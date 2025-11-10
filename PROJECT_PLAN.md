@@ -97,6 +97,17 @@ Refactor the existing MRI preprocessing codebase to:
 - [ ] Add config validation function
 - **Commit**: "Implement configuration loader with validation"
 
+### Step 2.4: Add config auto-generation from DICOM headers
+- [ ] Create `mri_preprocess/config_generator.py`
+- [ ] Function: `scan_dicom_directory()` - detect all sequences
+- [ ] Function: `extract_scanner_params()` - get TR, TE, voxel size, etc.
+- [ ] Function: `auto_populate_sequences()` - match to known patterns
+- [ ] Function: `generate_study_config()` - create complete YAML
+- [ ] CLI command: `mri-preprocess config init --dicom-dir ... --output ...`
+- [ ] Flag unknown sequences for manual review
+- [ ] Preserve detected scanner parameters as comments
+- **Commit**: "Add YAML auto-generation from DICOM headers"
+
 ---
 
 ## Phase 3: Utility Modules
