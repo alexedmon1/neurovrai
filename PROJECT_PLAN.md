@@ -7,12 +7,15 @@ Refactor the existing MRI preprocessing codebase to:
 3. Use YAML configuration for study-specific parameters
 4. Enable both interactive and batch processing workflows
 5. Implement multi-echo fMRI preprocessing with TEDANA
+6. **Implement transformation reuse**: Compute T1w→MNI transforms once, reuse across all modalities
 
 ## Guiding Principles
 - **Clean break**: No backward compatibility with old scripts (archive them)
 - **FSL-based**: Use FSL for speed (not FreeSurfer for coregistration)
 - **Config-driven**: Sequence names and study paths in YAML, not hardcoded
 - **Dual interface**: Both CLI and Python API support
+- **DRY (Don't Repeat Yourself)**: Compute transformations once, reuse everywhere
+- **Dependency management**: Anatomical workflow runs first, others reuse its outputs
 - **Commit often**: Git commit after each completed step
 
 ---
@@ -88,6 +91,14 @@ Refactor the existing MRI preprocessing codebase to:
 - [ ] Logging setup utilities
 - **Commit**: "Add workflow helper utilities"
 
+### Step 3.4: Transformation registry
+- [ ] Create `mri_preprocess/utils/transforms.py`
+- [ ] Class: `TransformRegistry` to save/load transformation files
+- [ ] Methods: `save_transform()`, `load_transform()`, `check_transform_exists()`
+- [ ] Standard naming: `{subject}_t1w_to_mni_affine.mat`, `{subject}_t1w_to_mni_warp.nii.gz`
+- [ ] Enable transform reuse across workflows (DRY principle)
+- **Commit**: "Add transformation registry for reusing computed transforms"
+
 ---
 
 ## Phase 4: DICOM Conversion Module
@@ -114,9 +125,11 @@ Refactor the existing MRI preprocessing codebase to:
 - [ ] Class: `AnatomicalPreprocessor(t1w_file, output_dir, config)`
 - [ ] Remove `os.chdir()`, use absolute paths
 - [ ] Build workflow from config parameters
+- [ ] **Save transformation files**: T1w→MNI affine (.mat) and warp field (.nii.gz)
+- [ ] Use `TransformRegistry` to save transforms for reuse by other workflows
 - [ ] Method: `build_workflow()` returns Nipype workflow
 - [ ] Method: `run()` executes workflow with config settings
-- **Commit**: "Refactor anatomical preprocessing workflow"
+- **Commit**: "Refactor anatomical preprocessing workflow with transform saving"
 
 ### Step 5.2: Add FreeSurfer wrapper (optional)
 - [ ] Create `FreeSurferReconAll` class in anatomical.py
@@ -135,11 +148,14 @@ Refactor the existing MRI preprocessing codebase to:
 
 ### Step 6.1: Refactor DTI workflow
 - [ ] Create `mri_preprocess/workflows/diffusion.py`
-- [ ] Class: `DiffusionPreprocessor(dwi_files, bvals, bvecs, output_dir, config)`
+- [ ] Class: `DiffusionPreprocessor(dwi_files, bvals, bvecs, output_dir, config, transform_registry)`
 - [ ] Handle multi-shell and single-shell cases
 - [ ] Shell merging logic from config
 - [ ] Eddy parameters (acqp, index) from config
-- **Commit**: "Refactor diffusion preprocessing workflow"
+- [ ] Compute DWI→T1w transformation
+- [ ] **Reuse T1w→MNI transforms** from anatomical workflow (load via `TransformRegistry`)
+- [ ] Concatenate transformations: DWI→T1w→MNI (single interpolation step)
+- **Commit**: "Refactor diffusion preprocessing workflow with transform reuse"
 
 ### Step 6.2: Add BEDPOSTX and tractography
 - [ ] Add optional BEDPOSTX step (config-controlled)
@@ -153,7 +169,7 @@ Refactor the existing MRI preprocessing codebase to:
 
 ### Step 7.1: Create base functional workflow
 - [ ] Create `mri_preprocess/workflows/functional.py`
-- [ ] Class: `FunctionalPreprocessor(func_files, t1w_file, output_dir, config)`
+- [ ] Class: `FunctionalPreprocessor(func_files, t1w_file, output_dir, config, transform_registry)`
 - [ ] Detect single-echo vs multi-echo from file count
 - [ ] Basic preprocessing: reorient, skull strip
 - **Commit**: "Create base functional preprocessing workflow"
@@ -168,13 +184,14 @@ Refactor the existing MRI preprocessing codebase to:
 
 ### Step 7.3: Add post-TEDANA processing
 - [ ] Structural coregistration (func → T1w)
-- [ ] Combine transforms (func → T1w → MNI)
-- [ ] Apply transformations to TEDANA output
+- [ ] **Reuse T1w→MNI transforms** from anatomical workflow (load via `TransformRegistry`)
+- [ ] Concatenate transforms: func→T1w→MNI (single interpolation step)
+- [ ] Apply combined transformation to TEDANA output
 - [ ] Spatial smoothing (post-TEDANA)
 - [ ] ICA-AROMA on denoised data
-- [ ] ACompCor nuisance regression
+- [ ] ACompCor nuisance regression (using T1w segmentation from anatomical workflow)
 - [ ] Temporal filtering (bandpass)
-- **Commit**: "Add post-TEDANA processing pipeline"
+- **Commit**: "Add post-TEDANA processing pipeline with transform reuse"
 
 ### Step 7.4: Handle single-echo fallback
 - [ ] Single-echo path: standard preprocessing without TEDANA
@@ -188,10 +205,12 @@ Refactor the existing MRI preprocessing codebase to:
 
 ### Step 8.1: Refactor myelin workflow
 - [ ] Create `mri_preprocess/workflows/myelin.py`
-- [ ] Class: `MyelinMapper(t1w_file, t2w_file, output_dir, config)`
-- [ ] T1w/T2w ratio calculation
-- [ ] Coregistration to MNI
-- **Commit**: "Refactor myelin mapping workflow"
+- [ ] Class: `MyelinMapper(t1w_file, t2w_file, output_dir, config, transform_registry)`
+- [ ] Coregister T2w to T1w space
+- [ ] Compute T1w/T2w ratio in native T1w space
+- [ ] **Reuse T1w→MNI transforms** from anatomical workflow (no recomputation!)
+- [ ] Apply T1w→MNI transform to myelin map
+- **Commit**: "Refactor myelin mapping workflow with transform reuse"
 
 ---
 
@@ -227,9 +246,12 @@ Refactor the existing MRI preprocessing codebase to:
 ### Step 10.1: Create pipeline orchestrator
 - [ ] Create `mri_preprocess/orchestrator.py`
 - [ ] Class: `PipelineOrchestrator(config)`
+- [ ] Initialize `TransformRegistry` for the study
+- [ ] **Workflow dependency management**: anatomical must run before func/dwi/myelin
 - [ ] Methods: `run_subject()`, `run_batch()`, `run_step()`
+- [ ] Check for required transforms before running dependent workflows
 - [ ] Handles subject iteration, step selection, error tracking
-- **Commit**: "Create pipeline orchestrator for batch processing"
+- **Commit**: "Create pipeline orchestrator with dependency management"
 
 ### Step 10.2: Add batch processing script
 - [ ] Create `scripts/batch_process.py`
@@ -314,6 +336,10 @@ Refactor the existing MRI preprocessing codebase to:
 ✅ Full pipeline runs from single CLI command: `mri-preprocess run --config study.yaml --subject 001 --steps all`
 
 ✅ Multi-echo functional data processed with TEDANA automatically
+
+✅ **T1w→MNI transformations computed once in anatomical workflow, reused by func/dwi/myelin**
+
+✅ **Orchestrator enforces dependencies**: anatomical runs before other modalities
 
 ✅ No hardcoded sequence names in code (all in config)
 
