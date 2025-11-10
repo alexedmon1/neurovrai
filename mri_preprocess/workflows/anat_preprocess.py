@@ -371,19 +371,13 @@ def create_anat_preprocessing_workflow(
     # === Connect workflow ===
 
     # Reorientation
-    wf.connect([
-        (inputnode, reorient, [('t1w', 'in_file')]),
-        (reorient, outputnode, [('out_file', 'reoriented_t1w')])
-    ])
+    wf.connect(inputnode, 't1w', reorient, 'in_file')
+    wf.connect(reorient, 'out_file', outputnode, 'reoriented_t1w')
 
     # Skull stripping
-    wf.connect([
-        (reorient, skull_strip, [('out_file', 'in_file')]),
-        (skull_strip, outputnode, [
-            ('out_file', 'brain'),
-            ('mask_file', 'brain_mask')
-        ])
-    ])
+    wf.connect(reorient, 'out_file', skull_strip, 'in_file')
+    wf.connect(skull_strip, 'out_file', outputnode, 'brain')
+    wf.connect(skull_strip, 'mask_file', outputnode, 'brain_mask')
 
     # Function to extract tissue maps from probability_maps list
     def extract_tissue_map(probability_maps, index):
@@ -421,52 +415,38 @@ def create_anat_preprocessing_workflow(
     extract_wm.inputs.index = 2  # WM
 
     # Bias correction and tissue segmentation
-    wf.connect([
-        (skull_strip, bias_correct, [('out_file', 'in_files')]),
-        (bias_correct, outputnode, [
-            ('restored_image', 'bias_corrected'),
-            ('tissue_class_map', 'tissue_class_map')
-        ]),
-        (bias_correct, extract_csf, [('probability_maps', 'probability_maps')]),
-        (bias_correct, extract_gm, [('probability_maps', 'probability_maps')]),
-        (bias_correct, extract_wm, [('probability_maps', 'probability_maps')]),
-        (extract_csf, outputnode, [('tissue_map', 'csf_prob')]),
-        (extract_gm, outputnode, [('tissue_map', 'gm_prob')]),
-        (extract_wm, outputnode, [('tissue_map', 'wm_prob')])
-    ])
+    wf.connect(skull_strip, 'out_file', bias_correct, 'in_files')
+    wf.connect(bias_correct, 'restored_image', outputnode, 'bias_corrected')
+    wf.connect(bias_correct, 'tissue_class_map', outputnode, 'tissue_class_map')
+    wf.connect(bias_correct, 'probability_maps', extract_csf, 'probability_maps')
+    wf.connect(bias_correct, 'probability_maps', extract_gm, 'probability_maps')
+    wf.connect(bias_correct, 'probability_maps', extract_wm, 'probability_maps')
+    wf.connect(extract_csf, 'tissue_map', outputnode, 'csf_prob')
+    wf.connect(extract_gm, 'tissue_map', outputnode, 'gm_prob')
+    wf.connect(extract_wm, 'tissue_map', outputnode, 'wm_prob')
 
     # Linear registration
-    wf.connect([
-        (bias_correct, linear_reg, [('restored_image', 'in_file')]),
-        (linear_reg, outputnode, [('out_matrix_file', 'mni_affine_mat')])
-    ])
+    wf.connect(bias_correct, 'restored_image', linear_reg, 'in_file')
+    wf.connect(linear_reg, 'out_matrix_file', outputnode, 'mni_affine_mat')
 
     # Nonlinear registration
-    wf.connect([
-        (reorient, nonlinear_reg, [('out_file', 'in_file')]),
-        (linear_reg, nonlinear_reg, [('out_matrix_file', 'affine_file')]),
-        (nonlinear_reg, outputnode, [
-            ('fieldcoeff_file', 'mni_warp'),
-            ('warped_file', 'mni_warped')
-        ])
-    ])
+    wf.connect(reorient, 'out_file', nonlinear_reg, 'in_file')
+    wf.connect(linear_reg, 'out_matrix_file', nonlinear_reg, 'affine_file')
+    wf.connect(nonlinear_reg, 'fieldcoeff_file', outputnode, 'mni_warp')
+    wf.connect(nonlinear_reg, 'warped_file', outputnode, 'mni_warped')
 
     # Save outputs
-    wf.connect([
-        (outputnode, datasink, [
-            ('reoriented_t1w', 'reoriented'),
-            ('brain', 'brain'),
-            ('brain_mask', 'mask'),
-            ('bias_corrected', 'bias_corrected'),
-            ('tissue_class_map', 'segmentation.@tissue_class'),
-            ('csf_prob', 'segmentation.@csf'),
-            ('gm_prob', 'segmentation.@gm'),
-            ('wm_prob', 'segmentation.@wm'),
-            ('mni_affine_mat', 'transforms.@affine'),
-            ('mni_warp', 'transforms.@warp'),
-            ('mni_warped', 'mni_space')
-        ])
-    ])
+    wf.connect(outputnode, 'reoriented_t1w', datasink, 'reoriented')
+    wf.connect(outputnode, 'brain', datasink, 'brain')
+    wf.connect(outputnode, 'brain_mask', datasink, 'mask')
+    wf.connect(outputnode, 'bias_corrected', datasink, 'bias_corrected')
+    wf.connect(outputnode, 'tissue_class_map', datasink, 'segmentation.@tissue_class')
+    wf.connect(outputnode, 'csf_prob', datasink, 'segmentation.@csf')
+    wf.connect(outputnode, 'gm_prob', datasink, 'segmentation.@gm')
+    wf.connect(outputnode, 'wm_prob', datasink, 'segmentation.@wm')
+    wf.connect(outputnode, 'mni_affine_mat', datasink, 'transforms.@affine')
+    wf.connect(outputnode, 'mni_warp', datasink, 'transforms.@warp')
+    wf.connect(outputnode, 'mni_warped', datasink, 'mni_space')
 
     logger.info("Anatomical preprocessing workflow created")
 
