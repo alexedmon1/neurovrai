@@ -1,0 +1,100 @@
+# example_study.yaml
+# Example study-specific configuration
+#
+# This file demonstrates how to override defaults for a specific study.
+# Inherits from configs/default.yaml and overrides only what's needed.
+
+# Study information (REQUIRED)
+study:
+  name: "Example Multi-Modal MRI Study"
+  code: "EXAMPLE2024"
+  base_dir: "/data/example_study"
+
+# Data paths (REQUIRED)
+paths:
+  # Source DICOM data
+  sourcedata: "${study.base_dir}/sourcedata"
+
+  # Converted NIfTI data (BIDS-like)
+  rawdata: "${study.base_dir}/rawdata"
+
+  # Preprocessed outputs
+  derivatives: "${study.base_dir}/derivatives"
+
+  # Transformation registry (for reusing T1w->MNI transforms)
+  transforms: "${study.base_dir}/transforms"
+
+  # Execution logs
+  logs: "${study.base_dir}/logs"
+
+# Study-specific sequence mappings (REQUIRED)
+# These are the actual sequence names from your scanner
+sequence_mappings:
+  t1w:
+    - "MPRAGE"
+    - "T1_3D_TFE"
+  t2w:
+    - "T2_SPACE"
+    - "T2W_SAGITTAL"
+  dwi:
+    - "ep2d_diff_b1000"
+    - "ep2d_diff_b2000"
+    - "ep2d_diff_b3000"
+  rest:
+    - "BOLD_REST_ME3"  # Multi-echo, 3 echoes
+  fmap:
+    - "gre_field_mapping"
+
+# Override anatomical parameters (if needed)
+anatomical:
+  skull_strip:
+    frac: 0.4  # Tighter skull strip for this dataset
+
+# Diffusion-specific parameters
+diffusion:
+  # REQUIRED: Acquisition parameters for eddy correction
+  eddy:
+    acqp_file: "${study.base_dir}/configs/acqp.txt"
+    index_file: "${study.base_dir}/configs/index.txt"
+
+  # Enable BEDPOSTX for this study (optional, slow)
+  bedpostx:
+    run: true
+    use_gpu: true
+
+  # Enable tractography (optional, requires BEDPOSTX)
+  probtrackx2:
+    run: true
+    n_samples: 5000
+
+# Functional parameters
+functional:
+  # Multi-echo data in this study
+  multi_echo:
+    enabled: true
+    tedana:
+      run: true
+      tedpca: kundu  # Override default 'auto' with 'kundu'
+
+# Execution settings for this study
+execution:
+  plugin: MultiProc
+  n_procs: 8  # Use 8 cores (adjust based on your system)
+  stop_on_first_crash: false
+
+# Enable anonymization for this study
+anonymization:
+  enabled: true
+  strip_headers: true
+  dcm2niix_flags: "-ba y"  # BIDS anonymization
+  remove_fields:
+    - PatientName
+    - PatientID
+    - PatientBirthDate
+    - AcquisitionDate
+    - SeriesDate
+    - InstitutionName
+
+# Logging
+logging:
+  level: INFO  # Use DEBUG for verbose output during development
