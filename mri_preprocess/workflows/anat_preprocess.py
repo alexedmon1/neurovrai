@@ -347,6 +347,10 @@ def create_anat_preprocessing_workflow(
                 'brain',
                 'brain_mask',
                 'bias_corrected',
+                'tissue_class_map',
+                'csf_prob',
+                'gm_prob',
+                'wm_prob',
                 'mni_affine_mat',
                 'mni_warp',
                 'mni_warped'
@@ -382,10 +386,16 @@ def create_anat_preprocessing_workflow(
         ])
     ])
 
-    # Bias correction
+    # Bias correction and tissue segmentation
     wf.connect([
         (skull_strip, bias_correct, [('out_file', 'in_files')]),
-        (bias_correct, outputnode, [('restored_image', 'bias_corrected')])
+        (bias_correct, outputnode, [
+            ('restored_image', 'bias_corrected'),
+            ('tissue_class_map', 'tissue_class_map'),
+            ('probability_maps', 'csf_prob', lambda x: x[0]),  # CSF = index 0
+            ('probability_maps', 'gm_prob', lambda x: x[1]),   # GM = index 1
+            ('probability_maps', 'wm_prob', lambda x: x[2])    # WM = index 2
+        ])
     ])
 
     # Linear registration
@@ -411,6 +421,10 @@ def create_anat_preprocessing_workflow(
             ('brain', 'brain'),
             ('brain_mask', 'mask'),
             ('bias_corrected', 'bias_corrected'),
+            ('tissue_class_map', 'segmentation.@tissue_class'),
+            ('csf_prob', 'segmentation.@csf'),
+            ('gm_prob', 'segmentation.@gm'),
+            ('wm_prob', 'segmentation.@wm'),
             ('mni_affine_mat', 'transforms.@affine'),
             ('mni_warp', 'transforms.@warp'),
             ('mni_warped', 'mni_space')
@@ -495,10 +509,16 @@ def run_anat_preprocessing(
     )
     anat_dir = derivatives_dir / 'anat'
 
+    segmentation_dir = anat_dir / 'segmentation'
+
     outputs = {
         'brain': list(anat_dir.glob('*brain.nii.gz'))[0] if anat_dir.exists() else None,
         'brain_mask': list(anat_dir.glob('*mask.nii.gz'))[0] if anat_dir.exists() else None,
         'bias_corrected': list(anat_dir.glob('*bias_corrected.nii.gz'))[0] if anat_dir.exists() else None,
+        'csf_prob': list(segmentation_dir.glob('*pve_0*.nii.gz'))[0] if segmentation_dir.exists() else None,
+        'gm_prob': list(segmentation_dir.glob('*pve_1*.nii.gz'))[0] if segmentation_dir.exists() else None,
+        'wm_prob': list(segmentation_dir.glob('*pve_2*.nii.gz'))[0] if segmentation_dir.exists() else None,
+        'tissue_class_map': list(segmentation_dir.glob('*seg*.nii.gz'))[0] if segmentation_dir.exists() else None,
         'mni_affine': list((anat_dir / 'transforms').glob('*.mat'))[0] if (anat_dir / 'transforms').exists() else None,
         'mni_warp': list((anat_dir / 'transforms').glob('*warp.nii.gz'))[0] if (anat_dir / 'transforms').exists() else None,
         'mni_warped': list((anat_dir / 'mni_space').glob('*.nii.gz'))[0] if (anat_dir / 'mni_space').exists() else None
@@ -520,6 +540,6 @@ def run_anat_preprocessing(
             source_image=t1w_file
         )
 
-        logging.info(f"Saved T1w’MNI152 transformation to registry")
+        logging.info(f"Saved T1wï¿½MNI152 transformation to registry")
 
     return outputs
