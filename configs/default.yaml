@@ -1,0 +1,211 @@
+# default.yaml
+# Default preprocessing parameters for MRI preprocessing pipeline
+#
+# This file contains sensible defaults for all parameters.
+# Create study-specific configs that inherit from this and override as needed.
+
+# FSL configuration
+fsl:
+  fsldir: ${FSLDIR}  # Uses environment variable
+  output_type: NIFTI_GZ
+
+# Reference templates (uses FSL templates by default)
+templates:
+  mni152_t1_2mm: ${fsl.fsldir}/data/standard/MNI152_T1_2mm_brain.nii.gz
+  mni152_t1_1mm: ${fsl.fsldir}/data/standard/MNI152_T1_1mm_brain.nii.gz
+  mni152_mask_2mm: ${fsl.fsldir}/data/standard/MNI152_T1_2mm_brain_mask.nii.gz
+  mni152_mask_1mm: ${fsl.fsldir}/data/standard/MNI152_T1_1mm_brain_mask.nii.gz
+
+# Sequence name patterns for auto-detection
+# Each list contains regex patterns or exact matches
+# Used by DICOM converter to classify sequences
+sequence_patterns:
+  t1w:
+    - ".*MPRAGE.*"
+    - ".*T1.*3D.*"
+    - ".*T1_TFE.*"
+    - ".*T1W.*"
+  t2w:
+    - ".*T2.*SPACE.*"
+    - ".*T2W.*"
+    - ".*T2_TSE.*"
+  dwi:
+    - ".*DTI.*"
+    - ".*DWI.*"
+    - ".*ep2d_diff.*"
+    - ".*dWIP.*"
+  rest:
+    - ".*REST.*"
+    - ".*BOLD.*"
+    - ".*fMRI.*"
+    - ".*rs_fMRI.*"
+  asl:
+    - ".*ASL.*"
+    - ".*pCASL.*"
+    - ".*PCASL.*"
+  fmap:
+    - ".*field.*map.*"
+    - ".*gre_field.*"
+    - ".*SE_EPI.*"
+    - ".*FIELDMAP.*"
+
+# Anatomical preprocessing defaults
+anatomical:
+  # Reorient to standard orientation
+  reorient: true
+
+  # Bias field correction
+  bias_correction:
+    method: fast  # Options: fast, ants
+    img_type: 1   # 1=T1-weighted, 2=T2-weighted
+    output_biascorrected: true
+
+  # Skull stripping
+  skull_strip:
+    method: bet        # Options: bet, ants
+    frac: 0.5          # BET fractional intensity threshold (0.1-0.9)
+    reduce_bias: true  # Reduce bias field before skull stripping
+
+  # Registration to MNI space
+  registration:
+    to_mni: true
+    dof: 12             # Degrees of freedom for affine (6=rigid, 12=affine)
+    cost_func: bbr      # Cost function: corratio, mutualinfo, bbr
+    nonlinear: true     # Use nonlinear registration (FNIRT)
+    use_fnirt: true
+
+  # Tissue segmentation (optional - needed for ACompCor)
+  segmentation:
+    run: false          # Only enable if needed for nuisance regression
+    number_classes: 3   # Number of tissue classes (3=GM/WM/CSF)
+
+# Diffusion preprocessing defaults
+diffusion:
+  # Shell handling
+  shells:
+    merge_multishell: true  # Combine multiple b-value shells
+    extract_b0: true        # Extract b0 volume for processing
+
+  # Eddy current and motion correction
+  eddy:
+    use_cuda: true          # Use GPU acceleration (highly recommended)
+    num_threads: 1
+    # acqp_file and index_file must be specified in study config
+    acqp_file: null
+    index_file: null
+
+  # Skull stripping
+  skull_strip:
+    frac: 0.5  # BET fractional intensity threshold
+
+  # DTI fitting
+  dtifit:
+    save_tensor: true  # Save full tensor
+    sse: true          # Save sum of squared errors
+
+  # BEDPOSTX (very slow - 8-20 hours per subject)
+  bedpostx:
+    run: false         # Disabled by default - enable in study config if needed
+    use_gpu: true      # GPU acceleration
+    n_fibres: 3        # Number of fiber populations to model
+    burn_in: 200       # Burn-in period
+    n_jumps: 5000      # Number of jumps
+    sample_every: 25   # Sampling frequency
+
+  # Probabilistic tractography
+  probtrackx2:
+    run: false              # Disabled by default - requires BEDPOSTX
+    n_samples: 5000         # Number of samples per voxel
+    curvature_threshold: 0.2  # Maximum curvature threshold
+    loopcheck: true         # Check for loops in pathways
+
+  # TBSS (Tract-Based Spatial Statistics)
+  tbss:
+    run: false  # Group-level analysis - typically done separately
+
+# Functional (resting-state) preprocessing defaults
+functional:
+  # Multi-echo specific settings
+  multi_echo:
+    enabled: true       # Auto-detect from file count if true
+    tedana:
+      run: true         # Run TEDANA for multi-echo data
+      tedpca: auto      # Options: auto, kundu, aic, kic, mdl
+      tedort: false     # Orthogonalization
+      gscontrol: null   # Global signal control: null, t1c, mir, gsr
+      fittype: curvefit # Fitting method: curvefit, loglin
+
+  # Motion correction
+  motion_correction:
+    method: mcflirt         # FSL MCFLIRT
+    cost: leastsquares      # Cost function
+    dof: 6                  # Degrees of freedom
+    stages: 4               # Number of optimization stages
+    interpolation: sinc     # Interpolation method
+    save_plots: true        # Save motion parameter plots
+    reference_echo: middle  # For multi-echo: first, middle, last
+
+  # Skull stripping (more liberal for functional data)
+  skull_strip:
+    frac: 0.3       # Lower threshold for functional
+    functional: true
+
+  # Spatial smoothing
+  smoothing:
+    fwhm: 6  # Full-width half-maximum in mm
+
+  # Intensity normalization
+  normalize:
+    method: grand_mean  # grand_mean or median
+    target: 1000        # Target intensity value
+
+  # Nuisance regression
+  nuisance_regression:
+    ica_aroma:
+      run: true
+      denoise_type: both  # Options: aggr, nonaggr, both
+    acompcor:
+      run: true
+      num_components: 6     # Number of components to extract
+      mask_type: combined   # Options: csf, wm, combined
+
+  # Temporal filtering
+  temporal_filter:
+    method: afni_bandpass  # AFNI 3dBandpass
+    highpass: 0.001        # Hz
+    lowpass: 0.08          # Hz
+
+  # Coregistration to structural
+  coregistration:
+    dof: 6               # Degrees of freedom
+    cost_func: mutualinfo  # Cost function
+
+# FreeSurfer configuration (optional)
+freesurfer:
+  enabled: false  # Not used by default (FSL-based pipeline)
+  use_t2: true    # Use T2 if available
+  parallel: true
+  hires: true     # High-resolution processing
+  openmp: 10      # Number of OpenMP threads
+
+# Workflow execution settings
+execution:
+  plugin: MultiProc  # Options: Linear, MultiProc
+  n_procs: 2         # Number of parallel processes
+  remove_unnecessary_outputs: true
+  keep_inputs: true
+  stop_on_first_crash: false  # Set to true for debugging
+  crashdump_dir: null         # Directory for crash dumps
+
+# Logging configuration
+logging:
+  level: INFO  # Options: DEBUG, INFO, WARNING, ERROR
+  log_directory: logs
+  workflow_log_directory: workflow_logs
+
+# Anonymization (disabled by default)
+anonymization:
+  enabled: false
+  strip_headers: false
+  dcm2niix_flags: ""
+  remove_fields: []
