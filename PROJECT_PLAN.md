@@ -18,7 +18,36 @@ Refactor the existing MRI preprocessing codebase to:
 - **Dual interface**: Both CLI and Python API support
 - **DRY (Don't Repeat Yourself)**: Compute transformations once, reuse everywhere
 - **Dependency management**: Anatomical workflow runs first, others reuse its outputs
+- **Test-driven development**: Test each phase with real data (sub-0580101) before proceeding
+- **De-identification first**: All outputs must be anonymized for use as example data
 - **Commit often**: Git commit after each completed step
+
+---
+
+## Testing Environment
+
+**Location**: `/mnt/bytopia/development/mri-preprocess/`
+
+**Test Subject**: sub-0580101 from IRC805 study
+- **DICOM Source**: `/mnt/bytopia/IRC805/raw/dicom/IRC805-0580101`
+- **Modalities**: T1w, T2w, multi-echo fMRI, multi-shell DWI, fieldmaps, ASL
+- **Purpose**: Real-world testing of each development phase
+
+**Testing Strategy**:
+1. Test each major workflow immediately after implementation
+2. Validate outputs with visual QC (FSLeyes)
+3. Check logs for errors/warnings
+4. Verify de-identification (no patient info in headers)
+5. Document any issues before proceeding
+
+**De-identification Requirements**:
+- Strip DICOM headers: patient name, ID, birthdate, scan dates
+- Use `dcm2niix -ba y` for BIDS anonymization
+- File names: generic BIDS format (sub-0580101_T1w.nii.gz, etc.)
+- Folder names: CAN use subject code (non-identifying)
+- Goal: Safe to share as example data
+
+**See**: `/mnt/bytopia/development/mri-preprocess/README.md` for detailed testing procedures
 
 ---
 
@@ -109,14 +138,26 @@ Refactor the existing MRI preprocessing codebase to:
 - [ ] Create `mri_preprocess/converters/dicom.py`
 - [ ] Refactor `dcm2niix` class to take explicit paths (no `os.chdir()`)
 - [ ] Use config for sequence mappings instead of hardcoded
+- [ ] **Add anonymization**: Use `dcm2niix -ba y` flag for de-identification
+- [ ] Strip patient info from JSON sidecars post-conversion
 - [ ] Return structured output (dict of modality → files)
-- **Commit**: "Refactor DICOM converter with config-based routing"
+- **Commit**: "Refactor DICOM converter with config-based routing and anonymization"
 
 ### Step 4.2: Add DICOM converter tests
 - [ ] Create test for sequence detection logic
 - [ ] Test with sample DICOM headers
 - [ ] Validate file organization output
+- [ ] **Verify anonymization**: Check headers have no patient info
 - **Commit**: "Add DICOM converter unit tests"
+
+### Step 4.3: Test with real data (sub-0580101)
+- [ ] Run converter on test subject DICOMs
+- [ ] Verify all modalities detected correctly
+- [ ] Check output structure matches expectations
+- [ ] Validate de-identification (inspect NIfTI headers with `nib-ls -H`)
+- [ ] Visual QC in FSLeyes (basic orientation check)
+- [ ] Document any issues or missing sequences
+- **Commit**: "Test DICOM converter with sub-0580101"
 
 ---
 
@@ -143,6 +184,16 @@ Refactor the existing MRI preprocessing codebase to:
 - [ ] Create simple test with mock data
 - [ ] Verify workflow graph generation
 - **Commit**: "Add anatomical workflow tests"
+
+### Step 5.4: Test with real data (sub-0580101)
+- [ ] Run anatomical workflow on test subject T1w
+- [ ] Verify all preprocessing steps complete
+- [ ] Check T1w→MNI transforms saved in `TransformRegistry`
+- [ ] Visual QC: brain extraction, bias correction, registration quality
+- [ ] Inspect workflow graph PNG
+- [ ] Validate outputs are de-identified
+- [ ] Document processing time and any warnings
+- **Commit**: "Test anatomical workflow with sub-0580101"
 
 ---
 
@@ -174,6 +225,18 @@ Refactor the existing MRI preprocessing codebase to:
 - [ ] Output: probability maps, waytotal stats, connectivity matrices
 - [ ] **Note**: Requires BEDPOSTX output and T1w→MNI transforms for ROI warping
 - **Commit**: "Add probtrackx2 for structural connectivity analysis"
+
+### Step 6.4: Test with real data (sub-0580101)
+- [ ] Run diffusion workflow on test subject multi-shell DWI
+- [ ] Verify shell merging (b1000, b2000, b3000)
+- [ ] Check eddy correction completes (GPU/CUDA)
+- [ ] Verify DTIFit outputs (FA, MD, etc.)
+- [ ] Check T1w→MNI transforms loaded correctly from `TransformRegistry`
+- [ ] Visual QC: eddy-corrected DWI, FA maps, registration quality
+- [ ] If BEDPOSTX enabled: verify fiber distributions generated
+- [ ] Validate outputs are de-identified
+- [ ] Document processing time (especially eddy/BEDPOSTX)
+- **Commit**: "Test diffusion workflow with sub-0580101"
 
 ---
 
@@ -211,6 +274,19 @@ Refactor the existing MRI preprocessing codebase to:
 - [ ] Ensure both paths work from same class
 - **Commit**: "Add single-echo preprocessing fallback"
 
+### Step 7.5: Test with real data (sub-0580101)
+- [ ] Run functional workflow on test subject multi-echo fMRI
+- [ ] Verify multi-echo detection (3 echoes expected)
+- [ ] Check per-echo motion correction
+- [ ] **Critical**: Verify TEDANA runs successfully and produces denoised output
+- [ ] Check TEDANA component classification (accepted/rejected)
+- [ ] Verify T1w→MNI transforms loaded from `TransformRegistry`
+- [ ] Visual QC: motion correction, TEDANA denoising quality, final registered data
+- [ ] Check ICA-AROMA and ACompCor outputs
+- [ ] Validate outputs are de-identified
+- [ ] Document processing time (TEDANA can be slow)
+- **Commit**: "Test functional workflow with multi-echo sub-0580101"
+
 ---
 
 ## Phase 8: Myelin Mapping Workflow
@@ -223,6 +299,16 @@ Refactor the existing MRI preprocessing codebase to:
 - [ ] **Reuse T1w→MNI transforms** from anatomical workflow (no recomputation!)
 - [ ] Apply T1w→MNI transform to myelin map
 - **Commit**: "Refactor myelin mapping workflow with transform reuse"
+
+### Step 8.2: Test with real data (sub-0580101)
+- [ ] Run myelin workflow on test subject T1w and T2w
+- [ ] Verify T2w→T1w coregistration quality
+- [ ] Check T1w/T2w ratio map looks reasonable
+- [ ] Verify T1w→MNI transforms loaded (no recomputation)
+- [ ] Visual QC: T2w alignment, myelin map in native and MNI space
+- [ ] Validate outputs are de-identified
+- [ ] Document processing time
+- **Commit**: "Test myelin workflow with sub-0580101"
 
 ---
 
