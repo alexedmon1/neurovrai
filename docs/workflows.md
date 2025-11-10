@@ -17,14 +17,16 @@ This document describes the preprocessing workflows for each MRI modality.
 
 ## Anatomical Preprocessing
 
-**Status**: 🚧 To be implemented in Phase 5
+**Status**: ✅ COMPLETED - Production Ready
 
 ### Overview
 Preprocesses T1-weighted (and optionally T2-weighted) structural images for:
-- Bias field correction
+- Reorientation to standard space
+- Bias field correction (ANTs N4 or FSL FAST)
 - Skull stripping
-- Registration to MNI152 standard space
+- Registration to MNI152 standard space (FSL FLIRT/FNIRT or ANTs)
 - Segmentation (optional, for nuisance regression)
+- Transform storage in TransformRegistry for reuse across workflows
 
 ### Input Requirements
 
@@ -66,19 +68,33 @@ See `docs/configuration.md` under "Anatomical Preprocessing"
 
 ### Usage
 
+**CLI:**
 ```bash
-mri-preprocess anat \
+mri-preprocess run anatomical \
   --config configs/my_study.yaml \
-  --subject sub-001 \
-  --bids-dir /path/to/rawdata \
-  --output-dir /path/to/derivatives
+  --subject sub-001
+```
+
+**Python API:**
+```python
+from mri_preprocess.config import load_config
+from mri_preprocess.workflows.anat_preprocess import run_anat_preprocessing
+
+config = load_config('configs/my_study.yaml')
+results = run_anat_preprocessing(
+    config=config,
+    subject='sub-001',
+    t1w_file=Path('rawdata/sub-001/anat/sub-001_T1w.nii.gz'),
+    output_dir=Path('derivatives'),
+    work_dir=Path('work')
+)
 ```
 
 ---
 
 ## Diffusion Preprocessing
 
-**Status**: 🚧 To be implemented in Phase 6
+**Status**: ✅ COMPLETED - Production Ready
 
 ### Overview
 Preprocesses diffusion-weighted imaging (DWI) data for:
@@ -135,19 +151,43 @@ See `docs/configuration.md` under "Diffusion Preprocessing"
 
 ### Usage
 
+**CLI:**
 ```bash
-mri-preprocess dwi \
+# Basic DTI preprocessing
+mri-preprocess run diffusion \
+  --config configs/my_study.yaml \
+  --subject sub-001
+
+# With BEDPOSTX for tractography
+mri-preprocess run diffusion \
   --config configs/my_study.yaml \
   --subject sub-001 \
-  --bids-dir /path/to/rawdata \
-  --output-dir /path/to/derivatives
+  --bedpostx
+```
+
+**Python API:**
+```python
+from mri_preprocess.config import load_config
+from mri_preprocess.workflows.dwi_preprocess import run_dwi_preprocessing
+
+config = load_config('configs/my_study.yaml')
+results = run_dwi_preprocessing(
+    config=config,
+    subject='sub-001',
+    dwi_file=Path('rawdata/sub-001/dwi/sub-001_dwi.nii.gz'),
+    bval_file=Path('rawdata/sub-001/dwi/sub-001_dwi.bval'),
+    bvec_file=Path('rawdata/sub-001/dwi/sub-001_dwi.bvec'),
+    output_dir=Path('derivatives'),
+    work_dir=Path('work'),
+    run_bedpostx=False
+)
 ```
 
 ---
 
 ## Functional Preprocessing
 
-**Status**: 🚧 To be implemented in Phase 7
+**Status**: 🚧 Framework Complete - TEDANA Integration Pending
 
 ### Overview
 Preprocesses resting-state fMRI data with:
@@ -210,19 +250,20 @@ Similar but skips TEDANA (steps 1-4, 6-11)
 
 ### Usage
 
+**Note**: Full implementation pending. Framework exists for future development.
+
+**CLI (when implemented):**
 ```bash
-mri-preprocess func \
+mri-preprocess run functional \
   --config configs/my_study.yaml \
-  --subject sub-001 \
-  --bids-dir /path/to/rawdata \
-  --output-dir /path/to/derivatives
+  --subject sub-001
 ```
 
 ---
 
 ## Myelin Mapping
 
-**Status**: 🚧 To be implemented in Phase 8
+**Status**: 📋 Planned - Not Yet Implemented
 
 ### Overview
 Generates T1w/T2w ratio maps as a proxy for myelin content.
@@ -268,22 +309,28 @@ mri-preprocess myelin \
 
 ## Full Pipeline
 
-Run all workflows in sequence:
+**Currently Implemented Workflows:**
 
+Run anatomical preprocessing (required first):
 ```bash
-mri-preprocess run \
+mri-preprocess run anatomical \
   --config configs/my_study.yaml \
-  --subject sub-001 \
-  --steps all
+  --subject sub-001
 ```
 
-Or specific steps:
-
+Run diffusion preprocessing (reuses anatomical transforms):
 ```bash
-mri-preprocess run \
+mri-preprocess run diffusion \
   --config configs/my_study.yaml \
-  --subject sub-001 \
-  --steps anat,dwi,func
+  --subject sub-001
+```
+
+**Sequential Processing:**
+```bash
+# Anatomical must run first to create transforms
+mri-preprocess run anatomical --config configs/study.yaml --subject sub-001
+# Then diffusion can reuse those transforms
+mri-preprocess run diffusion --config configs/study.yaml --subject sub-001
 ```
 
 ---
