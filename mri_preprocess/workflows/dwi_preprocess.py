@@ -7,9 +7,9 @@ Workflow steps:
 2. Brain extraction using T1w mask
 3. DTI tensor fitting (dtifit)
 4. BEDPOSTX probabilistic modeling (optional)
-5. Registration to MNI space using T1w’MNI transforms from TransformRegistry
+5. Registration to MNI space using T1w->MNI transforms from TransformRegistry
 
-Key feature: Reuses T1w’MNI transformations computed during anatomical
+Key feature: Reuses T1w->MNI transformations computed during anatomical
 preprocessing, avoiding duplicate computation.
 """
 
@@ -208,7 +208,7 @@ def create_dwi_preprocessing_workflow(
     2. Extracts brain using T1w mask
     3. Fits diffusion tensor (DTIFit)
     4. Optionally runs BEDPOSTX for tractography
-    5. Transforms outputs to MNI space using T1w’MNI transforms from TransformRegistry
+    5. Transforms outputs to MNI space using T1wï¿½MNI transforms from TransformRegistry
 
     Parameters
     ----------
@@ -504,9 +504,9 @@ def run_dwi_preprocessing(
         # Load transforms from registry
         registry = create_transform_registry(config, subject, session)
 
-        # Check if T1w’MNI transform exists
+        # Check if T1wï¿½MNI transform exists
         if registry.has_transform('T1w', 'MNI152', 'nonlinear'):
-            logger.info(" Found T1w’MNI152 transform in registry - reusing!")
+            logger.info(" Found T1wï¿½MNI152 transform in registry - reusing!")
 
             warp_file, affine_file = registry.get_nonlinear_transform('T1w', 'MNI152')
 
@@ -541,7 +541,7 @@ def run_dwi_preprocessing(
             logger.info(f"Created MD in MNI space: {md_mni}")
 
         else:
-            logger.warning("  T1w’MNI152 transform not found in registry")
+            logger.warning("ï¿½ T1wï¿½MNI152 transform not found in registry")
             logger.warning("  Run anatomical preprocessing first to compute transforms")
 
     return outputs

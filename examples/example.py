@@ -50,7 +50,7 @@ from mri_preprocess.utils.transforms import create_transform_registry
 
 # Test environment paths
 BASE_DIR = Path("/mnt/bytopia/development/mri-preprocess")
-DICOM_DIR = Path("/mnt/bytopia/IRC805/raw/dicom/IRC805-0580101")
+DICOM_DIR = Path("/mnt/bytopia/IRC805/raw/dicom/IRC805-0580101/20220301")
 
 # Subject information
 SUBJECT_ID = "0580101"  # Real subject ID
