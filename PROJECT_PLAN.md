@@ -1,0 +1,337 @@
+# MRI Preprocessing Pipeline Refactoring Plan
+
+## Overview
+Refactor the existing MRI preprocessing codebase to:
+1. Separate processing logic from file paths and sequence names
+2. Create clean CLI and Python API interfaces
+3. Use YAML configuration for study-specific parameters
+4. Enable both interactive and batch processing workflows
+5. Implement multi-echo fMRI preprocessing with TEDANA
+
+## Guiding Principles
+- **Clean break**: No backward compatibility with old scripts (archive them)
+- **FSL-based**: Use FSL for speed (not FreeSurfer for coregistration)
+- **Config-driven**: Sequence names and study paths in YAML, not hardcoded
+- **Dual interface**: Both CLI and Python API support
+- **Commit often**: Git commit after each completed step
+
+---
+
+## Phase 1: Project Structure Setup
+
+### Step 1.1: Create new directory structure
+- [ ] Create `mri_preprocess/` package directory
+- [ ] Create subdirectories: `workflows/`, `utils/`, `converters/`, `analysis/`
+- [ ] Create `configs/` directory for YAML files
+- [ ] Create `scripts/` directory for high-level orchestration
+- [ ] Add `__init__.py` files to make proper Python package
+- **Commit**: "Create new package structure"
+
+### Step 1.2: Archive old code
+- [ ] Move `anat/`, `dwi/`, `rest/`, `myelin/` to `archive/` directory
+- [ ] Move `dicom/`, `analysis/` to `archive/` as well
+- [ ] Keep `archive/` structure: `archive/anat/`, `archive/dwi/`, etc.
+- [ ] Update `.gitignore` to exclude `archive/` from future changes
+- **Commit**: "Archive original code maintaining directory structure"
+
+### Step 1.3: Update pyproject.toml
+- [ ] Add new dependencies: `click` (CLI), `pyyaml` (configs), `python-dotenv` (optional)
+- [ ] Define package entry points for CLI commands
+- [ ] Set package name and console scripts
+- **Commit**: "Update pyproject.toml with CLI dependencies and entry points"
+
+---
+
+## Phase 2: Configuration System
+
+### Step 2.1: Create default configuration
+- [ ] Create `configs/default.yaml` with all preprocessing parameters
+- [ ] Include: FSL paths, templates, sequence patterns, workflow defaults
+- [ ] Document each parameter with inline comments
+- **Commit**: "Add default.yaml configuration file"
+
+### Step 2.2: Create study configuration example
+- [ ] Create `configs/example_study.yaml` showing how to override defaults
+- [ ] Include study-specific paths, sequence mappings, subject lists
+- [ ] Add example for custom parameters per modality
+- **Commit**: "Add example study configuration"
+
+### Step 2.3: Build config loader
+- [ ] Create `mri_preprocess/config.py`
+- [ ] Implement YAML loading with inheritance (study overrides defaults)
+- [ ] Add environment variable substitution (`${VAR}` syntax)
+- [ ] Add config validation function
+- **Commit**: "Implement configuration loader with validation"
+
+---
+
+## Phase 3: Utility Modules
+
+### Step 3.1: File finder utility
+- [ ] Create `mri_preprocess/utils/file_finder.py`
+- [ ] Implement sequence name matching (regex-based from config)
+- [ ] Add functions: `find_by_modality()`, `find_subject_files()`, `match_sequence()`
+- [ ] Remove all hardcoded sequence names from matching logic
+- **Commit**: "Add file finder utility with config-based sequence matching"
+
+### Step 3.2: BIDS utilities
+- [ ] Create `mri_preprocess/utils/bids.py`
+- [ ] Functions for BIDS-like directory layout
+- [ ] Path builders: `get_subject_dir()`, `get_modality_dir()`, etc.
+- [ ] No `os.chdir()` - all absolute path handling
+- **Commit**: "Add BIDS utilities for path management"
+
+### Step 3.3: Workflow helpers
+- [ ] Create `mri_preprocess/utils/workflow.py`
+- [ ] Nipype workflow builder helpers
+- [ ] Common node configurations (FSL defaults, output types)
+- [ ] Logging setup utilities
+- **Commit**: "Add workflow helper utilities"
+
+---
+
+## Phase 4: DICOM Conversion Module
+
+### Step 4.1: Refactor DICOM converter
+- [ ] Create `mri_preprocess/converters/dicom.py`
+- [ ] Refactor `dcm2niix` class to take explicit paths (no `os.chdir()`)
+- [ ] Use config for sequence mappings instead of hardcoded
+- [ ] Return structured output (dict of modality → files)
+- **Commit**: "Refactor DICOM converter with config-based routing"
+
+### Step 4.2: Add DICOM converter tests
+- [ ] Create test for sequence detection logic
+- [ ] Test with sample DICOM headers
+- [ ] Validate file organization output
+- **Commit**: "Add DICOM converter unit tests"
+
+---
+
+## Phase 5: Anatomical Preprocessing Workflow
+
+### Step 5.1: Refactor anatomical workflow
+- [ ] Create `mri_preprocess/workflows/anatomical.py`
+- [ ] Class: `AnatomicalPreprocessor(t1w_file, output_dir, config)`
+- [ ] Remove `os.chdir()`, use absolute paths
+- [ ] Build workflow from config parameters
+- [ ] Method: `build_workflow()` returns Nipype workflow
+- [ ] Method: `run()` executes workflow with config settings
+- **Commit**: "Refactor anatomical preprocessing workflow"
+
+### Step 5.2: Add FreeSurfer wrapper (optional)
+- [ ] Create `FreeSurferReconAll` class in anatomical.py
+- [ ] Config-driven: only runs if `freesurfer.enabled: true`
+- [ ] Takes T1w, optional T2w from config
+- **Commit**: "Add FreeSurfer recon-all wrapper (configurable)"
+
+### Step 5.3: Test anatomical workflow
+- [ ] Create simple test with mock data
+- [ ] Verify workflow graph generation
+- **Commit**: "Add anatomical workflow tests"
+
+---
+
+## Phase 6: Diffusion Preprocessing Workflow
+
+### Step 6.1: Refactor DTI workflow
+- [ ] Create `mri_preprocess/workflows/diffusion.py`
+- [ ] Class: `DiffusionPreprocessor(dwi_files, bvals, bvecs, output_dir, config)`
+- [ ] Handle multi-shell and single-shell cases
+- [ ] Shell merging logic from config
+- [ ] Eddy parameters (acqp, index) from config
+- **Commit**: "Refactor diffusion preprocessing workflow"
+
+### Step 6.2: Add BEDPOSTX and tractography
+- [ ] Add optional BEDPOSTX step (config-controlled)
+- [ ] GPU/CUDA settings from config
+- [ ] Tractography as separate optional workflow
+- **Commit**: "Add BEDPOSTX and tractography to diffusion workflow"
+
+---
+
+## Phase 7: Functional Preprocessing Workflow (Multi-Echo + TEDANA)
+
+### Step 7.1: Create base functional workflow
+- [ ] Create `mri_preprocess/workflows/functional.py`
+- [ ] Class: `FunctionalPreprocessor(func_files, t1w_file, output_dir, config)`
+- [ ] Detect single-echo vs multi-echo from file count
+- [ ] Basic preprocessing: reorient, skull strip
+- **Commit**: "Create base functional preprocessing workflow"
+
+### Step 7.2: Implement multi-echo TEDANA integration
+- [ ] Add multi-echo detection logic
+- [ ] Per-echo motion correction (middle echo as reference)
+- [ ] Apply motion transforms to all echoes
+- [ ] TEDANA node with config parameters (tedpca, fittype, etc.)
+- [ ] Output: optimally combined and denoised time series
+- **Commit**: "Implement multi-echo preprocessing with TEDANA"
+
+### Step 7.3: Add post-TEDANA processing
+- [ ] Structural coregistration (func → T1w)
+- [ ] Combine transforms (func → T1w → MNI)
+- [ ] Apply transformations to TEDANA output
+- [ ] Spatial smoothing (post-TEDANA)
+- [ ] ICA-AROMA on denoised data
+- [ ] ACompCor nuisance regression
+- [ ] Temporal filtering (bandpass)
+- **Commit**: "Add post-TEDANA processing pipeline"
+
+### Step 7.4: Handle single-echo fallback
+- [ ] Single-echo path: standard preprocessing without TEDANA
+- [ ] Config flag: `functional.multi_echo.enabled: false` overrides auto-detect
+- [ ] Ensure both paths work from same class
+- **Commit**: "Add single-echo preprocessing fallback"
+
+---
+
+## Phase 8: Myelin Mapping Workflow
+
+### Step 8.1: Refactor myelin workflow
+- [ ] Create `mri_preprocess/workflows/myelin.py`
+- [ ] Class: `MyelinMapper(t1w_file, t2w_file, output_dir, config)`
+- [ ] T1w/T2w ratio calculation
+- [ ] Coregistration to MNI
+- **Commit**: "Refactor myelin mapping workflow"
+
+---
+
+## Phase 9: CLI Interface
+
+### Step 9.1: Create main CLI entry point
+- [ ] Create `mri_preprocess/cli.py`
+- [ ] Use Click for CLI framework
+- [ ] Main command group: `mri-preprocess`
+- [ ] Global options: `--config`, `--verbose`, `--dry-run`
+- **Commit**: "Create main CLI entry point with Click"
+
+### Step 9.2: Add subcommands
+- [ ] `mri-preprocess convert` - DICOM to NIfTI
+- [ ] `mri-preprocess anat` - anatomical preprocessing
+- [ ] `mri-preprocess dwi` - diffusion preprocessing
+- [ ] `mri-preprocess func` - functional preprocessing (auto-detects multi-echo)
+- [ ] `mri-preprocess myelin` - myelin mapping
+- [ ] Each command: `--subject`, `--bids-dir`, `--output-dir` options
+- **Commit**: "Add preprocessing subcommands to CLI"
+
+### Step 9.3: Add pipeline orchestration command
+- [ ] `mri-preprocess run` - run full pipeline
+- [ ] Options: `--steps` (all, convert, anat, dwi, func, myelin)
+- [ ] `--subjects` (single or list)
+- [ ] Calls subcommands in sequence
+- **Commit**: "Add pipeline orchestration command"
+
+---
+
+## Phase 10: Orchestration Layer
+
+### Step 10.1: Create pipeline orchestrator
+- [ ] Create `mri_preprocess/orchestrator.py`
+- [ ] Class: `PipelineOrchestrator(config)`
+- [ ] Methods: `run_subject()`, `run_batch()`, `run_step()`
+- [ ] Handles subject iteration, step selection, error tracking
+- **Commit**: "Create pipeline orchestrator for batch processing"
+
+### Step 10.2: Add batch processing script
+- [ ] Create `scripts/batch_process.py`
+- [ ] Reads subject list from config or file
+- [ ] Parallel execution support (joblib or multiprocessing)
+- [ ] Status tracking (resume failed runs)
+- [ ] Progress logging
+- **Commit**: "Add batch processing script"
+
+---
+
+## Phase 11: Analysis Utilities
+
+### Step 11.1: Refactor cluster analysis
+- [ ] Create `mri_preprocess/analysis/statistics.py`
+- [ ] Move cluster analysis logic
+- [ ] Config-driven input paths
+- **Commit**: "Refactor statistical analysis utilities"
+
+---
+
+## Phase 12: Documentation and Examples
+
+### Step 12.1: Update README
+- [ ] Installation instructions with `uv`
+- [ ] Quick start guide
+- [ ] CLI usage examples
+- [ ] Python API examples
+- **Commit**: "Update README with usage documentation"
+
+### Step 12.2: Create example workflows
+- [ ] `examples/single_subject.py` - Python API example
+- [ ] `examples/batch_subjects.sh` - CLI batch example
+- [ ] `examples/interactive.ipynb` - Jupyter notebook example
+- **Commit**: "Add example workflows"
+
+### Step 12.3: Update CLAUDE.md
+- [ ] Document new architecture
+- [ ] CLI commands
+- [ ] Config file structure
+- [ ] Development guidelines
+- **Commit**: "Update CLAUDE.md for refactored codebase"
+
+---
+
+## Phase 13: Testing and Validation
+
+### Step 13.1: Integration testing
+- [ ] Test full pipeline with sample data
+- [ ] Verify multi-echo TEDANA workflow
+- [ ] Test config overrides
+- [ ] Validate output file structures
+- **Commit**: "Add integration tests"
+
+### Step 13.2: Compare outputs with original code
+- [ ] Run same subject through old and new pipelines
+- [ ] Compare preprocessing outputs
+- [ ] Document any differences
+- **Commit**: "Validate outputs against original implementation"
+
+---
+
+## Phase 14: Final Cleanup
+
+### Step 14.1: Code review and polish
+- [ ] Remove any remaining hardcoded paths
+- [ ] Ensure consistent error handling
+- [ ] Add docstrings to all public functions
+- [ ] Type hints where appropriate
+- **Commit**: "Code cleanup and documentation"
+
+### Step 14.2: Performance optimization
+- [ ] Profile workflow execution
+- [ ] Optimize file I/O
+- [ ] Tune parallel processing settings
+- **Commit**: "Performance optimizations"
+
+---
+
+## Success Criteria
+
+✅ Full pipeline runs from single CLI command: `mri-preprocess run --config study.yaml --subject 001 --steps all`
+
+✅ Multi-echo functional data processed with TEDANA automatically
+
+✅ No hardcoded sequence names in code (all in config)
+
+✅ No hardcoded file paths in code (all in config or CLI args)
+
+✅ No `os.chdir()` calls in workflow code
+
+✅ Both interactive (single subject) and batch modes work
+
+✅ Clean Python API for programmatic use
+
+✅ Comprehensive config validation with helpful error messages
+
+---
+
+## Notes
+
+- Commit after EVERY completed step (not just phases)
+- Test each module independently before moving to next phase
+- Keep archive/ directory for reference but don't modify it
+- Document any deviations from this plan in commit messages
