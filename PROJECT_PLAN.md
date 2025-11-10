@@ -9,7 +9,7 @@ Refactor the existing MRI preprocessing codebase to:
 5. Implement multi-echo fMRI preprocessing with TEDANA
 6. **Implement transformation reuse**: Compute T1w→MNI transforms once, reuse across all modalities
 7. **Add probtrackx2 for structural connectivity**: Enable tractography and connectivity matrices
-8. **Plan for analysis pipelines**: Framework for post-preprocessing analyses (connectivity, VBM, TBSS) to be implemented after core preprocessing is complete
+8. **Plan for analysis pipelines**: Framework for post-preprocessing analyses (connectivity, ReHo, fALFF, VBM, TBSS) to be implemented after core preprocessing is complete
 
 ## Guiding Principles
 - **Clean break**: No backward compatibility with old scripts (archive them)
@@ -293,11 +293,15 @@ Refactor the existing MRI preprocessing codebase to:
 - [ ] **TODO**: Integration with network analysis packages (NetworkX, BCT)
 - **Note**: Implementation deferred to future phase after core preprocessing complete
 
-### Step 11.3: Plan functional connectivity analysis (Future)
+### Step 11.3: Plan functional connectivity and resting-state metrics (Future)
 - [ ] **TODO**: Seed-based correlation analysis
 - [ ] **TODO**: ROI-to-ROI connectivity matrices
 - [ ] **TODO**: Dual regression (for ICA-based analyses)
 - [ ] **TODO**: Dynamic connectivity (sliding window)
+- [ ] **TODO**: ReHo (Regional Homogeneity) - Kendall's coefficient of concordance
+- [ ] **TODO**: fALFF (fractional Amplitude of Low Frequency Fluctuations)
+- [ ] **TODO**: ALFF (Amplitude of Low Frequency Fluctuations)
+- [ ] **TODO**: Integration with AFNI/DPABI tools for ReHo/fALFF calculation
 - **Note**: Implementation deferred to future phase after core preprocessing complete
 
 ### Step 11.4: Plan group-level VBM/TBSS analysis (Future)
@@ -310,6 +314,7 @@ Refactor the existing MRI preprocessing codebase to:
 ### Step 11.5: Create analysis pipeline placeholder
 - [ ] Document planned analysis workflows in README
 - [ ] Create `mri_preprocess/analysis/connectivity.py` stub file
+- [ ] Create `mri_preprocess/analysis/resting_state.py` stub file (ReHo, fALFF, ALFF)
 - [ ] Create `mri_preprocess/analysis/vbm_tbss.py` stub file
 - [ ] Add TODOs and docstrings describing future functionality
 - **Commit**: "Add analysis pipeline stubs and documentation"
@@ -406,7 +411,9 @@ After core preprocessing is complete, the following analysis pipelines will be i
 
 🔮 **Structural connectivity analysis**: Connectivity matrices from probtrackx2, graph theory metrics
 
-🔮 **Functional connectivity analysis**: Seed-based correlation, ROI-to-ROI matrices, dual regression
+🔮 **Functional connectivity analysis**: Seed-based correlation, ROI-to-ROI matrices, dual regression, dynamic connectivity
+
+🔮 **Resting-state metrics**: ReHo (regional homogeneity), fALFF/ALFF (amplitude of low-frequency fluctuations)
 
 🔮 **Group-level morphometry**: TBSS pipeline for FA/diffusivity, VBM for gray matter volume
 
