@@ -8,6 +8,8 @@ Refactor the existing MRI preprocessing codebase to:
 4. Enable both interactive and batch processing workflows
 5. Implement multi-echo fMRI preprocessing with TEDANA
 6. **Implement transformation reuse**: Compute T1w→MNI transforms once, reuse across all modalities
+7. **Add probtrackx2 for structural connectivity**: Enable tractography and connectivity matrices
+8. **Plan for analysis pipelines**: Framework for post-preprocessing analyses (connectivity, VBM, TBSS) to be implemented after core preprocessing is complete
 
 ## Guiding Principles
 - **Clean break**: No backward compatibility with old scripts (archive them)
@@ -157,11 +159,21 @@ Refactor the existing MRI preprocessing codebase to:
 - [ ] Concatenate transformations: DWI→T1w→MNI (single interpolation step)
 - **Commit**: "Refactor diffusion preprocessing workflow with transform reuse"
 
-### Step 6.2: Add BEDPOSTX and tractography
+### Step 6.2: Add BEDPOSTX
 - [ ] Add optional BEDPOSTX step (config-controlled)
 - [ ] GPU/CUDA settings from config
-- [ ] Tractography as separate optional workflow
-- **Commit**: "Add BEDPOSTX and tractography to diffusion workflow"
+- [ ] Output fiber orientation distributions for probabilistic tractography
+- **Commit**: "Add BEDPOSTX to diffusion workflow"
+
+### Step 6.3: Add probtrackx2 tractography
+- [ ] Class: `ProbabilisticTractography` for probtrackx2 wrapper
+- [ ] Seed-based tractography from ROIs/masks
+- [ ] Network mode for structural connectivity matrices
+- [ ] Config options: number of samples, curvature threshold, loopcheck
+- [ ] Support for waypoint/exclusion/termination masks
+- [ ] Output: probability maps, waytotal stats, connectivity matrices
+- [ ] **Note**: Requires BEDPOSTX output and T1w→MNI transforms for ROI warping
+- **Commit**: "Add probtrackx2 for structural connectivity analysis"
 
 ---
 
@@ -263,13 +275,44 @@ Refactor the existing MRI preprocessing codebase to:
 
 ---
 
-## Phase 11: Analysis Utilities
+## Phase 11: Analysis Pipelines (Post-Preprocessing)
 
-### Step 11.1: Refactor cluster analysis
+**Note**: This phase covers analysis workflows that run AFTER preprocessing is complete. These include group-level statistical analyses, connectivity analyses, and other higher-level analyses.
+
+### Step 11.1: Refactor cluster analysis utilities
 - [ ] Create `mri_preprocess/analysis/statistics.py`
-- [ ] Move cluster analysis logic
+- [ ] Move cluster analysis logic from original code
+- [ ] FSL randomise result aggregation
 - [ ] Config-driven input paths
 - **Commit**: "Refactor statistical analysis utilities"
+
+### Step 11.2: Plan structural connectivity analysis (Future)
+- [ ] **TODO**: Structural connectivity matrix generation from probtrackx2
+- [ ] **TODO**: Graph theory metrics (network efficiency, modularity, etc.)
+- [ ] **TODO**: Group-level connectivity analyses
+- [ ] **TODO**: Integration with network analysis packages (NetworkX, BCT)
+- **Note**: Implementation deferred to future phase after core preprocessing complete
+
+### Step 11.3: Plan functional connectivity analysis (Future)
+- [ ] **TODO**: Seed-based correlation analysis
+- [ ] **TODO**: ROI-to-ROI connectivity matrices
+- [ ] **TODO**: Dual regression (for ICA-based analyses)
+- [ ] **TODO**: Dynamic connectivity (sliding window)
+- **Note**: Implementation deferred to future phase after core preprocessing complete
+
+### Step 11.4: Plan group-level VBM/TBSS analysis (Future)
+- [ ] **TODO**: TBSS pipeline wrapper (FA, MD, RD, AD analyses)
+- [ ] **TODO**: VBM pipeline wrapper (GMV, cortical thickness)
+- [ ] **TODO**: Design matrix generation from demographic files
+- [ ] **TODO**: FSL randomise integration with multiple comparison correction
+- **Note**: Implementation deferred to future phase after core preprocessing complete
+
+### Step 11.5: Create analysis pipeline placeholder
+- [ ] Document planned analysis workflows in README
+- [ ] Create `mri_preprocess/analysis/connectivity.py` stub file
+- [ ] Create `mri_preprocess/analysis/vbm_tbss.py` stub file
+- [ ] Add TODOs and docstrings describing future functionality
+- **Commit**: "Add analysis pipeline stubs and documentation"
 
 ---
 
@@ -341,6 +384,8 @@ Refactor the existing MRI preprocessing codebase to:
 
 ✅ **Orchestrator enforces dependencies**: anatomical runs before other modalities
 
+✅ **Diffusion tractography**: probtrackx2 integration for structural connectivity matrices
+
 ✅ No hardcoded sequence names in code (all in config)
 
 ✅ No hardcoded file paths in code (all in config or CLI args)
@@ -355,9 +400,28 @@ Refactor the existing MRI preprocessing codebase to:
 
 ---
 
+## Future Work (Post-Refactoring)
+
+After core preprocessing is complete, the following analysis pipelines will be implemented:
+
+🔮 **Structural connectivity analysis**: Connectivity matrices from probtrackx2, graph theory metrics
+
+🔮 **Functional connectivity analysis**: Seed-based correlation, ROI-to-ROI matrices, dual regression
+
+🔮 **Group-level morphometry**: TBSS pipeline for FA/diffusivity, VBM for gray matter volume
+
+🔮 **Network analysis**: Integration with NetworkX/BCT for graph-theoretic measures
+
+🔮 **Statistical workflows**: Design matrix generation, FSL randomise wrappers, multiple comparison correction
+
+These will be added as Phase 15+ after validating the preprocessing pipeline.
+
+---
+
 ## Notes
 
 - Commit after EVERY completed step (not just phases)
 - Test each module independently before moving to next phase
 - Keep archive/ directory for reference but don't modify it
 - Document any deviations from this plan in commit messages
+- Analysis pipelines (Phase 11) marked as future work - implement after preprocessing validated
