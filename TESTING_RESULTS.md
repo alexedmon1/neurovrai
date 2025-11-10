@@ -28,6 +28,27 @@ Successfully validated the MRI preprocessing pipeline infrastructure with real d
 **Issue:** Example script pointed to wrong DICOM directory level
 **Fix:** Updated to point to date subdirectory: `/mnt/bytopia/IRC805/raw/dicom/IRC805-0580101/20220301`
 
+### 5. Nipype Workflow Execution Config ✅ FIXED
+**Error:** `TypeError: Workflow.run() got an unexpected keyword argument 'remove_unnecessary_outputs'`
+**Location:** `mri_preprocess/utils/workflow.py:245-260`
+**Cause:** Function returned invalid parameters that Nipype doesn't accept
+**Fix:** Removed invalid parameters - Nipype's `Workflow.run()` only accepts `plugin` and `plugin_args`
+**Commit:** 15a45ba "Fix Nipype workflow execution config - remove invalid parameters"
+
+### 6. FAST Performance Bottleneck ⚠️ INVESTIGATION ONGOING
+**Issue:** FAST with `-l 10` (10 smoothing iterations) hung indefinitely on high-resolution T1w data (512x512x400)
+**Location:** Anatomical preprocessing workflow, FAST node
+**Impact:** Expected 2-3 minute runtime became indefinite hang
+**Temporary Solution:** Skipped FAST to test registration independently
+**Planned Fix:** Implement ANTs N4BiasFieldCorrection as faster, more robust alternative
+
+### 7. FNIRT Warp Field Output Configuration 🔧 IN TESTING
+**Error:** `IndexError: list index out of range` when searching for `*fieldcoeff.nii.gz` files
+**Location:** Test scripts attempting to retrieve FNIRT outputs
+**Cause:** FNIRT node wasn't configured to save warp field coefficients separately
+**Fix:** Added `field_file=True` and `fieldcoeff_file=True` to FNIRT configuration
+**Status:** Currently validating in FSL vs ANTs comparison test
+
 ## Validation Tests
 
 ### ✅ Test 1: Basic Workflow Execution
@@ -41,9 +62,43 @@ Successfully validated the MRI preprocessing pipeline infrastructure with real d
 
 **Output:** Successfully generated brain mask and skull-stripped T1w
 
-### Test 2: Full Anatomical Preprocessing
-**Status:** IN PROGRESS
-**Pending:** Full pipeline with FAST + FLIRT + FNIRT
+### ✅ Test 2: Registration Performance (FSL)
+**Status:** PASSED
+**Components Tested:**
+- Reorient2Std (execution time: ~1.4s)
+- BET skull stripping (execution time: ~73s)
+- FLIRT linear registration to MNI152 (execution time: ~225s / 3.7 min)
+- FNIRT nonlinear registration to MNI152 (execution time: ~427s / 7.1 min)
+
+**Total Registration Time:** ~10.8 minutes (FLIRT + FNIRT)
+
+**Output Files Generated:**
+- Affine transformation matrix (.mat)
+- Nonlinear warp field coefficients (.nii.gz)
+- Warped T1w in MNI152 space
+
+### 🔄 Test 3: FSL vs ANTs Registration Comparison
+**Status:** RUNNING
+**Purpose:** Compare FSL (FLIRT+FNIRT) vs ANTs (antsRegistration) for:
+- Execution time
+- Registration quality
+- Output file formats
+
+**FSL Configuration:**
+- FLIRT: 12 DOF, corratio cost function
+- FNIRT: Nonlinear with proper warp field output
+
+**ANTs Configuration:**
+- Multi-stage: Rigid → Affine → SyN
+- Metrics: Mutual Information + Cross-Correlation
+- Convergence: 4-level multi-resolution pyramid
+
+**Expected Completion:** ~20-30 minutes total
+
+### Test 4: Full Anatomical Preprocessing
+**Status:** PENDING
+**Blocked By:** FAST performance issue (#6 above)
+**Next Steps:** Implement ANTs N4BiasFieldCorrection alternative
 
 ## Test Data Setup
 
