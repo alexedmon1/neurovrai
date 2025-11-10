@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Archived old code (reference only, no future changes tracked)
+# archive/
