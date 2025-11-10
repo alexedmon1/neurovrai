@@ -246,10 +246,7 @@ def get_execution_config(config: Dict[str, Any]) -> Dict[str, Any]:
         # Defaults
         return {
             'plugin': 'MultiProc',
-            'plugin_args': {'n_procs': 2},
-            'remove_unnecessary_outputs': True,
-            'keep_inputs': True,
-            'stop_on_first_crash': False
+            'plugin_args': {'n_procs': 2}
         }
 
     exec_section = config['execution']
@@ -259,11 +256,7 @@ def get_execution_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         'plugin': plugin,
-        'plugin_args': {'n_procs': n_procs},
-        'remove_unnecessary_outputs': exec_section.get('remove_unnecessary_outputs', True),
-        'keep_inputs': exec_section.get('keep_inputs', True),
-        'stop_on_first_crash': exec_section.get('stop_on_first_crash', False),
-        'crashdump_dir': exec_section.get('crashdump_dir', None)
+        'plugin_args': {'n_procs': n_procs}
     }
 
 
