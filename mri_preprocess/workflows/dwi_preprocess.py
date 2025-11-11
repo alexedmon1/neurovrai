@@ -11,6 +11,16 @@ Workflow steps:
 
 Key feature: Reuses T1w->MNI transformations computed during anatomical
 preprocessing, avoiding duplicate computation.
+
+TODO: Add TOPUP distortion correction
+    - The SE_EPI reverse phase-encoding acquisition is now correctly identified
+      by the DICOM converter (sequence pattern: ".*SE_EPI.*")
+    - Need to add TOPUP node before eddy correction:
+      1. Merge forward/reverse PE b0 volumes
+      2. Run TOPUP to estimate susceptibility-induced distortion field
+      3. Pass topup outputs to eddy for simultaneous correction
+    - Reference: FSL TOPUP documentation
+    - Config location: configs/default.yaml -> diffusion.topup section (to be added)
 """
 
 import logging
