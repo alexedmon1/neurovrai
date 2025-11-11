@@ -25,6 +25,7 @@ sequence_patterns:
     - ".*T1.*3D.*"
     - ".*T1_TFE.*"
     - ".*T1W.*"
+    - ".*T1.*MPR.*"      # MPR reformats (axial/coronal/sagittal)
   t2w:
     - ".*T2.*SPACE.*"
     - ".*T2W.*"
@@ -34,6 +35,7 @@ sequence_patterns:
     - ".*DWI.*"
     - ".*ep2d_diff.*"
     - ".*dWIP.*"
+    - ".*SE_EPI.*"       # Reverse PE direction for TOPUP distortion correction
   rest:
     - ".*REST.*"
     - ".*BOLD.*"
@@ -43,10 +45,10 @@ sequence_patterns:
     - ".*ASL.*"
     - ".*pCASL.*"
     - ".*PCASL.*"
+    - ".*PCA.*PRE.*"     # Pre-contrast ASL intensity reference
   fmap:
     - ".*field.*map.*"
     - ".*gre_field.*"
-    - ".*SE_EPI.*"
     - ".*FIELDMAP.*"
 
 # Anatomical preprocessing defaults
