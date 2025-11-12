@@ -9,5 +9,16 @@ wheels/
 # Virtual environments
 .venv
 
+# Test outputs and temporary files
+*.nii.gz
+*.bval
+*.bvec
+*.mat
+*.log
+b0_merged*
+jac_*
+warpfield_*
+xfm_*
+
 # Archived old code (reference only, no future changes tracked)
 # archive/

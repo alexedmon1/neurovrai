@@ -363,9 +363,8 @@ def create_anat_preprocessing_workflow(
         DataSink(),
         name='datasink'
     )
-    datasink.inputs.base_directory = str(
-        get_derivatives_dir(output_dir, 'mri-preprocess', subject, session, create=True)
-    )
+    # output_dir is now the full derivatives directory path
+    datasink.inputs.base_directory = str(output_dir)
     datasink.inputs.container = 'anat'
 
     # === Connect workflow ===
@@ -458,7 +457,7 @@ def run_anat_preprocessing(
     subject: str,
     t1w_file: Path,
     output_dir: Path,
-    work_dir: Path,
+    work_dir: Optional[Path] = None,
     session: Optional[str] = None,
     save_transforms: bool = True
 ) -> Dict[str, Path]:
@@ -478,9 +477,11 @@ def run_anat_preprocessing(
     t1w_file : Path
         Input T1w file
     output_dir : Path
-        Output directory
-    work_dir : Path
-        Working directory
+        Study root directory (e.g., /mnt/bytopia/development/IRC805/)
+        Derivatives will be saved to: {output_dir}/derivatives/anat_preproc/{subject}/
+    work_dir : Path, optional
+        Working directory for temporary Nipype files
+        Default: {output_dir}/work/{subject}/anat_preproc/
     session : str, optional
         Session identifier
     save_transforms : bool
@@ -504,12 +505,26 @@ def run_anat_preprocessing(
     ... )
     >>> print(results['brain'])
     """
+    # Setup directory structure
+    # output_dir is the study root (e.g., /mnt/bytopia/development/IRC805/)
+    study_root = Path(output_dir)
+
+    # Create directory hierarchy
+    derivatives_dir = study_root / 'derivatives' / 'anat_preproc' / subject
+    if work_dir is None:
+        work_dir = study_root / 'work' / subject / 'anat_preproc'
+    else:
+        work_dir = Path(work_dir)
+
+    derivatives_dir.mkdir(parents=True, exist_ok=True)
+    work_dir.mkdir(parents=True, exist_ok=True)
+
     # Create workflow
     wf = create_anat_preprocessing_workflow(
         config=config,
         subject=subject,
         t1w_file=t1w_file,
-        output_dir=output_dir,
+        output_dir=derivatives_dir,  # Pass derivatives directory directly
         work_dir=work_dir,
         session=session
     )
@@ -521,9 +536,7 @@ def run_anat_preprocessing(
     wf.run(**exec_config)
 
     # Collect outputs
-    derivatives_dir = get_derivatives_dir(
-        output_dir, 'mri-preprocess', subject, session
-    )
+    # derivatives_dir is already set at the top of the function
     anat_dir = derivatives_dir / 'anat'
 
     segmentation_dir = anat_dir / 'segmentation'

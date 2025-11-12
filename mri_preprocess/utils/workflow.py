@@ -158,6 +158,7 @@ def get_node_config(node_type: str, config: Dict[str, Any]) -> Dict[str, Any]:
         'fnirt': 'anatomical.registration',
 
         # Diffusion
+        'topup': 'diffusion.topup',
         'eddy': 'diffusion.eddy',
         'dtifit': 'diffusion.dtifit',
         'bedpostx': 'diffusion.bedpostx',

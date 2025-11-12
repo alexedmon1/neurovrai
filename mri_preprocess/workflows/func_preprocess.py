@@ -58,14 +58,14 @@ def run_func_preprocessing(
     subject: str,
     func_file: Path,
     output_dir: Path,
-    work_dir: Path,
+    work_dir: Optional[Path] = None,
     csf_mask: Optional[Path] = None,
     wm_mask: Optional[Path] = None,
     session: Optional[str] = None
 ) -> Dict[str, Path]:
     """
     Run functional preprocessing with TEDANA and ACompCor.
-    
+
     Parameters
     ----------
     config : dict
@@ -75,9 +75,11 @@ def run_func_preprocessing(
     func_file : Path
         Input functional file
     output_dir : Path
-        Output directory
-    work_dir : Path
-        Working directory
+        Study root directory (e.g., /mnt/bytopia/development/IRC805/)
+        Derivatives will be saved to: {output_dir}/derivatives/func_preproc/{subject}/
+    work_dir : Path, optional
+        Working directory for temporary Nipype files
+        Default: {output_dir}/work/{subject}/func_preproc/
     csf_mask : Path, optional
         CSF probability map from anatomical workflow
     wm_mask : Path, optional
@@ -101,7 +103,25 @@ def run_func_preprocessing(
     logger.info(f"Functional preprocessing for {subject}")
     logger.info(f"  CSF mask: {csf_mask}")
     logger.info(f"  WM mask: {wm_mask}")
-    
+
+    # Setup directory structure
+    # output_dir is the study root (e.g., /mnt/bytopia/development/IRC805/)
+    study_root = Path(output_dir)
+
+    # Create directory hierarchy
+    derivatives_dir = study_root / 'derivatives' / 'func_preproc' / subject
+    if work_dir is None:
+        work_dir = study_root / 'work' / subject / 'func_preproc'
+    else:
+        work_dir = Path(work_dir)
+
+    derivatives_dir.mkdir(parents=True, exist_ok=True)
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Study root: {study_root}")
+    logger.info(f"Derivatives output: {derivatives_dir}")
+    logger.info(f"Working directory: {work_dir}")
+
     # Placeholder for full implementation
     # In a complete implementation, this would:
     # 1. Create Nipype workflow with motion correction, slice timing
@@ -110,10 +130,13 @@ def run_func_preprocessing(
     # 4. Run ICA-AROMA
     # 5. Apply spatial smoothing
     # 6. Warp to MNI using TransformRegistry transforms
-    
+    # 7. Save outputs to derivatives_dir (not using get_derivatives_dir)
+
     return {
         'preprocessed': None,
         'motion_params': None,
-        'acompcor_components': None
+        'acompcor_components': None,
+        'derivatives_dir': derivatives_dir,
+        'work_dir': work_dir
     }
 

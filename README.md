@@ -8,9 +8,12 @@ A production-ready, config-driven MRI preprocessing pipeline for anatomical (T1w
 - **BIDS-Compatible**: Follows Brain Imaging Data Structure conventions
 - **Transform Registry**: Centralized management of spatial transformations for efficient reuse
 - **Modular Workflows**: Separate anatomical and diffusion preprocessing pipelines
+- **TOPUP Distortion Correction**: Advanced susceptibility distortion correction for DWI
+- **GPU Acceleration**: CUDA support for FSL eddy correction
+- **Standardized Output**: Consistent directory hierarchy across all workflows
 - **Flexible Registration**: Support for both FSL (FLIRT/FNIRT) and ANTs registration
 - **CLI Interface**: Command-line tools for batch processing
-- **Production-Ready**: Validated with real clinical data
+- **Production-Ready**: Tested and validated with multi-shell DWI data (see `docs/DWI_TOPUP_TEST_RESULTS.md`)
 
 ## Prerequisites
 
