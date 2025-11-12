@@ -11,6 +11,7 @@ A production-ready, config-driven MRI preprocessing pipeline for anatomical (T1w
 - **TOPUP Distortion Correction**: Advanced susceptibility distortion correction for DWI
 - **GPU Acceleration**: CUDA support for FSL eddy correction
 - **Standardized Output**: Consistent directory hierarchy across all workflows
+- **Quality Control Framework**: Comprehensive QC for DWI (TOPUP, motion, DTI) and anatomical (skull stripping) preprocessing
 - **Flexible Registration**: Support for both FSL (FLIRT/FNIRT) and ANTs registration
 - **CLI Interface**: Command-line tools for batch processing
 - **Production-Ready**: Tested and validated with multi-shell DWI data (see `docs/DWI_TOPUP_TEST_RESULTS.md`)
@@ -211,6 +212,69 @@ mri-preprocess run diffusion \
 - `sub-XXX_dwi_FA.nii.gz`: Fractional anisotropy map
 - `sub-XXX_dwi_MD.nii.gz`: Mean diffusivity map
 - `sub-XXX_dwi_to_MNI152.nii.gz`: DWI warped to MNI152
+
+## Quality Control (QC)
+
+The pipeline includes comprehensive quality control modules for both DWI and anatomical preprocessing.
+
+### DWI QC
+
+Automated QC for diffusion preprocessing:
+
+```python
+from mri_preprocess.qc.dwi import TOPUPQualityControl, MotionQualityControl, DTIQualityControl
+
+# TOPUP QC: Field map analysis
+topup_qc = TOPUPQualityControl(
+    subject='sub-001',
+    work_dir=Path('derivatives/dwi_topup/sub-001'),
+    qc_dir=Path('qc/dwi/sub-001/topup')
+)
+results = topup_qc.run_qc()
+
+# Motion QC: Framewise displacement
+motion_qc = MotionQualityControl(
+    subject='sub-001',
+    work_dir=Path('derivatives/dwi_topup/sub-001'),
+    qc_dir=Path('qc/dwi/sub-001/motion')
+)
+results = motion_qc.run_qc()
+
+# DTI QC: FA/MD distributions
+dti_qc = DTIQualityControl(
+    subject='sub-001',
+    dti_dir=Path('derivatives/dwi_topup/sub-001/dti'),
+    qc_dir=Path('qc/dwi/sub-001/dti')
+)
+results = dti_qc.run_qc(metrics=['FA', 'MD'])
+```
+
+**QC Outputs** (stored in `{study_root}/qc/dwi/{subject}/`):
+- TOPUP convergence plots and field map statistics
+- Motion parameter plots with outlier detection
+- FA/MD histograms and distribution statistics
+- JSON metrics files for all QC measures
+
+### Anatomical QC
+
+```python
+from mri_preprocess.qc.anat import SkullStripQualityControl
+
+# Skull stripping QC
+skull_qc = SkullStripQualityControl(
+    subject='sub-001',
+    anat_dir=Path('derivatives/anat_preproc/sub-001/anat'),
+    qc_dir=Path('qc/anat/sub-001/skull_strip')
+)
+results = skull_qc.run_qc()
+```
+
+**QC Outputs** (stored in `{study_root}/qc/anat/{subject}/`):
+- Brain mask overlay visualizations
+- Brain volume statistics
+- Quality assessment metrics (contrast ratio, over/under-stripping detection)
+
+For complete QC documentation, see `docs/DWI_QC_SPECIFICATION.md`.
 
 ## Configuration Options
 

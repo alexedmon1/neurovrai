@@ -24,6 +24,36 @@ All preprocessing workflows now use a standardized directory hierarchy with clea
 │       └── func/
 │           └── sub-{subject}_task-rest_bold.nii.gz
 │
+├── qc/                                # Quality Control outputs (centralized)
+│   ├── dwi/                           # DWI QC
+│   │   └── {subject}/
+│   │       ├── reports/               # HTML/PDF reports
+│   │       ├── metrics/               # JSON/CSV metrics
+│   │       ├── images/                # Visualization images
+│   │       ├── motion/                # Motion QC
+│   │       ├── topup/                 # TOPUP QC
+│   │       └── comparisons/           # Before/after
+│   ├── rest/                          # Resting-state fMRI QC
+│   │   └── {subject}/
+│   │       ├── reports/
+│   │       ├── metrics/
+│   │       ├── images/
+│   │       ├── motion/
+│   │       ├── carpet_plots/
+│   │       └── ica_aroma/
+│   ├── anat/                          # Anatomical QC
+│   │   └── {subject}/
+│   │       ├── reports/
+│   │       ├── metrics/
+│   │       ├── images/
+│   │       ├── segmentation/
+│   │       └── registration/
+│   └── cross_modality/                # Cross-modality registration QC
+│       └── {subject}/
+│           ├── dwi_to_t1w/
+│           ├── rest_to_t1w/
+│           └── reports/
+│
 ├── derivatives/                       # Preprocessed outputs
 │   ├── anat_preproc/                 # Anatomical preprocessing
 │   │   └── {subject}/
@@ -138,11 +168,15 @@ results = run_dwi_multishell_topup_preprocessing(
 
 ## Benefits
 
-1. **Clear Organization**: Separate directories for raw data, conversions, and derivatives
-2. **Easy Cleanup**: Temporary `work/` directory can be deleted after successful preprocessing
-3. **Consistent Structure**: All workflows follow the same pattern
-4. **BIDS-Compatible**: Structure aligns with BIDS derivatives specification
-5. **Subject-Level**: Each subject has isolated derivative directories
+1. **Clear Organization**: Separate directories for raw data, conversions, derivatives, and QC
+2. **Centralized QC**: All quality control outputs in one location for easy review
+3. **Modality-Specific QC**: DWI, anatomical, and functional QC organized separately
+4. **Cross-Modality QC**: Dedicated space for registration QC across modalities
+5. **Easy Cleanup**: Temporary `work/` directory can be deleted after successful preprocessing
+6. **Consistent Structure**: All workflows follow the same pattern
+7. **BIDS-Compatible**: Structure aligns with BIDS derivatives specification
+8. **Subject-Level**: Each subject has isolated derivative directories
+9. **Group QC**: Easy to aggregate QC metrics across subjects from centralized location
 
 ## Migration from Old Structure
 
