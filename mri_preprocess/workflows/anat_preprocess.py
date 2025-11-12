@@ -459,7 +459,8 @@ def run_anat_preprocessing(
     output_dir: Path,
     work_dir: Optional[Path] = None,
     session: Optional[str] = None,
-    save_transforms: bool = True
+    save_transforms: bool = True,
+    run_qc: bool = True
 ) -> Dict[str, Path]:
     """
     Run anatomical preprocessing and save transformations.
@@ -486,6 +487,8 @@ def run_anat_preprocessing(
         Session identifier
     save_transforms : bool
         Save transforms to registry (default: True)
+    run_qc : bool
+        Run quality control after preprocessing (default: True)
 
     Returns
     -------
@@ -571,5 +574,90 @@ def run_anat_preprocessing(
         )
 
         logging.info(f"Saved T1w�MNI152 transformation to registry")
+
+    # Run Quality Control
+    if run_qc:
+        logging.info("="*70)
+        logging.info("Running Anatomical QC")
+        logging.info("="*70)
+
+        qc_dir = study_root / 'qc' / 'anat' / subject
+        qc_results = {}
+
+        try:
+            # 1. Skull Strip QC
+            if outputs.get('brain_mask'):
+                from mri_preprocess.qc.anat.skull_strip_qc import SkullStripQualityControl
+
+                logging.info("Running Skull Strip QC...")
+                skull_qc = SkullStripQualityControl(
+                    subject=subject,
+                    anat_dir=derivatives_dir / 'anat',
+                    qc_dir=qc_dir / 'skull_strip'
+                )
+                qc_results['skull_strip'] = skull_qc.run_qc(
+                    t1w_file=t1w_file,
+                    brain_file=outputs.get('brain'),
+                    mask_file=outputs.get('brain_mask')
+                )
+                logging.info("  ✓ Skull Strip QC completed")
+
+            # 2. Segmentation QC
+            if outputs.get('csf_prob') or outputs.get('gm_prob') or outputs.get('wm_prob'):
+                from mri_preprocess.qc.anat.segmentation_qc import SegmentationQualityControl
+
+                logging.info("Running Segmentation QC...")
+                seg_qc = SegmentationQualityControl(
+                    subject=subject,
+                    anat_dir=segmentation_dir,
+                    qc_dir=qc_dir / 'segmentation'
+                )
+                qc_results['segmentation'] = seg_qc.run_qc(
+                    csf_file=outputs.get('csf_prob'),
+                    gm_file=outputs.get('gm_prob'),
+                    wm_file=outputs.get('wm_prob')
+                )
+                logging.info("  ✓ Segmentation QC completed")
+
+            # 3. Registration QC
+            if outputs.get('mni_warped'):
+                from mri_preprocess.qc.anat.registration_qc import RegistrationQualityControl
+
+                logging.info("Running Registration QC...")
+                reg_qc = RegistrationQualityControl(
+                    subject=subject,
+                    anat_dir=anat_dir / 'mni_space',
+                    qc_dir=qc_dir / 'registration'
+                )
+                qc_results['registration'] = reg_qc.run_qc(
+                    registered_file=outputs.get('mni_warped'),
+                    template_file=None,  # Use FSL MNI152 template
+                    registered_mask=None,  # Will be auto-detected or generated
+                    template_mask=None  # Use FSL MNI152 mask
+                )
+                logging.info("  ✓ Registration QC completed")
+
+            # Save combined QC results
+            import json
+            combined_qc_file = qc_dir / 'combined_qc_results.json'
+            combined_qc_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Convert Path objects to strings for JSON serialization
+            qc_results_serializable = json.loads(json.dumps(qc_results, default=str))
+
+            with open(combined_qc_file, 'w') as f:
+                json.dump(qc_results_serializable, f, indent=2)
+
+            logging.info(f"Saved combined QC results: {combined_qc_file}")
+            logging.info("="*70)
+            logging.info("Anatomical QC Complete")
+            logging.info("="*70)
+
+            outputs['qc_results'] = qc_results
+            outputs['qc_dir'] = qc_dir
+
+        except Exception as e:
+            logging.error(f"QC failed with error: {e}")
+            logging.warning("Continuing without QC...")
 
     return outputs
