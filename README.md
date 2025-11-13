@@ -1,20 +1,56 @@
 # Human MRI Preprocessing Pipeline
 
-A production-ready, config-driven MRI preprocessing pipeline for anatomical (T1w) and diffusion-weighted imaging (DWI) data. Built with Nipype for workflow orchestration, supporting both FSL and ANTs for neuroimaging processing.
+A production-ready, config-driven MRI preprocessing pipeline for multiple neuroimaging modalities: anatomical (T1w), diffusion-weighted imaging (DWI), resting-state fMRI, and arterial spin labeling (ASL). Built with Nipype for workflow orchestration, supporting both FSL and ANTs for neuroimaging processing.
 
 ## Features
 
+### Core Features
 - **Config-Driven Architecture**: YAML-based configuration for all processing parameters
 - **BIDS-Compatible**: Follows Brain Imaging Data Structure conventions
 - **Transform Registry**: Centralized management of spatial transformations for efficient reuse
-- **Modular Workflows**: Separate anatomical and diffusion preprocessing pipelines
-- **TOPUP Distortion Correction**: Advanced susceptibility distortion correction for DWI
-- **GPU Acceleration**: CUDA support for FSL eddy correction
+- **Modular Workflows**: Separate pipelines for anatomical, diffusion, functional, and ASL preprocessing
 - **Standardized Output**: Consistent directory hierarchy across all workflows
-- **Quality Control Framework**: Comprehensive QC for DWI (TOPUP, motion, DTI) and anatomical (skull stripping) preprocessing
-- **Flexible Registration**: Support for both FSL (FLIRT/FNIRT) and ANTs registration
 - **CLI Interface**: Command-line tools for batch processing
-- **Production-Ready**: Tested and validated with multi-shell DWI data (see `docs/DWI_TOPUP_TEST_RESULTS.md`)
+- **Production-Ready**: Tested and validated with real-world data
+
+### Anatomical Preprocessing
+- N4 bias field correction with ANTs
+- Brain extraction with FSL BET
+- Tissue segmentation with ANTs Atropos (faster than FSL FAST)
+- Registration to MNI152 with FSL FNIRT
+- Comprehensive quality control
+
+### Diffusion Preprocessing
+- TOPUP distortion correction for multi-shell data
+- GPU-accelerated eddy current correction
+- DTI fitting with standard metrics (FA, MD, AD, RD)
+- Advanced models: DKI and NODDI
+- Probabilistic tractography with atlas-based ROI extraction
+- Comprehensive QC (TOPUP, motion, DTI metrics)
+
+### Functional Preprocessing
+- Multi-echo TEDANA denoising
+- Motion correction with MCFLIRT
+- ICA-AROMA (optional)
+- CompCor nuisance regression
+- Bandpass temporal filtering
+- Registration to anatomical space
+
+### ASL (Arterial Spin Labeling) Preprocessing
+- **Automated DICOM Parameter Extraction**: Auto-extracts acquisition parameters (τ, PLD) from scanner DICOM files
+- **M0 Calibration**: White matter reference calibration to correct for M0 estimation bias
+- **Partial Volume Correction**: Linear regression method for improved tissue-specific CBF accuracy
+- Motion correction with MCFLIRT
+- Label-control separation and quantification
+- CBF quantification with standard kinetic model (Alsop et al., 2015)
+- Tissue-specific CBF statistics
+- Registration to anatomical space
+- Comprehensive quality control with motion, CBF, and tSNR metrics
+
+### Advanced Features
+- **GPU Acceleration**: CUDA support for FSL eddy and BEDPOSTX
+- **Flexible Registration**: Support for both FSL (FLIRT/FNIRT) and ANTs
+- **Quality Control Framework**: Automated QC for all modalities with detailed reports
 
 ## Prerequisites
 

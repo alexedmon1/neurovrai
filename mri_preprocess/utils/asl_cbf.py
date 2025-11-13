@@ -274,6 +274,247 @@ def compute_tissue_specific_cbf(
     return results
 
 
+def calibrate_cbf_with_wm_reference(
+    cbf: np.ndarray,
+    wm_mask: np.ndarray,
+    wm_cbf_expected: float = 25.0,
+    wm_threshold: float = 0.7
+) -> Tuple[np.ndarray, Dict[str, float]]:
+    """
+    Calibrate CBF using white matter reference region.
+
+    This corrects for M0 estimation bias when using control images as M0.
+    White matter has relatively stable CBF (~25 ml/100g/min) and serves as
+    an internal calibration reference.
+
+    Parameters
+    ----------
+    cbf : np.ndarray
+        Uncalibrated CBF map in ml/100g/min
+    wm_mask : np.ndarray
+        White matter probability map (0-1)
+    wm_cbf_expected : float
+        Expected white matter CBF in ml/100g/min (default: 25)
+    wm_threshold : float
+        WM probability threshold for high-confidence voxels (default: 0.7)
+
+    Returns
+    -------
+    tuple
+        (cbf_calibrated, calibration_info) where calibration_info contains:
+        - wm_cbf_measured: Measured WM CBF before calibration
+        - scaling_factor: Applied scaling factor
+        - wm_cbf_calibrated: WM CBF after calibration (should match expected)
+
+    Notes
+    -----
+    Expected CBF values:
+    - White matter: 25 ml/100g/min (relatively stable across subjects)
+    - Gray matter: 40-60 ml/100g/min
+    - Whole brain: 35-50 ml/100g/min
+
+    If M0 is underestimated (common when using control images), CBF will be
+    overestimated. This calibration corrects the systematic bias.
+
+    References
+    ----------
+    Alsop et al. (2015). Recommended implementation of arterial spin-labeled
+    perfusion MRI for clinical applications. MRM, 73(1).
+    """
+    logger.info("Calibrating CBF using white matter reference")
+
+    # Select high-confidence WM voxels
+    wm_high_conf = wm_mask > wm_threshold
+    n_wm_voxels = np.sum(wm_high_conf)
+
+    if n_wm_voxels < 100:
+        logger.warning(f"Only {n_wm_voxels} high-confidence WM voxels found")
+        logger.warning("Calibration may be unreliable. Consider lowering wm_threshold.")
+
+    # Measure WM CBF before calibration
+    wm_cbf_measured = np.mean(cbf[wm_high_conf])
+    wm_cbf_std = np.std(cbf[wm_high_conf])
+
+    logger.info(f"  WM voxels used: {n_wm_voxels}")
+    logger.info(f"  Measured WM CBF: {wm_cbf_measured:.2f} ± {wm_cbf_std:.2f} ml/100g/min")
+    logger.info(f"  Expected WM CBF: {wm_cbf_expected:.2f} ml/100g/min")
+
+    # Calculate scaling factor
+    scaling_factor = wm_cbf_expected / wm_cbf_measured
+
+    logger.info(f"  Scaling factor: {scaling_factor:.3f}")
+
+    # Apply calibration
+    cbf_calibrated = cbf * scaling_factor
+
+    # Verify calibration
+    wm_cbf_calibrated = np.mean(cbf_calibrated[wm_high_conf])
+
+    logger.info(f"  Calibrated WM CBF: {wm_cbf_calibrated:.2f} ml/100g/min")
+    logger.info("")
+
+    calibration_info = {
+        'wm_cbf_measured': float(wm_cbf_measured),
+        'wm_cbf_expected': float(wm_cbf_expected),
+        'scaling_factor': float(scaling_factor),
+        'wm_cbf_calibrated': float(wm_cbf_calibrated),
+        'n_wm_voxels': int(n_wm_voxels)
+    }
+
+    return cbf_calibrated, calibration_info
+
+
+def apply_partial_volume_correction(
+    cbf: np.ndarray,
+    gm_pve: np.ndarray,
+    wm_pve: np.ndarray,
+    csf_pve: np.ndarray,
+    brain_mask: Optional[np.ndarray] = None
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Apply partial volume correction to CBF map.
+
+    Uses linear regression method (Asllani et al., 2008) to correct for
+    partial volume averaging in low-resolution ASL images.
+
+    Parameters
+    ----------
+    cbf : np.ndarray
+        CBF map in ml/100g/min
+    gm_pve : np.ndarray
+        Gray matter partial volume estimate (0-1)
+    wm_pve : np.ndarray
+        White matter partial volume estimate (0-1)
+    csf_pve : np.ndarray
+        CSF partial volume estimate (0-1)
+    brain_mask : np.ndarray, optional
+        Brain mask to restrict processing
+
+    Returns
+    -------
+    tuple
+        (cbf_gm_corrected, cbf_wm_corrected) - GM and WM CBF after PVC
+
+    Notes
+    -----
+    The linear regression model assumes:
+        Observed_CBF = GM_fraction × GM_CBF + WM_fraction × WM_CBF
+
+    CSF is assumed to have zero perfusion.
+
+    This correction is particularly important for:
+    - Low spatial resolution images (e.g., 3×3×5 mm voxels)
+    - Analysis at tissue boundaries (GM/WM interface)
+    - ROI-based analyses
+
+    References
+    ----------
+    Asllani et al. (2008). Regression algorithm correcting for partial volume
+    effects in arterial spin labeling MRI. MRM, 60(6).
+    """
+    logger.info("Applying partial volume correction")
+
+    if brain_mask is not None:
+        mask = brain_mask > 0
+    else:
+        mask = (gm_pve + wm_pve + csf_pve) > 0.1
+
+    # Initialize corrected maps
+    cbf_gm_corrected = np.zeros_like(cbf)
+    cbf_wm_corrected = np.zeros_like(cbf)
+
+    # Get brain voxels
+    brain_voxels = np.where(mask)
+    n_voxels = len(brain_voxels[0])
+
+    logger.info(f"  Processing {n_voxels} brain voxels")
+
+    # For each voxel, use local regression to estimate GM and WM CBF
+    # This uses a kernel regression approach with neighboring voxels
+
+    # Simple implementation: Use voxelwise PVE to estimate pure tissue CBF
+    # More sophisticated methods use spatial regularization
+
+    for i, (x, y, z) in enumerate(zip(*brain_voxels)):
+        gm_frac = gm_pve[x, y, z]
+        wm_frac = wm_pve[x, y, z]
+
+        # Skip if no GM or WM
+        if gm_frac + wm_frac < 0.1:
+            continue
+
+        # Observed CBF
+        cbf_obs = cbf[x, y, z]
+
+        # Solve for pure tissue CBF using neighboring voxels
+        # Define local neighborhood (3×3×3 kernel)
+        x_min = max(0, x - 1)
+        x_max = min(cbf.shape[0], x + 2)
+        y_min = max(0, y - 1)
+        y_max = min(cbf.shape[1], y + 2)
+        z_min = max(0, z - 1)
+        z_max = min(cbf.shape[2], z + 2)
+
+        # Extract neighborhood
+        neighborhood_cbf = cbf[x_min:x_max, y_min:y_max, z_min:z_max]
+        neighborhood_gm = gm_pve[x_min:x_max, y_min:y_max, z_min:z_max]
+        neighborhood_wm = wm_pve[x_min:x_max, y_min:y_max, z_min:z_max]
+        neighborhood_mask = mask[x_min:x_max, y_min:y_max, z_min:z_max]
+
+        # Flatten
+        cbf_local = neighborhood_cbf[neighborhood_mask].flatten()
+        gm_local = neighborhood_gm[neighborhood_mask].flatten()
+        wm_local = neighborhood_wm[neighborhood_mask].flatten()
+
+        if len(cbf_local) < 5:
+            # Not enough neighbors, use simple division
+            if gm_frac > 0.1:
+                cbf_gm_corrected[x, y, z] = cbf_obs / gm_frac
+            if wm_frac > 0.1:
+                cbf_wm_corrected[x, y, z] = cbf_obs / wm_frac
+            continue
+
+        # Linear regression: CBF_obs = β_gm × GM_frac + β_wm × WM_frac
+        # Using least squares
+        try:
+            from scipy import linalg
+
+            # Design matrix
+            X = np.column_stack([gm_local, wm_local])
+            y = cbf_local
+
+            # Solve least squares
+            beta, _, _, _ = linalg.lstsq(X, y)
+
+            cbf_gm_corrected[x, y, z] = beta[0]
+            cbf_wm_corrected[x, y, z] = beta[1]
+
+        except Exception as e:
+            # Fall back to simple division
+            if gm_frac > 0.1:
+                cbf_gm_corrected[x, y, z] = cbf_obs / gm_frac
+            if wm_frac > 0.1:
+                cbf_wm_corrected[x, y, z] = cbf_obs / wm_frac
+
+    # Replace NaN/inf with 0
+    cbf_gm_corrected = np.nan_to_num(cbf_gm_corrected, nan=0.0, posinf=0.0, neginf=0.0)
+    cbf_wm_corrected = np.nan_to_num(cbf_wm_corrected, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # Clip to reasonable ranges
+    cbf_gm_corrected = np.clip(cbf_gm_corrected, 0, 200)
+    cbf_wm_corrected = np.clip(cbf_wm_corrected, 0, 100)
+
+    # Calculate statistics
+    gm_mean = np.mean(cbf_gm_corrected[gm_pve > 0.7])
+    wm_mean = np.mean(cbf_wm_corrected[wm_pve > 0.7])
+
+    logger.info(f"  PVC GM CBF: {gm_mean:.2f} ml/100g/min")
+    logger.info(f"  PVC WM CBF: {wm_mean:.2f} ml/100g/min")
+    logger.info("")
+
+    return cbf_gm_corrected, cbf_wm_corrected
+
+
 def save_asl_outputs(
     output_dir: Path,
     subject: str,

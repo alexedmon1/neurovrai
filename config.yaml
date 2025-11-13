@@ -73,5 +73,13 @@ asl:
   blood_brain_partition: 0.9  # λ (lambda) in ml/g
   label_control_order: control_first  # 'control_first' or 'label_first' [Confirmed by DICOM tag 2005,1429]
   background_suppression_pulses: 1  # [Extracted from DICOM tag 2005,1412]
+
+  # M0 calibration with white matter reference
+  apply_m0_calibration: true  # Correct for M0 estimation bias using WM reference
+  wm_cbf_reference: 25.0  # Expected WM CBF in ml/100g/min (literature value)
+
+  # Partial volume correction
+  apply_pvc: false  # Apply linear regression PVC method (requires tissue masks)
+
   normalize_to_mni: false  # Reuse anatomical transforms for normalization
   run_qc: true

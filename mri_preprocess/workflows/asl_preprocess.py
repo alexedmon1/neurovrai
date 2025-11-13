@@ -5,16 +5,20 @@ ASL (Arterial Spin Labeling) Preprocessing Workflow
 Workflow features:
 1. Motion correction (MCFLIRT)
 2. Label-control separation and subtraction
-3. Perfusion-weighted signal (ΔM) computation
-4. Brain extraction
-5. CBF quantification using standard kinetic model
-6. Registration to anatomical space
-7. Spatial normalization to MNI152 (reuses anatomical transforms)
-8. Quality control metrics
+3. Brain extraction
+4. CBF quantification using standard kinetic model
+5. M0 calibration with white matter reference (optional)
+6. Partial volume correction (optional)
+7. Tissue-specific CBF statistics
+8. Registration to anatomical space
+9. Spatial normalization to MNI152 (reuses anatomical transforms)
+10. Quality control metrics
 
 Key integrations:
 - Reuses anatomical→MNI152 transforms for efficient normalization
 - Uses tissue segmentation from anatomical workflow for tissue-specific CBF
+- M0 calibration corrects for estimation bias (reduces elevated CBF)
+- PVC corrects for partial volume averaging in low-resolution ASL
 - Compatible with pCASL and PASL acquisition types
 """
 
@@ -30,8 +34,11 @@ from mri_preprocess.utils.asl_cbf import (
     compute_perfusion_weighted_signal,
     quantify_cbf,
     compute_tissue_specific_cbf,
+    calibrate_cbf_with_wm_reference,
+    apply_partial_volume_correction,
     save_asl_outputs
 )
+from mri_preprocess.utils.dicom_asl_params import extract_asl_parameters
 from mri_preprocess.qc.asl_qc import (
     compute_asl_motion_qc,
     compute_cbf_qc,
@@ -51,6 +58,7 @@ def run_asl_preprocessing(
     gm_mask: Optional[Path] = None,
     wm_mask: Optional[Path] = None,
     csf_mask: Optional[Path] = None,
+    dicom_dir: Optional[Path] = None,
     label_control_order: str = 'control_first',
     labeling_duration: float = 1.8,
     post_labeling_delay: float = 1.8,
@@ -86,12 +94,17 @@ def run_asl_preprocessing(
         White matter mask in T1w space
     csf_mask : Path, optional
         CSF mask in T1w space
+    dicom_dir : Path, optional
+        Directory containing ASL DICOM files for automatic parameter extraction
+        If provided, will extract acquisition parameters from DICOM and override config
     label_control_order : str
         Label-control ordering ('control_first' or 'label_first')
     labeling_duration : float
         Labeling duration (τ) in seconds (default: 1.8s for pCASL)
+        Overridden by DICOM if dicom_dir is provided
     post_labeling_delay : float
         Post-labeling delay (PLD) in seconds (default: 1.8s)
+        Overridden by DICOM if dicom_dir is provided
     normalize_to_mni : bool
         Perform spatial normalization to MNI152 (default: False)
 
@@ -132,6 +145,66 @@ def run_asl_preprocessing(
     logger.info(f"Derivatives output: {derivatives_dir}")
     logger.info(f"Working directory: {work_dir}")
     logger.info("")
+
+    # Automatic DICOM parameter extraction (if available)
+    dicom_params = None
+    if dicom_dir and dicom_dir.exists():
+        logger.info("Attempting to extract ASL parameters from DICOM...")
+        logger.info(f"  DICOM directory: {dicom_dir}")
+
+        try:
+            # Find ASL DICOM files
+            import glob
+            dicom_files = list(dicom_dir.glob('*.dcm')) + list(dicom_dir.glob('*.DCM'))
+
+            if dicom_files:
+                # Extract from first DICOM file
+                dicom_file = dicom_files[0]
+                logger.info(f"  Using DICOM file: {dicom_file.name}")
+
+                dicom_params = extract_asl_parameters(dicom_file)
+
+                # Override parameters with DICOM values if available
+                param_sources = {}
+
+                if 'labeling_duration' in dicom_params:
+                    labeling_duration = dicom_params['labeling_duration']
+                    param_sources['labeling_duration'] = 'DICOM'
+                else:
+                    param_sources['labeling_duration'] = 'config'
+
+                if 'post_labeling_delay' in dicom_params:
+                    post_labeling_delay = dicom_params['post_labeling_delay']
+                    param_sources['post_labeling_delay'] = 'DICOM'
+                else:
+                    param_sources['post_labeling_delay'] = 'config'
+
+                if 'label_control_order' in dicom_params:
+                    label_control_order = dicom_params['label_control_order']
+                    param_sources['label_control_order'] = 'DICOM'
+                else:
+                    param_sources['label_control_order'] = 'config'
+
+                logger.info("")
+                logger.info("ASL Acquisition Parameters:")
+                logger.info(f"  Labeling duration (τ): {labeling_duration:.3f} s [{param_sources['labeling_duration']}]")
+                logger.info(f"  Post-labeling delay (PLD): {post_labeling_delay:.3f} s [{param_sources['post_labeling_delay']}]")
+                logger.info(f"  Label-control order: {label_control_order} [{param_sources['label_control_order']}]")
+                logger.info("")
+            else:
+                logger.warning("  No DICOM files found in directory")
+                logger.info("  Using parameters from config")
+                logger.info("")
+        except Exception as e:
+            logger.warning(f"  Failed to extract DICOM parameters: {e}")
+            logger.info("  Using parameters from config")
+            logger.info("")
+    else:
+        logger.info("ASL Acquisition Parameters (from config):")
+        logger.info(f"  Labeling duration (τ): {labeling_duration:.3f} s")
+        logger.info(f"  Post-labeling delay (PLD): {post_labeling_delay:.3f} s")
+        logger.info(f"  Label-control order: {label_control_order}")
+        logger.info("")
 
     results = {}
 
@@ -243,6 +316,116 @@ def run_asl_preprocessing(
 
     logger.info("")
 
+    # Step 5: M0 Calibration with White Matter Reference (if WM mask provided)
+    cbf_calibrated = None
+    calibration_info = None
+    if wm_mask and config.get('asl', {}).get('apply_m0_calibration', True):
+        logger.info("Step 5: M0 Calibration with White Matter Reference")
+        logger.info("  Correcting for M0 estimation bias...")
+        logger.info("  Resampling tissue masks to ASL space...")
+
+        # Resample WM mask from anatomical to ASL space
+        wm_mask_asl = work_dir / 'wm_mask_asl.nii.gz'
+        flirt_resample_cmd = [
+            'flirt',
+            '-in', str(wm_mask),
+            '-ref', str(control_mean_file),  # ASL reference
+            '-out', str(wm_mask_asl),
+            '-applyxfm',  # Apply identity transform (just resample)
+            '-interp', 'nearestneighbour'  # Preserve mask values
+        ]
+        subprocess.run(flirt_resample_cmd, check=True, capture_output=True)
+        logger.info(f"  WM mask resampled: {wm_mask_asl}")
+
+        # Load resampled WM mask
+        wm_data = nib.load(wm_mask_asl).get_fdata()
+
+        try:
+            cbf_calibrated, calibration_info = calibrate_cbf_with_wm_reference(
+                cbf=cbf,
+                wm_mask=wm_data,
+                wm_cbf_expected=config.get('asl', {}).get('wm_cbf_reference', 25.0),
+                wm_threshold=0.7
+            )
+
+            logger.info(f"  Calibration successful:")
+            logger.info(f"    Measured WM CBF: {calibration_info['wm_cbf_measured']:.2f} ml/100g/min")
+            logger.info(f"    Expected WM CBF: {calibration_info['wm_cbf_expected']:.2f} ml/100g/min")
+            logger.info(f"    Scaling factor: {calibration_info['scaling_factor']:.3f}")
+            logger.info(f"    Calibrated WM CBF: {calibration_info['wm_cbf_calibrated']:.2f} ml/100g/min")
+            logger.info("")
+
+        except Exception as e:
+            logger.warning(f"  M0 calibration failed: {e}")
+            logger.warning("  Proceeding with uncalibrated CBF")
+            logger.info("")
+
+    # Step 6: Partial Volume Correction (if enabled and tissue masks provided)
+    cbf_gm_pvc = None
+    cbf_wm_pvc = None
+    if config.get('asl', {}).get('apply_pvc', False) and gm_mask and wm_mask and csf_mask:
+        logger.info("Step 6: Partial Volume Correction")
+        logger.info("  Applying linear regression PVC method...")
+        logger.info("  Resampling tissue masks to ASL space...")
+
+        # Resample tissue masks from anatomical to ASL space
+        gm_mask_asl = work_dir / 'gm_mask_asl.nii.gz'
+        csf_mask_asl = work_dir / 'csf_mask_asl.nii.gz'
+
+        # Resample GM mask
+        flirt_gm_cmd = [
+            'flirt', '-in', str(gm_mask), '-ref', str(control_mean_file),
+            '-out', str(gm_mask_asl), '-applyxfm', '-interp', 'nearestneighbour'
+        ]
+        subprocess.run(flirt_gm_cmd, check=True, capture_output=True)
+
+        # Resample CSF mask
+        flirt_csf_cmd = [
+            'flirt', '-in', str(csf_mask), '-ref', str(control_mean_file),
+            '-out', str(csf_mask_asl), '-applyxfm', '-interp', 'nearestneighbour'
+        ]
+        subprocess.run(flirt_csf_cmd, check=True, capture_output=True)
+
+        # Load resampled tissue masks (wm_data may already be loaded from calibration)
+        gm_data = nib.load(gm_mask_asl).get_fdata()
+        if 'wm_data' not in locals():  # Load if not already loaded in calibration
+            wm_mask_asl = work_dir / 'wm_mask_asl.nii.gz'
+            flirt_wm_cmd = [
+                'flirt', '-in', str(wm_mask), '-ref', str(control_mean_file),
+                '-out', str(wm_mask_asl), '-applyxfm', '-interp', 'nearestneighbour'
+            ]
+            subprocess.run(flirt_wm_cmd, check=True, capture_output=True)
+            wm_data = nib.load(wm_mask_asl).get_fdata()
+        csf_data = nib.load(csf_mask_asl).get_fdata()
+
+        # Use calibrated CBF if available, otherwise use uncalibrated
+        cbf_to_correct = cbf_calibrated if cbf_calibrated is not None else cbf
+
+        try:
+            cbf_gm_pvc, cbf_wm_pvc = apply_partial_volume_correction(
+                cbf=cbf_to_correct,
+                gm_pve=gm_data,
+                wm_pve=wm_data,
+                csf_pve=csf_data,
+                brain_mask=brain_mask
+            )
+
+            # Compute statistics for PVC-corrected maps
+            gm_high_conf = gm_data > 0.7
+            wm_high_conf = wm_data > 0.7
+
+            gm_cbf_pvc_mean = np.mean(cbf_gm_pvc[gm_high_conf])
+            wm_cbf_pvc_mean = np.mean(cbf_wm_pvc[wm_high_conf])
+
+            logger.info(f"  PVC-corrected GM CBF: {gm_cbf_pvc_mean:.2f} ml/100g/min")
+            logger.info(f"  PVC-corrected WM CBF: {wm_cbf_pvc_mean:.2f} ml/100g/min")
+            logger.info("")
+
+        except Exception as e:
+            logger.warning(f"  Partial volume correction failed: {e}")
+            logger.warning("  Proceeding without PVC")
+            logger.info("")
+
     # Save outputs
     logger.info("Saving ASL outputs...")
     saved_files = save_asl_outputs(
@@ -257,20 +440,55 @@ def run_asl_preprocessing(
     )
     results.update(saved_files)
 
+    # Save calibrated CBF if available
+    if cbf_calibrated is not None:
+        cbf_calibrated_file = derivatives_dir / f'{subject}_cbf_calibrated.nii.gz'
+        nib.save(nib.Nifti1Image(cbf_calibrated, affine, header), cbf_calibrated_file)
+        results['cbf_calibrated'] = cbf_calibrated_file
+        results['calibration_info'] = calibration_info
+        logger.info(f"  CBF (calibrated): {cbf_calibrated_file}")
+
+    # Save PVC-corrected CBF maps if available
+    if cbf_gm_pvc is not None:
+        cbf_gm_pvc_file = derivatives_dir / f'{subject}_cbf_gm_pvc.nii.gz'
+        nib.save(nib.Nifti1Image(cbf_gm_pvc, affine, header), cbf_gm_pvc_file)
+        results['cbf_gm_pvc'] = cbf_gm_pvc_file
+        logger.info(f"  CBF GM (PVC): {cbf_gm_pvc_file}")
+
+    if cbf_wm_pvc is not None:
+        cbf_wm_pvc_file = derivatives_dir / f'{subject}_cbf_wm_pvc.nii.gz'
+        nib.save(nib.Nifti1Image(cbf_wm_pvc, affine, header), cbf_wm_pvc_file)
+        results['cbf_wm_pvc'] = cbf_wm_pvc_file
+        logger.info(f"  CBF WM (PVC): {cbf_wm_pvc_file}")
+
     # Copy brain mask to derivatives
     brain_mask_out = derivatives_dir / f'{subject}_brain_mask.nii.gz'
     nib.save(nib.Nifti1Image(brain_mask, affine, header), brain_mask_out)
     results['brain_mask'] = brain_mask_out
     logger.info("")
 
-    # Step 5: Tissue-specific CBF (if masks provided)
+    # Step 7: Tissue-specific CBF statistics (if masks provided)
     if gm_mask and wm_mask and csf_mask:
-        logger.info("Step 5: Computing tissue-specific CBF")
+        logger.info("Step 7: Computing tissue-specific CBF statistics")
 
-        # Load tissue masks
-        gm_data = nib.load(gm_mask).get_fdata()
-        wm_data = nib.load(wm_mask).get_fdata()
-        csf_data = nib.load(csf_mask).get_fdata()
+        # Check if resampled masks exist from previous steps, otherwise resample now
+        gm_mask_asl = work_dir / 'gm_mask_asl.nii.gz'
+        wm_mask_asl = work_dir / 'wm_mask_asl.nii.gz'
+        csf_mask_asl = work_dir / 'csf_mask_asl.nii.gz'
+
+        if not gm_mask_asl.exists():
+            logger.info("  Resampling tissue masks to ASL space...")
+            for mask_file, mask_asl in [(gm_mask, gm_mask_asl), (wm_mask, wm_mask_asl), (csf_mask, csf_mask_asl)]:
+                flirt_cmd = [
+                    'flirt', '-in', str(mask_file), '-ref', str(control_mean_file),
+                    '-out', str(mask_asl), '-applyxfm', '-interp', 'nearestneighbour'
+                ]
+                subprocess.run(flirt_cmd, check=True, capture_output=True)
+
+        # Load resampled tissue masks
+        gm_data = nib.load(gm_mask_asl).get_fdata()
+        wm_data = nib.load(wm_mask_asl).get_fdata()
+        csf_data = nib.load(csf_mask_asl).get_fdata()
 
         # Compute tissue-specific statistics
         tissue_cbf = compute_tissue_specific_cbf(
@@ -283,9 +501,9 @@ def run_asl_preprocessing(
         results['tissue_cbf'] = tissue_cbf
         logger.info("")
 
-    # Step 6: Registration to anatomical space (if T1w provided)
+    # Step 8: Registration to anatomical space (if T1w provided)
     if t1w_brain:
-        logger.info("Step 6: Registration to anatomical space")
+        logger.info("Step 8: Registration to anatomical space")
         logger.info("  Registering mean control to T1w...")
 
         transforms_dir = derivatives_dir / 'transforms'
@@ -325,9 +543,9 @@ def run_asl_preprocessing(
         results['cbf_anat'] = cbf_anat
         logger.info("")
 
-    # Step 7: Spatial normalization to MNI152 (optional)
+    # Step 9: Spatial normalization to MNI152 (optional)
     if normalize_to_mni and t1w_brain and asl_to_anat_mat:
-        logger.info("Step 7: Spatial normalization to MNI152")
+        logger.info("Step 9: Spatial normalization to MNI152")
 
         # Get anatomical transforms
         anat_derivatives_dir = outdir / 'derivatives' / subject / 'anat'
@@ -384,9 +602,9 @@ def run_asl_preprocessing(
             logger.warning("  Run anatomical preprocessing first to generate transforms")
             logger.info("")
 
-    # Step 8: Quality Control (optional)
+    # Step 10: Quality Control (optional)
     if config.get('run_qc', True):
-        logger.info("Step 8: Quality Control")
+        logger.info("Step 10: Quality Control")
 
         qc_dir = derivatives_dir / 'qc'
         qc_dir.mkdir(parents=True, exist_ok=True)
@@ -401,13 +619,19 @@ def run_asl_preprocessing(
 
         # CBF QC
         logger.info("  Computing CBF QC metrics...")
+
+        # Use resampled masks for QC if they exist, otherwise use original (will cause error)
+        gm_mask_for_qc = work_dir / 'gm_mask_asl.nii.gz' if (work_dir / 'gm_mask_asl.nii.gz').exists() else gm_mask
+        wm_mask_for_qc = work_dir / 'wm_mask_asl.nii.gz' if (work_dir / 'wm_mask_asl.nii.gz').exists() else wm_mask
+        csf_mask_for_qc = work_dir / 'csf_mask_asl.nii.gz' if (work_dir / 'csf_mask_asl.nii.gz').exists() else csf_mask
+
         cbf_qc = compute_cbf_qc(
             cbf_file=results['cbf'],
             mask_file=results['brain_mask'],
             output_dir=qc_dir,
-            gm_mask=gm_mask if gm_mask else None,
-            wm_mask=wm_mask if wm_mask else None,
-            csf_mask=csf_mask if csf_mask else None
+            gm_mask=gm_mask_for_qc if gm_mask else None,
+            wm_mask=wm_mask_for_qc if wm_mask else None,
+            csf_mask=csf_mask_for_qc if csf_mask else None
         )
 
         # Perfusion tSNR (if we have the 4D perfusion file)
