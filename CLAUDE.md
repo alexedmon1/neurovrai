@@ -2,6 +2,44 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Goals & Current Status
+
+### Overall Objectives
+1. **Production-ready MRI preprocessing pipeline** for anatomical (T1w), diffusion (DWI), and resting-state fMRI data
+2. **Config-driven architecture** using YAML for all processing parameters (documented in README.md)
+3. **Standardized directory hierarchy** across all workflows: `{study_root}/derivatives/{subject}/{modality}/`
+4. **Quality control framework** with automated QC for all modalities
+5. **Performance optimization** - Fast, reliable processing with GPU acceleration where available
+
+### Current Implementation Status
+
+**✅ Completed & Validated**:
+- **Anatomical Preprocessing**: T1w workflow with N4 bias correction, BET skull stripping, FLIRT/FNIRT registration
+- **Tissue Segmentation**: Using ANTs Atropos (faster than FSL FAST which was taking 15+ minutes)
+- **DWI Preprocessing**: Multi-shell with TOPUP distortion correction, GPU eddy, DTI fitting
+- **Advanced Diffusion Models**: DKI and NODDI (DIPY-based)
+- **Tractography**: GPU-accelerated probtrackx2 with atlas-based ROI extraction
+- **QC Framework**: Comprehensive quality control for DWI (TOPUP, motion, DTI) and anatomical (skull stripping, segmentation, registration)
+- **Configuration System**: YAML-based config with variable substitution (`mri_preprocess/config.py`)
+- **Directory Standardization**: All workflows use `{outdir}/{subject}/{modality}/` pattern
+
+**🔄 In Progress**:
+- Testing Atropos segmentation speed vs FAST (current session)
+- Anatomical preprocessing running for IRC805-0580101
+
+**📋 Planned**:
+- Resting-state fMRI preprocessing with TEDANA (multi-echo) and ACompCor
+- FreeSurfer integration for all workflows
+- AMICO integration for better NODDI fitting
+
+### Key Design Decisions
+- **Bias correction**: ANTs N4 (~2.5 min) before segmentation
+- **Segmentation**: ANTs Atropos (faster than FSL FAST which was hanging)
+- **DWI**: Merge-first approach with TOPUP before eddy
+- **fMRI denoising**: TEDANA for multi-echo (not ICA-AROMA - redundant)
+- **Work directory structure**: `{study_root}/work/{subject}/` (Nipype adds workflow name automatically)
+- **Nipype DataSink hierarchy**: DataSink creates subdirectories based on `container` parameter. When `base_directory` is already `{study_root}/derivatives/{subject}/anat/`, setting `container='anat'` creates redundant `/anat/anat/` hierarchy. **Solution**: Set `container=''` (empty string) to use base_directory as-is.
+
 ## Project Overview
 
 This repository contains Python-based MRI preprocessing pipelines built with Nipype for neuroimaging analysis. The project processes multiple MRI modalities (anatomical, diffusion, resting-state fMRI) from DICOM to analysis-ready formats, with FSL and FreeSurfer as the primary neuroimaging tools.
@@ -28,6 +66,173 @@ uv sync
 
 # Activate virtual environment
 source .venv/bin/activate
+```
+
+## Configuration
+
+The pipeline uses a YAML-based configuration system as documented in `README.md`.
+
+### Configuration File Format
+
+Create a `config.yaml` file in the project root:
+
+```yaml
+# Project paths
+project_dir: /mnt/bytopia/IRC805         # Study root directory
+rawdata_dir: ${project_dir}/subjects      # Raw data (IRC805 uses 'subjects' not 'rawdata')
+derivatives_dir: ${project_dir}/derivatives
+work_dir: ${project_dir}/work
+transforms_dir: ${project_dir}/transforms
+
+# Execution settings
+execution:
+  plugin: MultiProc
+  n_procs: 6
+
+# Template files
+templates:
+  mni152_t1_2mm: /usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz
+  mni152_t1_1mm: /usr/local/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz
+
+# Anatomical preprocessing
+anatomical:
+  bet:
+    frac: 0.5
+    reduce_bias: true
+    robust: true
+  fast:
+    bias_iters: 1
+    bias_lowpass: 10
+  registration_method: fsl  # or 'ants'
+  run_qc: true
+
+# Diffusion preprocessing
+diffusion:
+  denoise_method: dwidenoise
+  topup:
+    readout_time: 0.05
+  eddy_config:
+    flm: linear
+    slm: linear
+    use_cuda: true
+  run_qc: true
+
+# Functional preprocessing
+functional:
+  tr: 1.029
+  te: [10.0, 30.0, 50.0]
+  highpass: 0.001
+  lowpass: 0.08
+  fwhm: 6
+  tedana:
+    enabled: true
+    tedpca: kundu
+    tree: kundu
+  aroma:
+    enabled: false
+  acompcor:
+    enabled: true
+    num_components: 5
+    variance_threshold: 0.5
+  run_qc: true
+```
+
+### Dual Config Format Support
+
+The pipeline supports **two configuration formats** for maximum flexibility:
+
+#### Format 1: Preprocessing Parameters (Current - Recommended)
+This is the format used in `config.yaml`. It directly specifies paths and processing parameters.
+
+```yaml
+project_dir: /mnt/bytopia/IRC805
+rawdata_dir: ${project_dir}/subjects
+derivatives_dir: ${project_dir}/derivatives
+work_dir: ${project_dir}/work
+
+anatomical:
+  bet:
+    frac: 0.5
+diffusion:
+  topup:
+    readout_time: 0.05
+functional:
+  tr: 1.029
+```
+
+**Use this format when:**
+- You manually organize your data
+- You know the sequence names and don't need auto-detection
+- You want simple, direct configuration (recommended for most users)
+
+#### Format 2: Study Config (Auto-generated)
+This format is generated by `mri_preprocess/config_generator.py` from DICOM files.
+
+```yaml
+study:
+  name: IRC805 Study
+  code: IRC805
+  base_dir: /mnt/bytopia/IRC805
+paths:
+  sourcedata: ${study.base_dir}/sourcedata
+  rawdata: ${study.base_dir}/rawdata
+  derivatives: ${study.base_dir}/derivatives
+sequence_mappings:
+  t1w: ['WIP_3D_T1_TFE_SAG_CS3']
+  dwi: ['DTI_2shell_b1000_b2000_MB4']
+```
+
+**Use this format when:**
+- You want to auto-detect sequences from DICOM directories
+- You need to map scanner-specific sequence names to modalities
+- You're setting up a new study from scratch
+
+#### Automatic Format Detection and Normalization
+
+The config loader (`mri_preprocess/config.py`) automatically:
+1. Detects which format you're using
+2. Normalizes study config format to preprocessing params format
+3. Ensures consistency across sessions
+
+This means **both formats work seamlessly** with all workflows.
+
+### Variable Substitution
+
+The config loader (`mri_preprocess/config.py`) supports:
+- **Environment variables**: `${ENV_VAR}`
+- **Config references**: `${project_dir}` references other config values
+
+Example:
+```yaml
+project_dir: /mnt/bytopia/IRC805
+derivatives_dir: ${project_dir}/derivatives  # Expands to /mnt/bytopia/IRC805/derivatives
+```
+
+### Using Configuration
+
+**In Python scripts**:
+```python
+from mri_preprocess.config import load_config
+from pathlib import Path
+
+# Load config
+config = load_config(Path('config.yaml'))
+
+# Access values
+project_dir = Path(config['project_dir'])
+n_procs = config['execution']['n_procs']
+```
+
+**With production runner**:
+```bash
+# Uses config.yaml in current directory by default
+python run_preprocessing.py --subject IRC805-0580101 --modality anat
+
+# Or specify custom config
+python run_preprocessing.py --subject IRC805-0580101 --modality anat --config /path/to/custom.yaml
+
+# Override project_dir from command line
+python run_preprocessing.py --subject IRC805-0580101 --modality anat --study-root /different/path
 ```
 
 ## Directory Structure
@@ -410,3 +615,129 @@ results = run_atlas_based_tractography(
 - [ ] Automated QC report generation
 - [ ] BIDS compliance improvements
 - [ ] Containerization (Docker/Singularity)
+
+## Project Organization
+
+### File Structure
+
+The project follows a clean, organized structure:
+
+```
+human-mri-preprocess/
+├── README.md                   # Main project documentation
+├── CLAUDE.md                   # This file - AI assistant guidelines
+├── run_preprocessing.py        # Production preprocessing runner
+├── logs/                       # All log files (gitignored)
+├── docs/                       # All documentation
+│   ├── README.md               # Documentation navigation guide
+│   ├── implementation/         # Technical implementation details
+│   ├── status/                 # Progress tracking documents
+│   ├── amico/                  # AMICO-specific documentation
+│   └── archive/                # Outdated/superseded documentation
+├── archive/
+│   └── tests/                  # Archived test scripts
+└── mri_preprocess/             # Production code
+    ├── workflows/              # Validated preprocessing workflows
+    ├── utils/                  # Helper functions and utilities
+    └── qc/                     # Quality control modules
+```
+
+### Organization Guidelines
+
+**Documentation**:
+- **Keep in root**: Only `README.md` and `CLAUDE.md`
+- **docs/**: All technical documentation
+  - User guides: `cli.md`, `configuration.md`, `workflows.md`
+  - Implementation: `docs/implementation/` for technical details
+  - Status: `docs/status/` for progress tracking
+  - Archive: `docs/archive/` for outdated docs
+
+**Code**:
+- **Keep in root**: Only `run_preprocessing.py` (production runner)
+- **mri_preprocess/**: All production code
+  - `workflows/`: Validated preprocessing workflows
+  - `utils/`: Reusable helper functions
+  - `qc/`: Quality control modules
+- **archive/tests/**: Test scripts (not in production use)
+
+**Logs**:
+- **All logs go to** `logs/` directory
+- Scripts should create logs with: `logging.FileHandler('logs/script_name.log')`
+- The `logs/` directory is gitignored
+
+**Output Data** (not in repository):
+
+All workflows MUST use the standardized output directory hierarchy:
+
+```
+{outdir}/{subject}/{modality}/
+```
+
+**Directory Variables:**
+- `outdir`: Base output directory for all derivatives (e.g., `/mnt/bytopia/IRC805/derivatives`)
+- `subject`: Subject identifier (e.g., `IRC805-0580101`)
+- `modality`: Data type (`anat`, `dwi`, `func`)
+
+**Complete Study Hierarchy:**
+```
+{study_root}/                                  # e.g., /mnt/bytopia/IRC805/
+├── subjects/{subject}/nifti/{modality}/       # Raw NIfTI files
+├── derivatives/                               # ALL processed outputs (outdir)
+│   └── {subject}/                             # One directory per subject
+│       ├── anat/                              # Anatomical preprocessing
+│       │   ├── brain.nii.gz
+│       │   ├── brain_mask.nii.gz
+│       │   ├── bias_corrected.nii.gz
+│       │   ├── segmentation/                  # Tissue probability maps
+│       │   │   ├── pve_0.nii.gz              # CSF
+│       │   │   ├── pve_1.nii.gz              # GM
+│       │   │   └── pve_2.nii.gz              # WM
+│       │   └── transforms/                    # Spatial transforms
+│       ├── dwi/                               # DWI preprocessing
+│       │   ├── eddy_corrected.nii.gz
+│       │   ├── dti/                           # DTI metrics
+│       │   ├── dki/                           # DKI metrics (if run)
+│       │   └── noddi/                         # NODDI metrics (if run)
+│       └── func/                              # Functional preprocessing
+│           ├── preprocessed_bold.nii.gz
+│           └── qc/                            # Modality-specific QC
+├── work/{subject}/{workflow}/                 # Temporary Nipype files
+└── qc/{subject}/                              # Study-level QC reports
+    ├── anat/
+    ├── dwi/
+    └── func/
+```
+
+**Implementation Rules:**
+1. **All workflows** receive `output_dir` parameter = path to `{study_root}/derivatives`
+2. **Workflow creates**: `{output_dir}/{subject}/{modality}/` directory
+3. **No intermediate folders** like "mri-preprocess" or "sub-" prefixes
+4. **Work directory**: `{study_root}/work/{subject}/{workflow_name}/`
+5. **QC reports**: `{study_root}/qc/{subject}/{modality}/`
+
+**Example Usage:**
+```python
+# In all workflows
+def run_workflow(subject: str, output_dir: Path, ...):
+    # output_dir = /mnt/bytopia/IRC805/derivatives
+    derivatives_dir = output_dir / subject / 'anat'  # or 'dwi' or 'func'
+    derivatives_dir.mkdir(parents=True, exist_ok=True)
+
+    # Work directory
+    work_dir = output_dir.parent / 'work' / subject / 'anat_preproc'
+    work_dir.mkdir(parents=True, exist_ok=True)
+```
+
+### Cleanup Guidelines
+
+When adding new files:
+1. **Documentation**: Place in appropriate `docs/` subdirectory
+2. **Logs**: Ensure scripts output to `logs/` directory
+3. **Test scripts**: Place in `archive/tests/` or delete after validation
+4. **Status docs**: Use `docs/status/` for progress tracking, move to `docs/archive/` when complete
+
+When finishing a feature:
+1. Archive temporary test scripts to `archive/tests/`
+2. Move implementation notes to `docs/implementation/`
+3. Move status docs to `docs/archive/` when complete
+4. Update main `README.md` if user-facing features changed

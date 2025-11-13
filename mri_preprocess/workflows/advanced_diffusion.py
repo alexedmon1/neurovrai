@@ -377,21 +377,27 @@ def run_advanced_diffusion_models(
     mask_file: Optional[Path] = None,
     output_dir: Path = Path('./advanced_diffusion'),
     fit_dki: bool = True,
-    fit_noddi: bool = True
+    fit_noddi: bool = True,
+    fit_sandi: bool = False,
+    fit_activeax: bool = False,
+    use_amico: bool = True,
+    n_threads: Optional[int] = None
 ) -> Dict[str, Dict[str, Path]]:
     """
-    Run both DKI and NODDI model fitting.
+    Run advanced diffusion model fitting (DKI, NODDI, SANDI, ActiveAx).
 
-    Convenience function to fit both advanced diffusion models in one call.
+    This function provides both DIPY and AMICO implementations:
+    - DKI: DIPY only (AMICO doesn't support DKI)
+    - NODDI/SANDI/ActiveAx: AMICO (100x faster) or DIPY fallback
 
     Parameters
     ----------
     dwi_file : Path
-        Preprocessed DWI data
+        Preprocessed DWI data (eddy-corrected)
     bval_file : Path
         b-values file
     bvec_file : Path
-        b-vectors file
+        b-vectors file (eddy-rotated)
     mask_file : Path, optional
         Brain mask
     output_dir : Path
@@ -400,35 +406,74 @@ def run_advanced_diffusion_models(
         Fit DKI model (default: True)
     fit_noddi : bool
         Fit NODDI model (default: True)
+    fit_sandi : bool
+        Fit SANDI model (default: False)
+    fit_activeax : bool
+        Fit ActiveAx model (default: False)
+    use_amico : bool
+        Use AMICO for NODDI/SANDI/ActiveAx (default: True)
+        If False, uses DIPY (much slower, only supports NODDI approximation)
+    n_threads : int, optional
+        Number of CPU threads for AMICO (default: all available)
 
     Returns
     -------
     dict
-        Dictionary with 'dki' and 'noddi' subdicts containing model outputs
+        Dictionary with model outputs:
+        - 'dki': DKI metrics (if fit_dki=True)
+        - 'noddi': NODDI metrics (if fit_noddi=True)
+        - 'sandi': SANDI metrics (if fit_sandi=True)
+        - 'activeax': ActiveAx metrics (if fit_activeax=True)
+
+    Notes
+    -----
+    AMICO vs DIPY:
+    - AMICO: 100-1000x faster, precise biophysical models
+    - DIPY: Slower, NODDI is approximation only
+
+    For detailed metric descriptions, see AMICO_MODELS_DOCUMENTATION.md
 
     Examples
     --------
+    >>> # Fast AMICO fitting with all models
     >>> results = run_advanced_diffusion_models(
     ...     dwi_file=Path('dwi_eddy.nii.gz'),
     ...     bval_file=Path('dwi.bval'),
     ...     bvec_file=Path('dwi_rotated.bvec'),
-    ...     output_dir=Path('advanced_models')
+    ...     output_dir=Path('advanced_models'),
+    ...     fit_dki=True,
+    ...     fit_noddi=True,
+    ...     fit_sandi=True,
+    ...     fit_activeax=True,
+    ...     use_amico=True
     ... )
-    >>> print(f"DKI mean kurtosis: {results['dki']['mk']}")
-    >>> print(f"NODDI neurite density: {results['noddi']['ficvf']}")
+
+    >>> # DIPY-only (slower, no SANDI/ActiveAx)
+    >>> results = run_advanced_diffusion_models(
+    ...     dwi_file=Path('dwi_eddy.nii.gz'),
+    ...     bval_file=Path('dwi.bval'),
+    ...     bvec_file=Path('dwi_rotated.bvec'),
+    ...     output_dir=Path('advanced_models'),
+    ...     fit_dki=True,
+    ...     fit_noddi=True,
+    ...     use_amico=False  # Use DIPY
+    ... )
     """
     logger = logging.getLogger(__name__)
     logger.info("Running advanced diffusion models")
+    logger.info(f"  Implementation: {'AMICO' if use_amico else 'DIPY'}")
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     results = {}
 
+    # DKI - always uses DIPY (AMICO doesn't support DKI)
     if fit_dki:
-        logger.info("\n" + "="*60)
+        logger.info("\n" + "="*70)
         logger.info("DIFFUSION KURTOSIS IMAGING (DKI)")
-        logger.info("="*60)
+        logger.info("="*70)
+        logger.info("  Implementation: DIPY")
         dki_dir = output_dir / 'dki'
         results['dki'] = fit_dki_model(
             dwi_file=dwi_file,
@@ -438,23 +483,103 @@ def run_advanced_diffusion_models(
             output_dir=dki_dir
         )
 
-    if fit_noddi:
-        logger.info("\n" + "="*60)
-        logger.info("NODDI (Neurite Orientation Dispersion and Density Imaging)")
-        logger.info("="*60)
-        noddi_dir = output_dir / 'noddi'
-        results['noddi'] = fit_noddi_model(
-            dwi_file=dwi_file,
-            bval_file=bval_file,
-            bvec_file=bvec_file,
-            mask_file=mask_file,
-            output_dir=noddi_dir
-        )
+    # Microstructure models - AMICO or DIPY
+    if use_amico:
+        # Use AMICO for fast, accurate microstructure modeling
+        try:
+            from mri_preprocess.workflows.amico_models import (
+                fit_noddi_amico,
+                fit_sandi_amico,
+                fit_activeax_amico
+            )
 
-    logger.info("\n" + "="*60)
+            if fit_noddi:
+                logger.info("\n" + "="*70)
+                logger.info("NODDI (Neurite Orientation Dispersion and Density)")
+                logger.info("="*70)
+                logger.info("  Implementation: AMICO")
+                results['noddi'] = fit_noddi_amico(
+                    dwi_file=dwi_file,
+                    bval_file=bval_file,
+                    bvec_file=bvec_file,
+                    mask_file=mask_file,
+                    output_dir=output_dir,
+                    n_threads=n_threads
+                )
+
+            if fit_sandi:
+                logger.info("\n" + "="*70)
+                logger.info("SANDI (Soma And Neurite Density Imaging)")
+                logger.info("="*70)
+                logger.info("  Implementation: AMICO")
+                results['sandi'] = fit_sandi_amico(
+                    dwi_file=dwi_file,
+                    bval_file=bval_file,
+                    bvec_file=bvec_file,
+                    mask_file=mask_file,
+                    output_dir=output_dir,
+                    n_threads=n_threads
+                )
+
+            if fit_activeax:
+                logger.info("\n" + "="*70)
+                logger.info("ActiveAx (Axon Diameter Distribution)")
+                logger.info("="*70)
+                logger.info("  Implementation: AMICO")
+                results['activeax'] = fit_activeax_amico(
+                    dwi_file=dwi_file,
+                    bval_file=bval_file,
+                    bvec_file=bvec_file,
+                    mask_file=mask_file,
+                    output_dir=output_dir,
+                    n_threads=n_threads
+                )
+
+        except ImportError as e:
+            logger.error(f"AMICO not available: {e}")
+            logger.error("Install with: uv pip install dmri-amico")
+            logger.warning("Falling back to DIPY for NODDI (slower, approximation only)")
+
+            if fit_noddi:
+                noddi_dir = output_dir / 'noddi'
+                results['noddi'] = fit_noddi_model(
+                    dwi_file=dwi_file,
+                    bval_file=bval_file,
+                    bvec_file=bvec_file,
+                    mask_file=mask_file,
+                    output_dir=noddi_dir
+                )
+
+            if fit_sandi or fit_activeax:
+                logger.error("SANDI and ActiveAx require AMICO - skipping")
+
+    else:
+        # Use DIPY (slower, only NODDI approximation available)
+        if fit_noddi:
+            logger.info("\n" + "="*70)
+            logger.info("NODDI (Neurite Orientation Dispersion and Density)")
+            logger.info("="*70)
+            logger.info("  Implementation: DIPY (approximation)")
+            noddi_dir = output_dir / 'noddi'
+            results['noddi'] = fit_noddi_model(
+                dwi_file=dwi_file,
+                bval_file=bval_file,
+                bvec_file=bvec_file,
+                mask_file=mask_file,
+                output_dir=noddi_dir
+            )
+
+        if fit_sandi or fit_activeax:
+            logger.error("SANDI and ActiveAx require AMICO (use_amico=True)")
+            logger.error("These models are not available in DIPY")
+
+    logger.info("\n" + "="*70)
     logger.info("Advanced diffusion models complete!")
-    logger.info("="*60)
+    logger.info("="*70)
     logger.info(f"Output directory: {output_dir}")
+    logger.info("")
+    logger.info("For detailed metric descriptions, see:")
+    logger.info("  AMICO_MODELS_DOCUMENTATION.md")
 
     return results
 

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Dict, Optional, Any
 
 from nipype import Workflow, Node, MapNode
-from nipype.interfaces import fsl, utility as niu
+from nipype.interfaces import fsl, ants, utility as niu
 from nipype.interfaces.io import DataSink
 
 from mri_preprocess.utils.workflow import (
@@ -108,7 +108,9 @@ def create_bias_correction_node(
     name: str = 'bias_correction'
 ) -> Node:
     """
-    Create bias field correction node using FAST.
+    Create bias correction node using ANTs N4BiasFieldCorrection.
+
+    Fast bias correction (~2.5 min on high-res data).
 
     Parameters
     ----------
@@ -120,30 +122,72 @@ def create_bias_correction_node(
     Returns
     -------
     Node
-        Nipype Node for bias correction
+        Nipype Node for N4 bias correction
 
     Examples
     --------
-    >>> fast = create_bias_correction_node(config)
-    >>> fast.inputs.in_files = "T1w_brain.nii.gz"
+    >>> n4 = create_bias_correction_node(config)
+    >>> n4.inputs.input_image = "T1w_brain.nii.gz"
     """
-    # Get FAST configuration
-    fast_config = get_node_config('fast', config)
-
-    fast = Node(
-        fsl.FAST(),
+    n4 = Node(
+        ants.N4BiasFieldCorrection(),
         name=name
     )
 
-    # Set parameters
-    fast.inputs.img_type = 1  # T1-weighted
-    fast.inputs.bias_iters = fast_config.get('bias_iters', 4)
-    fast.inputs.bias_lowpass = fast_config.get('bias_lowpass', 10)
-    fast.inputs.segments = True
-    fast.inputs.output_biascorrected = True
-    fast.inputs.output_type = 'NIFTI_GZ'
+    # Set parameters for fast processing
+    n4.inputs.dimension = 3
+    n4.inputs.n_iterations = [50, 50, 30, 20]  # Reduced iterations for speed
+    n4.inputs.shrink_factor = 3  # Downsample for speed
+    n4.inputs.convergence_threshold = 0.001
+    n4.inputs.bspline_fitting_distance = 300
 
-    return fast
+    return n4
+
+
+def create_segmentation_node(
+    config: Dict[str, Any],
+    name: str = 'segmentation'
+) -> Node:
+    """
+    Create tissue segmentation node using ANTs Atropos.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary
+    name : str
+        Node name
+
+    Returns
+    -------
+    Node
+        Nipype Node for tissue segmentation
+
+    Examples
+    --------
+    >>> atropos = create_segmentation_node(config)
+    >>> atropos.inputs.intensity_images = "T1w_brain.nii.gz"
+    >>> atropos.inputs.mask_image = "T1w_brain_mask.nii.gz"
+    """
+    atropos = Node(
+        ants.Atropos(),
+        name=name
+    )
+
+    # Set parameters for 3-class segmentation
+    # Input will be the N4-bias-corrected image
+    atropos.inputs.dimension = 3
+    atropos.inputs.number_of_tissue_classes = 3  # CSF, GM, WM
+    atropos.inputs.initialization = 'KMeans'  # Nipype expects just the method name
+    atropos.inputs.likelihood_model = 'Gaussian'
+    atropos.inputs.mrf_smoothing_factor = 0.1
+    atropos.inputs.mrf_radius = [1, 1, 1]
+    atropos.inputs.convergence_threshold = 0.001
+    atropos.inputs.n_iterations = 5
+    atropos.inputs.save_posteriors = True  # Save probability maps
+    atropos.inputs.output_posteriors_name_template = 'POSTERIOR_%02d.nii.gz'
+
+    return atropos
 
 
 def create_linear_registration_node(
@@ -327,14 +371,17 @@ def create_anat_preprocessing_workflow(
     # 2. Skull stripping
     skull_strip = create_skull_strip_node(config)
 
-    # 3. Bias correction
+    # 3. Bias correction (ANTs N4, fast ~2.5min)
     bias_correct = create_bias_correction_node(config)
 
-    # 4. Linear registration
+    # 4. Tissue segmentation (ANTs Atropos)
+    segment = create_segmentation_node(config)
+
+    # 5. Linear registration
     linear_reg = create_linear_registration_node(config)
     linear_reg.inputs.reference = str(mni_brain_template)
 
-    # 5. Nonlinear registration
+    # 6. Nonlinear registration
     nonlinear_reg = create_nonlinear_registration_node(config)
     nonlinear_reg.inputs.ref_file = str(mni_template)
 
@@ -365,7 +412,9 @@ def create_anat_preprocessing_workflow(
     )
     # output_dir is now the full derivatives directory path
     datasink.inputs.base_directory = str(output_dir)
-    datasink.inputs.container = 'anat'
+    # Set container to empty string to avoid redundant /anat/anat/ hierarchy
+    # (base_directory is already {study_root}/derivatives/{subject}/anat/)
+    datasink.inputs.container = ''
 
     # === Connect workflow ===
 
@@ -378,9 +427,14 @@ def create_anat_preprocessing_workflow(
     wf.connect(skull_strip, 'out_file', outputnode, 'brain')
     wf.connect(skull_strip, 'mask_file', outputnode, 'brain_mask')
 
+    # Bias correction (ANTs N4)
+    wf.connect(skull_strip, 'out_file', bias_correct, 'input_image')
+    wf.connect(skull_strip, 'mask_file', bias_correct, 'mask_image')
+    wf.connect(bias_correct, 'output_image', outputnode, 'bias_corrected')
+
     # Function to extract tissue maps from probability_maps list
     def extract_tissue_map(probability_maps, index):
-        """Extract a single tissue map from FAST probability maps."""
+        """Extract a single tissue map from posteriors list."""
         return probability_maps[index]
 
     extract_csf = Node(
@@ -413,19 +467,20 @@ def create_anat_preprocessing_workflow(
     )
     extract_wm.inputs.index = 2  # WM
 
-    # Bias correction and tissue segmentation
-    wf.connect(skull_strip, 'out_file', bias_correct, 'in_files')
-    wf.connect(bias_correct, 'restored_image', outputnode, 'bias_corrected')
-    wf.connect(bias_correct, 'tissue_class_map', outputnode, 'tissue_class_map')
-    wf.connect(bias_correct, 'probability_maps', extract_csf, 'probability_maps')
-    wf.connect(bias_correct, 'probability_maps', extract_gm, 'probability_maps')
-    wf.connect(bias_correct, 'probability_maps', extract_wm, 'probability_maps')
+    # Tissue segmentation using ANTs Atropos (on N4-bias-corrected image)
+    # Atropos requires both intensity image and mask
+    wf.connect(bias_correct, 'output_image', segment, 'intensity_images')
+    wf.connect(skull_strip, 'mask_file', segment, 'mask_image')
+    wf.connect(segment, 'classified_image', outputnode, 'tissue_class_map')
+    wf.connect(segment, 'posteriors', extract_csf, 'probability_maps')
+    wf.connect(segment, 'posteriors', extract_gm, 'probability_maps')
+    wf.connect(segment, 'posteriors', extract_wm, 'probability_maps')
     wf.connect(extract_csf, 'tissue_map', outputnode, 'csf_prob')
     wf.connect(extract_gm, 'tissue_map', outputnode, 'gm_prob')
     wf.connect(extract_wm, 'tissue_map', outputnode, 'wm_prob')
 
-    # Linear registration
-    wf.connect(bias_correct, 'restored_image', linear_reg, 'in_file')
+    # Linear registration (use bias-corrected brain)
+    wf.connect(bias_correct, 'output_image', linear_reg, 'in_file')
     wf.connect(linear_reg, 'out_matrix_file', outputnode, 'mni_affine_mat')
 
     # Nonlinear registration
@@ -509,17 +564,22 @@ def run_anat_preprocessing(
     >>> print(results['brain'])
     """
     # Setup directory structure
-    # output_dir is the study root (e.g., /mnt/bytopia/development/IRC805/)
-    study_root = Path(output_dir)
+    # output_dir is the derivatives base (e.g., /mnt/bytopia/IRC805/derivatives)
+    # Use standardized hierarchy: {outdir}/{subject}/{modality}/
+    outdir = Path(output_dir)
 
-    # Create directory hierarchy
-    derivatives_dir = study_root / 'derivatives' / 'anat_preproc' / subject
+    # Create simple, standardized hierarchy
+    derivatives_dir = outdir / subject / 'anat'
+    derivatives_dir.mkdir(parents=True, exist_ok=True)
+
+    # Work directory: {study_root}/work/{subject}/
+    # Nipype will add workflow name as subdirectory
     if work_dir is None:
-        work_dir = study_root / 'work' / subject / 'anat_preproc'
+        study_root = outdir.parent
+        work_dir = study_root / 'work' / subject
     else:
         work_dir = Path(work_dir)
 
-    derivatives_dir.mkdir(parents=True, exist_ok=True)
     work_dir.mkdir(parents=True, exist_ok=True)
 
     # Create workflow
@@ -539,22 +599,30 @@ def run_anat_preprocessing(
     wf.run(**exec_config)
 
     # Collect outputs
-    # derivatives_dir is already set at the top of the function
-    anat_dir = derivatives_dir / 'anat'
+    # Find output files in derivatives directory
+    # Handle both old (anat/anat/) and new (anat/) hierarchy
+    anat_dir_old = derivatives_dir / 'anat'  # Old double-anat hierarchy
+    anat_dir_new = derivatives_dir          # New flat hierarchy
 
-    segmentation_dir = anat_dir / 'segmentation'
+    # Check which structure exists
+    if (anat_dir_old / 'brain').exists():
+        anat_dir = anat_dir_old  # Old structure
+    else:
+        anat_dir = anat_dir_new  # New structure
 
+    # Find files using recursive globbing to handle both structures
     outputs = {
-        'brain': list(anat_dir.glob('*brain.nii.gz'))[0] if anat_dir.exists() else None,
-        'brain_mask': list(anat_dir.glob('*mask.nii.gz'))[0] if anat_dir.exists() else None,
-        'bias_corrected': list(anat_dir.glob('*bias_corrected.nii.gz'))[0] if anat_dir.exists() else None,
-        'csf_prob': list(segmentation_dir.glob('*pve_0*.nii.gz'))[0] if segmentation_dir.exists() else None,
-        'gm_prob': list(segmentation_dir.glob('*pve_1*.nii.gz'))[0] if segmentation_dir.exists() else None,
-        'wm_prob': list(segmentation_dir.glob('*pve_2*.nii.gz'))[0] if segmentation_dir.exists() else None,
-        'tissue_class_map': list(segmentation_dir.glob('*seg*.nii.gz'))[0] if segmentation_dir.exists() else None,
-        'mni_affine': list((anat_dir / 'transforms').glob('*.mat'))[0] if (anat_dir / 'transforms').exists() else None,
-        'mni_warp': list((anat_dir / 'transforms').glob('*warp.nii.gz'))[0] if (anat_dir / 'transforms').exists() else None,
-        'mni_warped': list((anat_dir / 'mni_space').glob('*.nii.gz'))[0] if (anat_dir / 'mni_space').exists() else None
+        'brain': list(derivatives_dir.glob('**/brain/*.nii.gz'))[0] if list(derivatives_dir.glob('**/brain/*.nii.gz')) else None,
+        'brain_mask': list(derivatives_dir.glob('**/mask/*.nii.gz'))[0] if list(derivatives_dir.glob('**/mask/*.nii.gz')) else None,
+        'bias_corrected': list(derivatives_dir.glob('**/bias_corrected/*.nii.gz'))[0] if list(derivatives_dir.glob('**/bias_corrected/*.nii.gz')) else None,
+        # Atropos outputs: POSTERIOR_01.nii.gz (CSF), POSTERIOR_02.nii.gz (GM), POSTERIOR_03.nii.gz (WM)
+        'csf_prob': list(derivatives_dir.glob('**/segmentation/POSTERIOR_01.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_01.nii.gz')) else None,
+        'gm_prob': list(derivatives_dir.glob('**/segmentation/POSTERIOR_02.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_02.nii.gz')) else None,
+        'wm_prob': list(derivatives_dir.glob('**/segmentation/POSTERIOR_03.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_03.nii.gz')) else None,
+        'tissue_class_map': list(derivatives_dir.glob('**/segmentation/*labeled.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/*labeled.nii.gz')) else None,
+        'mni_affine': list(derivatives_dir.glob('**/transforms/*.mat'))[0] if list(derivatives_dir.glob('**/transforms/*.mat')) else None,
+        'mni_warp': list(derivatives_dir.glob('**/transforms/*warp.nii.gz'))[0] if list(derivatives_dir.glob('**/transforms/*warp.nii.gz')) else None,
+        'mni_warped': list(derivatives_dir.glob('**/mni_space/*.nii.gz'))[0] if list(derivatives_dir.glob('**/mni_space/*.nii.gz')) else None
     }
 
     # Save transformations to registry

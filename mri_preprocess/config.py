@@ -142,6 +142,63 @@ def substitute_variables(config: Dict[str, Any], context: Optional[Dict[str, Any
     return process_value(config)
 
 
+def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize configuration to standard format.
+
+    Handles two formats:
+    1. Study config (config_generator.py format):
+       - study: {name, code, base_dir}
+       - paths: {rawdata, derivatives, ...}
+       - sequence_mappings: {...}
+
+    2. Preprocessing params (current format):
+       - project_dir: /path/to/study
+       - rawdata_dir, derivatives_dir, work_dir
+       - anatomical, diffusion, functional params
+
+    Converts study config to preprocessing params format for consistency.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration to normalize
+
+    Returns
+    -------
+    dict
+        Normalized configuration
+    """
+    # If already in preprocessing params format, return as-is
+    if 'project_dir' in config:
+        return config
+
+    # Convert study config format to preprocessing params format
+    if 'study' in config and 'base_dir' in config['study']:
+        normalized = config.copy()
+
+        # Map study.base_dir to project_dir
+        normalized['project_dir'] = config['study']['base_dir']
+
+        # Map paths if they exist
+        if 'paths' in config:
+            paths = config['paths']
+            if 'rawdata' in paths:
+                normalized['rawdata_dir'] = paths['rawdata']
+            if 'derivatives' in paths:
+                normalized['derivatives_dir'] = paths['derivatives']
+            if 'work' in paths:
+                normalized['work_dir'] = paths['work']
+
+        # Substitute variables after mapping
+        normalized = substitute_variables(normalized)
+
+        return normalized
+
+    # If neither format is detected, return as-is
+    return config
+
+
 def validate_config(config: Dict[str, Any]) -> None:
     """
     Validate configuration has all required parameters.
@@ -156,29 +213,43 @@ def validate_config(config: Dict[str, Any]) -> None:
     ConfigurationError
         If required parameters are missing or invalid
     """
-    # Check study information (required for study configs, not default)
-    if 'study' not in config:
-        # This is okay for default.yaml
+    # Check if this is a study config (config_generator.py format)
+    if 'study' in config:
+        # Required study fields
+        required_study_fields = ['name', 'code', 'base_dir']
+        for field in required_study_fields:
+            if field not in config.get('study', {}):
+                raise ConfigurationError(f"Missing required study field: study.{field}")
+
+        # Required paths
+        required_paths = ['rawdata', 'derivatives']
+        for path in required_paths:
+            if path not in config.get('paths', {}):
+                raise ConfigurationError(f"Missing required path: paths.{path}")
+
+        # At least one modality must be specified
+        if 'sequence_mappings' not in config:
+            raise ConfigurationError("Missing sequence_mappings section")
+
+        if not config['sequence_mappings']:
+            raise ConfigurationError("sequence_mappings is empty - specify at least one modality")
+
+    # Check if this is preprocessing params config (current format)
+    elif 'project_dir' in config:
+        # Verify project_dir exists
+        project_dir = Path(config['project_dir'])
+        if not project_dir.exists():
+            print(f"Warning: project_dir does not exist: {project_dir}")
+
+        # At least one modality config should be present
+        modalities = ['anatomical', 'diffusion', 'functional']
+        has_modality = any(mod in config for mod in modalities)
+        if not has_modality:
+            print("Warning: No modality configurations found (anatomical, diffusion, functional)")
+
+    else:
+        # Unknown format - this is okay for default.yaml
         return
-
-    # Required study fields
-    required_study_fields = ['name', 'code', 'base_dir']
-    for field in required_study_fields:
-        if field not in config.get('study', {}):
-            raise ConfigurationError(f"Missing required study field: study.{field}")
-
-    # Required paths
-    required_paths = ['rawdata', 'derivatives']
-    for path in required_paths:
-        if path not in config.get('paths', {}):
-            raise ConfigurationError(f"Missing required path: paths.{path}")
-
-    # At least one modality must be specified
-    if 'sequence_mappings' not in config:
-        raise ConfigurationError("Missing sequence_mappings section")
-
-    if not config['sequence_mappings']:
-        raise ConfigurationError("sequence_mappings is empty - specify at least one modality")
 
     # Check for common mistakes
     if 'fsl' in config:
@@ -197,7 +268,8 @@ def load_config(config_path: Path, validate: bool = True) -> Dict[str, Any]:
     1. Loads the study config
     2. Loads and merges default config
     3. Substitutes variables
-    4. Validates the result
+    4. Normalizes to standard format
+    5. Validates the result
 
     Parameters
     ----------
@@ -234,11 +306,14 @@ def load_config(config_path: Path, validate: bool = True) -> Dict[str, Any]:
         # Merge: defaults + study overrides
         config = merge_configs(default_config, study_config)
     else:
-        print(f"Warning: default.yaml not found at {default_path}, using study config only")
+        # No default config found - use study config only
         config = study_config
 
     # Substitute variables
     config = substitute_variables(config)
+
+    # Normalize to standard format (handles both config formats)
+    config = normalize_config(config)
 
     # Validate
     if validate:
