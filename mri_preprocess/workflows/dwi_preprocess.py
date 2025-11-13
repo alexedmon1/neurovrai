@@ -36,6 +36,7 @@ from mri_preprocess.utils.workflow import (
 )
 from mri_preprocess.utils.transforms import TransformRegistry, create_transform_registry
 from mri_preprocess.utils.bids import get_derivatives_dir
+from mri_preprocess.utils.topup_helper import create_topup_files_for_multishell
 
 
 def merge_dwi_files(
@@ -718,20 +719,25 @@ def run_dwi_multishell_topup_preprocessing(
     logger.info("")
 
     # Setup directory structure
-    # output_dir is the study root (e.g., /mnt/bytopia/development/IRC805/)
-    study_root = Path(output_dir)
+    # output_dir is the derivatives base (e.g., /mnt/bytopia/IRC805/derivatives)
+    # Use standardized hierarchy: {outdir}/{subject}/{modality}/
+    outdir = Path(output_dir)
 
-    # Create directory hierarchy
-    derivatives_dir = study_root / 'derivatives' / 'dwi_topup' / subject
+    # Create simple, standardized hierarchy
+    derivatives_dir = outdir / subject / 'dwi'
+    derivatives_dir.mkdir(parents=True, exist_ok=True)
+
+    # Work directory: {study_root}/work/{subject}/
+    # Nipype will add workflow name as subdirectory
     if work_dir is None:
-        work_dir = study_root / 'work' / subject / 'dwi_topup'
+        study_root = outdir.parent
+        work_dir = study_root / 'work' / subject
     else:
         work_dir = Path(work_dir)
 
-    derivatives_dir.mkdir(parents=True, exist_ok=True)
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Study root: {study_root}")
+    logger.info(f"Study root: {study_root if work_dir is None else work_dir.parent.parent}")
     logger.info(f"Derivatives output: {derivatives_dir}")
     logger.info(f"Working directory: {work_dir}")
     logger.info("")
@@ -796,13 +802,36 @@ def run_dwi_multishell_topup_preprocessing(
     topup_config = get_node_config('topup', config)
     encoding_file = topup_config.get('encoding_file')
 
+    # Auto-generate acqparams.txt if not provided
     if not encoding_file or not Path(encoding_file).exists():
-        logger.error(f"TOPUP encoding file not found: {encoding_file}")
-        logger.error("Please create an encoding file (acqparams.txt) specifying phase encoding directions")
-        logger.error("Example format:")
-        logger.error("  0 -1 0 0.05  # AP (anterior-posterior)")
-        logger.error("  0 1 0 0.05   # PA (posterior-anterior)")
-        raise FileNotFoundError(f"TOPUP encoding file required: {encoding_file}")
+        logger.info("  Auto-generating TOPUP acquisition parameters...")
+
+        # Get phase encoding direction and readout time from config
+        pe_direction = topup_config.get('pe_direction', 'AP')  # Default: AP
+        readout_time = topup_config.get('readout_time', 0.05)  # Default: 0.05s
+
+        # Create param files directory
+        param_dir = work_dir / 'topup_params'
+        param_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate acqparams.txt and index.txt
+        acqparams_file, index_file = create_topup_files_for_multishell(
+            dwi_files=dwi_files,
+            pe_direction=pe_direction,
+            readout_time=readout_time,
+            output_dir=param_dir
+        )
+
+        encoding_file = acqparams_file
+        logger.info(f"  Generated: {encoding_file}")
+        logger.info(f"  Generated: {index_file}")
+        logger.info(f"  PE direction: {pe_direction}, Readout time: {readout_time}s")
+
+        # Update config to include auto-generated files for eddy
+        if 'eddy' not in config:
+            config['eddy'] = {}
+        config['eddy']['acqp_file'] = str(acqparams_file)
+        config['eddy']['index_file'] = str(index_file)
 
     topup_out = work_dir / 'topup_results'
 
