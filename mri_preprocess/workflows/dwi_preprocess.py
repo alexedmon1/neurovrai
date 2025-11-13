@@ -828,10 +828,13 @@ def run_dwi_multishell_topup_preprocessing(
         logger.info(f"  PE direction: {pe_direction}, Readout time: {readout_time}s")
 
         # Update config to include auto-generated files for eddy
-        if 'eddy' not in config:
-            config['eddy'] = {}
-        config['eddy']['acqp_file'] = str(acqparams_file)
-        config['eddy']['index_file'] = str(index_file)
+        # Note: get_node_config('eddy', config) looks for config['diffusion']['eddy']
+        if 'diffusion' not in config:
+            config['diffusion'] = {}
+        if 'eddy' not in config['diffusion']:
+            config['diffusion']['eddy'] = {}
+        config['diffusion']['eddy']['acqp_file'] = str(acqparams_file)
+        config['diffusion']['eddy']['index_file'] = str(index_file)
 
     topup_out = work_dir / 'topup_results'
 
