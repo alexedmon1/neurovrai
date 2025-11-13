@@ -50,6 +50,7 @@ functional:
   highpass: 0.001
   lowpass: 0.08
   fwhm: 6
+  normalize_to_mni: true  # Reuse anatomical transforms for normalization
   tedana:
     enabled: true
     tedpca: kundu

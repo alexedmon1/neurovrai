@@ -37,6 +37,10 @@ from mri_preprocess.utils.workflow import (
 from mri_preprocess.utils.transforms import TransformRegistry, create_transform_registry
 from mri_preprocess.utils.bids import get_derivatives_dir
 from mri_preprocess.utils.topup_helper import create_topup_files_for_multishell
+from mri_preprocess.utils.dwi_normalization import (
+    normalize_dwi_to_fmrib58,
+    apply_warp_to_metrics
+)
 
 
 def merge_dwi_files(
@@ -932,6 +936,76 @@ def run_dwi_multishell_topup_preprocessing(
         'mask': mask_files[0] if mask_files else None,
         'rotated_bvec': bvec_files[0] if bvec_files else None,
     }
+
+    # Step 8: Spatial normalization to FMRIB58_FA template
+    if outputs['fa'] and outputs['fa'].exists():
+        logger.info("")
+        logger.info("="*70)
+        logger.info("Step 8: Normalizing DWI metrics to FMRIB58_FA template")
+        logger.info("="*70)
+        logger.info("")
+
+        # Run normalization
+        norm_results = normalize_dwi_to_fmrib58(
+            fa_file=outputs['fa'],
+            output_dir=derivatives_dir,
+            fmrib58_template=None  # Uses $FSLDIR default
+        )
+
+        # Add transform outputs
+        outputs['fa_to_fmrib58_affine'] = norm_results['affine_mat']
+        outputs['fa_to_fmrib58_warp'] = norm_results['forward_warp']
+        outputs['fmrib58_to_fa_warp'] = norm_results['inverse_warp']
+        outputs['fa_normalized'] = norm_results['fa_normalized']
+
+        # Collect all DWI metrics for normalization
+        dti_dir = derivatives_dir / 'dti'
+        metric_files = []
+
+        # Standard DTI metrics
+        if dti_dir.exists():
+            for metric in ['MD', 'AD', 'RD', 'L1', 'L2', 'L3']:
+                metric_file = list(dti_dir.glob(f'*{metric}.nii.gz'))
+                if metric_file:
+                    metric_files.append(metric_file[0])
+
+        # Check for DKI metrics (if advanced_diffusion was run)
+        dki_dir = derivatives_dir / 'dki'
+        if dki_dir.exists():
+            logger.info("  Found DKI metrics, including in normalization...")
+            for metric in ['mean_kurtosis', 'axial_kurtosis', 'radial_kurtosis', 'kurtosis_fa']:
+                metric_file = list(dki_dir.glob(f'*{metric}.nii.gz'))
+                if metric_file:
+                    metric_files.append(metric_file[0])
+
+        # Check for NODDI metrics (if advanced_diffusion was run)
+        noddi_dir = derivatives_dir / 'noddi'
+        if noddi_dir.exists():
+            logger.info("  Found NODDI metrics, including in normalization...")
+            for metric in ['ficvf', 'odi', 'fiso']:
+                metric_file = list(noddi_dir.glob(f'*{metric}.nii.gz'))
+                if metric_file:
+                    metric_files.append(metric_file[0])
+
+        # Apply warp to all metrics
+        if metric_files:
+            logger.info(f"  Normalizing {len(metric_files)} DWI metric maps...")
+            normalized_files = apply_warp_to_metrics(
+                metric_files=metric_files,
+                forward_warp=norm_results['forward_warp'],
+                fmrib58_template=None,
+                output_dir=derivatives_dir,
+                interpolation='spline'
+            )
+            outputs['normalized_metrics'] = normalized_files
+            logger.info(f"  Successfully normalized {len(normalized_files)} metrics")
+
+        logger.info("")
+        logger.info("Normalization complete!")
+        logger.info(f"  Forward warp (for group analyses): {outputs['fa_to_fmrib58_warp']}")
+        logger.info(f"  Inverse warp (for tractography ROIs): {outputs['fmrib58_to_fa_warp']}")
+        logger.info(f"  Normalized metrics saved to: {derivatives_dir / 'normalized'}")
+        logger.info("")
 
     logger.info("")
     logger.info("="*70)

@@ -92,7 +92,7 @@ def register_masks_to_functional(
     csf_mask: Path,
     wm_mask: Path,
     output_dir: Path
-) -> Tuple[Path, Path]:
+) -> Tuple[Path, Path, Path]:
     """
     Register tissue masks from T1w space to functional space.
 
@@ -114,23 +114,34 @@ def register_masks_to_functional(
     Returns
     -------
     tuple
-        (csf_func, wm_func) - Tissue masks in functional space
+        (csf_func, wm_func, func_to_t1w_mat) - Tissue masks in functional space and BBR transform
     """
     logger.info("Registering tissue masks to functional space...")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Step 1: Register functional to T1w (BBR)
-    logger.info("  Computing functional → T1w registration (BBR)...")
+    # Step 0: Compute mean volume if input is 4D
+    logger.info("  Computing mean functional volume for registration...")
+    mean_func = output_dir / 'func_mean.nii.gz'
+
+    mean_cmd = [
+        'fslmaths',
+        str(func_ref),
+        '-Tmean',
+        str(mean_func)
+    ]
+    subprocess.run(mean_cmd, check=True, capture_output=True)
+
+    # Step 1: Register functional to T1w (correlation ratio)
+    logger.info("  Computing functional → T1w registration (correlation ratio)...")
     xfm_file = output_dir / 'func_to_t1w.mat'
 
     flirt_cmd = [
         'flirt',
-        '-in', str(func_ref),
+        '-in', str(mean_func),  # Use mean volume, not 4D time series
         '-ref', str(t1w_brain),
         '-dof', '6',
-        '-cost', 'bbr',  # Boundary-based registration
-        '-omat', str(xfm_file),
-        '-wmseg', str(wm_mask)  # Use WM for BBR
+        '-cost', 'corratio',  # Correlation ratio - fast, robust for different contrasts
+        '-omat', str(xfm_file)
     ]
     subprocess.run(flirt_cmd, check=True, capture_output=True)
 
@@ -175,7 +186,8 @@ def register_masks_to_functional(
     subprocess.run(apply_wm_cmd, check=True, capture_output=True)
 
     logger.info("  Registration complete")
-    return csf_func, wm_func
+    logger.info(f"  BBR transform: {xfm_file}")
+    return csf_func, wm_func, xfm_file
 
 
 def prepare_acompcor_masks(

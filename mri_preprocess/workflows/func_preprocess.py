@@ -49,6 +49,7 @@ from mri_preprocess.utils.acompcor_helper import (
     extract_acompcor_components,
     regress_out_components
 )
+from mri_preprocess.utils.func_normalization import normalize_func_to_mni152
 
 logger = logging.getLogger(__name__)
 
@@ -95,25 +96,70 @@ def run_tedana(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Convert echo times to seconds (TEDANA expects seconds)
-    tes_sec = [te / 1000.0 for te in echo_times]
+    # Check if TEDANA outputs already exist
+    expected_outputs = {
+        'optcom': output_dir / 'tedana_desc-optcom_bold.nii.gz',
+        'denoised': output_dir / 'tedana_desc-denoised_bold.nii.gz',
+        'metrics': output_dir / 'tedana_desc-tedana_metrics.tsv',
+        'report': output_dir / 'tedana_tedana_report.html'
+    }
 
-    # Run TEDANA workflow
-    logger.info("Running TEDANA workflow...")
-    logger.info(f"  TE values (sec): {tes_sec}")
+    # Create parameter hash to detect if parameters changed
+    import hashlib
+    import json
+    param_dict = {
+        'echo_files': [str(f) for f in echo_files],
+        'echo_times': echo_times,
+        'tedpca': 225,
+        'tree': 'kundu',
+        'mask': str(mask_file) if mask_file else None
+    }
+    param_hash = hashlib.md5(json.dumps(param_dict, sort_keys=True).encode()).hexdigest()
+    hash_file = output_dir / '.tedana_params.md5'
 
-    workflows.tedana_workflow(
-        data=[str(f) for f in echo_files],
-        tes=tes_sec,
-        out_dir=str(output_dir),
-        mask=str(mask_file) if mask_file else None,
-        tedpca=225,  # Manual PCA: 450 volumes / 2 = 225 components (improved ICA convergence)
-        tree='kundu',
-        verbose=True,
-        prefix='tedana'
-    )
+    # Check if outputs exist AND parameters haven't changed
+    all_exist = all(p.exists() for p in expected_outputs.values())
+    params_unchanged = hash_file.exists() and hash_file.read_text() == param_hash
 
-    logger.info("TEDANA completed successfully")
+    if all_exist and params_unchanged:
+        logger.info("TEDANA outputs already exist - using cached results")
+        logger.info(f"  Cached denoised output: {expected_outputs['denoised']}")
+        logger.info(f"  Cached HTML report: {expected_outputs['report']}")
+        logger.info("TEDANA completed successfully")
+    elif all_exist and not hash_file.exists():
+        # Outputs exist but no hash file (first run with new caching code)
+        logger.info("TEDANA outputs exist - using cached results (no hash file yet)")
+        logger.info(f"  Cached denoised output: {expected_outputs['denoised']}")
+        logger.info("TEDANA completed successfully")
+        # Save hash for future runs
+        hash_file.write_text(param_hash)
+    else:
+        if all_exist and hash_file.exists() and not params_unchanged:
+            logger.info("TEDANA parameters changed - re-running...")
+        elif not all_exist:
+            logger.info("TEDANA outputs incomplete - running...")
+        # Convert echo times to seconds (TEDANA expects seconds)
+        tes_sec = [te / 1000.0 for te in echo_times]
+
+        # Run TEDANA workflow
+        logger.info("Running TEDANA workflow...")
+        logger.info(f"  TE values (sec): {tes_sec}")
+
+        workflows.tedana_workflow(
+            data=[str(f) for f in echo_files],
+            tes=tes_sec,
+            out_dir=str(output_dir),
+            mask=str(mask_file) if mask_file else None,
+            tedpca=225,  # Manual PCA: 450 volumes / 2 = 225 components (improved ICA convergence)
+            tree='kundu',
+            verbose=True,
+            prefix='tedana'
+        )
+
+        logger.info("TEDANA completed successfully")
+
+        # Save parameter hash for future cache validation
+        hash_file.write_text(param_hash)
 
     # Return paths to key outputs
     return {
@@ -367,7 +413,6 @@ def run_func_preprocessing(
         logger.info("")
 
         # Step 1a: Run MCFLIRT on middle echo to get transformation matrices
-        logger.info("Running motion correction on middle echo...")
         mcflirt_dir = derivatives_dir / 'mcflirt_echo'
         mcflirt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -377,16 +422,46 @@ def run_func_preprocessing(
         mcflirt_base = str(mcflirt_out).replace('.nii.gz', '.nii')
         mcflirt_mat_dir = mcflirt_base + '.mat'
 
-        mcflirt_cmd = [
-            'mcflirt',
-            '-in', str(middle_echo),
-            '-out', mcflirt_base,  # Output base name (e.g., echo2_mcf.nii)
-            '-plots',
-            '-mats',
-            '-rmsrel',
-            '-rmsabs'
-        ]
-        subprocess.run(mcflirt_cmd, check=True, capture_output=True)
+        # Check if motion correction already completed with same parameters
+        import hashlib
+        import json
+        mcflirt_params = {
+            'input_file': str(middle_echo),
+            'output_base': mcflirt_base,
+            'options': ['-plots', '-mats', '-rmsrel', '-rmsabs']
+        }
+        mcflirt_hash = hashlib.md5(json.dumps(mcflirt_params, sort_keys=True).encode()).hexdigest()
+        mcflirt_hash_file = mcflirt_dir / '.mcflirt_params.md5'
+
+        outputs_exist = mcflirt_out.exists() and Path(mcflirt_mat_dir).exists()
+        params_unchanged = mcflirt_hash_file.exists() and mcflirt_hash_file.read_text() == mcflirt_hash
+
+        if outputs_exist and params_unchanged:
+            logger.info("Motion correction already completed - using cached results")
+            logger.info(f"  Cached output: {mcflirt_out}")
+        elif outputs_exist and not mcflirt_hash_file.exists():
+            # Outputs exist but no hash file (first run with new caching code)
+            logger.info("Motion correction already completed - using cached results (no hash file yet)")
+            logger.info(f"  Cached output: {mcflirt_out}")
+            # Save hash for future runs
+            mcflirt_hash_file.write_text(mcflirt_hash)
+        else:
+            if outputs_exist and mcflirt_hash_file.exists() and not params_unchanged:
+                logger.info("Motion correction parameters changed - re-running...")
+            logger.info("Running motion correction on middle echo...")
+            mcflirt_cmd = [
+                'mcflirt',
+                '-in', str(middle_echo),
+                '-out', mcflirt_base,  # Output base name (e.g., echo2_mcf.nii)
+                '-plots',
+                '-mats',
+                '-rmsrel',
+                '-rmsabs'
+            ]
+            subprocess.run(mcflirt_cmd, check=True, capture_output=True)
+
+            # Save parameter hash for future cache validation
+            mcflirt_hash_file.write_text(mcflirt_hash)
 
         # Store motion parameters from middle echo
         # MCFLIRT creates .nii.par when output is echo2_mcf.nii
@@ -411,42 +486,51 @@ def run_func_preprocessing(
                 # Apply transformation matrices from middle echo to other echoes
                 output_echo = mcflirt_dir / f'echo{i + 1}_mcf.nii.gz'
 
-                # Use applyxfm4D to apply the transformation matrices
-                applyxfm_cmd = [
-                    'applyxfm4D',
-                    str(echo_file),           # Input echo
-                    str(middle_echo),         # Reference (middle echo)
-                    str(output_echo),         # Output
-                    str(mcflirt_mat_dir),     # Transformation matrices directory
-                    '-fourdigit'              # MAT file naming convention
-                ]
-                subprocess.run(applyxfm_cmd, check=True, capture_output=True)
-                motion_corrected_echoes.append(output_echo)
-                logger.info(f"    Corrected using middle echo transforms")
+                # Check if already processed
+                if output_echo.exists():
+                    logger.info(f"    Using cached motion-corrected echo")
+                    motion_corrected_echoes.append(output_echo)
+                else:
+                    # Use applyxfm4D to apply the transformation matrices
+                    applyxfm_cmd = [
+                        'applyxfm4D',
+                        str(echo_file),           # Input echo
+                        str(middle_echo),         # Reference (middle echo)
+                        str(output_echo),         # Output
+                        str(mcflirt_mat_dir),     # Transformation matrices directory
+                        '-fourdigit'              # MAT file naming convention
+                    ]
+                    subprocess.run(applyxfm_cmd, check=True, capture_output=True)
+                    motion_corrected_echoes.append(output_echo)
+                    logger.info(f"    Corrected using middle echo transforms")
 
         logger.info("")
         logger.info("All echoes motion-corrected and aligned")
         logger.info("")
 
         # Step 1c: Create brain mask from motion-corrected middle echo
-        logger.info("Creating brain mask from motion-corrected middle echo...")
         mask_file = derivatives_dir / 'func_mask.nii.gz'
 
-        bet_cmd = [
-            'bet',
-            str(mcflirt_out),
-            str(derivatives_dir / 'func_brain'),
-            '-f', '0.3',
-            '-m',
-            '-R'
-        ]
-        subprocess.run(bet_cmd, check=True, capture_output=True)
+        if mask_file.exists():
+            logger.info("Brain mask already exists - using cached version")
+            logger.info(f"  Cached mask: {mask_file}")
+        else:
+            logger.info("Creating brain mask from motion-corrected middle echo...")
+            bet_cmd = [
+                'bet',
+                str(mcflirt_out),
+                str(derivatives_dir / 'func_brain'),
+                '-f', '0.3',
+                '-m',
+                '-R'
+            ]
+            subprocess.run(bet_cmd, check=True, capture_output=True)
 
-        # Move mask to expected location
-        mask_output = derivatives_dir / 'func_brain_mask.nii.gz'
-        if mask_output.exists():
-            mask_output.rename(mask_file)
-        logger.info(f"  Brain mask: {mask_file}")
+            # Move mask to expected location
+            mask_output = derivatives_dir / 'func_brain_mask.nii.gz'
+            if mask_output.exists():
+                mask_output.rename(mask_file)
+            logger.info(f"  Brain mask: {mask_file}")
         logger.info("")
 
         # Step 1d: Run TEDANA on motion-corrected echoes
@@ -491,7 +575,7 @@ def run_func_preprocessing(
         # POSTERIOR_01.nii.gz = CSF, POSTERIOR_02.nii.gz = GM, POSTERIOR_03.nii.gz = WM
         csf_files = list(seg_dir.glob('*POSTERIOR_01.nii.gz'))
         wm_files = list(seg_dir.glob('*POSTERIOR_03.nii.gz'))
-        brain_files = list(anat_dir.glob('*brain.nii.gz'))
+        brain_files = list(anat_dir.glob('brain/*brain.nii.gz'))
 
         if csf_files and wm_files and brain_files:
             csf_mask = csf_files[0]
@@ -533,7 +617,7 @@ def run_func_preprocessing(
 
     # Write workflow graph
     graph_file = derivatives_dir / 'workflow_graph.png'
-    wf.write_graph(graph_png=str(graph_file), format='png', simple_form=True)
+    wf.write_graph(graph2use='flat', format='png', simple_form=True)
     logger.info(f"Workflow graph: {graph_file}")
     logger.info("")
 
@@ -542,10 +626,23 @@ def run_func_preprocessing(
     exec_config = get_execution_config(config)
     wf_result = wf.run(**exec_config)
 
-    # Get bandpass-filtered output
-    bandpass_node = wf.get_node('bandpass_filter')
-    bandpass_output = Path(bandpass_node.result.outputs.out_file)
+    # Get outputs from work directory (result pickle may be in temp location)
+    bandpass_dir = work_dir / 'func_preproc' / 'bandpass_filter'
+    smooth_dir = work_dir / 'func_preproc' / 'spatial_smooth'
+
+    bandpass_files = list(bandpass_dir.glob('*_bp.nii.gz'))
+    smooth_files = list(smooth_dir.glob('*_smooth.nii.gz'))
+
+    if not bandpass_files:
+        raise FileNotFoundError(f"Bandpass output not found in {bandpass_dir}")
+    if not smooth_files:
+        raise FileNotFoundError(f"Smoothed output not found in {smooth_dir}")
+
+    bandpass_output = bandpass_files[0]
+    smooth_output = smooth_files[0]
+
     logger.info(f"Bandpass filtered: {bandpass_output}")
+    logger.info(f"Smoothed: {smooth_output}")
 
     # Step 4: Apply ACompCor (if enabled)
     if acompcor_enabled and csf_mask and wm_mask and brain_file:
@@ -559,7 +656,7 @@ def run_func_preprocessing(
 
         # Step 4a: Register tissue masks to functional space
         logger.info("Step 1: Registering tissue masks to functional space...")
-        csf_func, wm_func = register_masks_to_functional(
+        csf_func, wm_func, func_to_anat_bbr = register_masks_to_functional(
             t1w_brain=brain_file,
             func_ref=bandpass_output,  # Use bandpass output as reference
             csf_mask=csf_mask,
@@ -568,6 +665,16 @@ def run_func_preprocessing(
         )
         results['csf_func_mask'] = csf_func
         results['wm_func_mask'] = wm_func
+
+        # Save BBR transform to transforms directory for reuse in normalization
+        transforms_dir = derivatives_dir / 'transforms'
+        transforms_dir.mkdir(parents=True, exist_ok=True)
+
+        bbr_transform = transforms_dir / f'{subject}_func_to_anat_bbr.mat'
+        import shutil
+        shutil.copy2(func_to_anat_bbr, bbr_transform)
+        results['func_to_anat_bbr'] = bbr_transform
+        logger.info(f"  BBR transform saved: {bbr_transform}")
         logger.info("")
 
         # Step 4b: Prepare masks (threshold and erode)
@@ -723,6 +830,64 @@ def run_func_preprocessing(
             logger.info("")
         else:
             logger.warning("Skipping QC report generation (no motion metrics)")
+
+    # Step 8: Spatial normalization to MNI152 (optional, reuses anatomical transforms)
+    if config.get('normalize_to_mni', False):
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info("Step 8: Normalizing functional data to MNI152")
+        logger.info("=" * 70)
+        logger.info("")
+
+        # Check for required transforms
+        bbr_transform = results.get('func_to_anat_bbr')
+
+        # Get anatomical transforms from derivatives
+        anat_derivatives_dir = derivatives_dir.parent.parent / 'anat'
+        anat_transforms_dir = anat_derivatives_dir / 'transforms'
+
+        t1w_to_mni_affine = anat_transforms_dir / f'{subject}_T1w_to_MNI152_affine.mat'
+        t1w_to_mni_warp = anat_transforms_dir / f'{subject}_T1w_to_MNI152_warp.nii.gz'
+
+        # Verify all transforms exist
+        if bbr_transform and bbr_transform.exists() and t1w_to_mni_affine.exists() and t1w_to_mni_warp.exists():
+            logger.info("All required transforms found - proceeding with normalization")
+            logger.info(f"  BBR (func→anat): {bbr_transform}")
+            logger.info(f"  Affine (anat→MNI): {t1w_to_mni_affine}")
+            logger.info(f"  Warp (anat→MNI): {t1w_to_mni_warp}")
+            logger.info("")
+
+            try:
+                norm_results = normalize_func_to_mni152(
+                    func_file=results['preprocessed'],
+                    func_to_anat_bbr=bbr_transform,
+                    t1w_to_mni_affine=t1w_to_mni_affine,
+                    t1w_to_mni_warp=t1w_to_mni_warp,
+                    output_dir=derivatives_dir,
+                    mni152_template=None,  # Uses $FSLDIR default
+                    interpolation='spline'
+                )
+
+                results['func_to_mni_warp'] = norm_results['func_to_mni_warp']
+                results['func_normalized'] = norm_results['func_normalized']
+
+                logger.info("Functional normalization complete!")
+                logger.info(f"  Concatenated warp: {results['func_to_mni_warp']}")
+                logger.info(f"  Normalized functional data: {results['func_normalized']}")
+                logger.info("")
+            except Exception as e:
+                logger.error(f"Functional normalization failed: {e}")
+                logger.warning("Continuing without normalization...")
+        else:
+            logger.warning("Required transforms not found - skipping normalization")
+            if not bbr_transform or not bbr_transform.exists():
+                logger.warning(f"  Missing BBR transform: {bbr_transform}")
+            if not t1w_to_mni_affine.exists():
+                logger.warning(f"  Missing anatomical affine: {t1w_to_mni_affine}")
+            if not t1w_to_mni_warp.exists():
+                logger.warning(f"  Missing anatomical warp: {t1w_to_mni_warp}")
+            logger.warning("  Tip: Run anatomical preprocessing first to generate transforms")
+            logger.info("")
 
     logger.info("=" * 70)
     logger.info("Preprocessing Complete")

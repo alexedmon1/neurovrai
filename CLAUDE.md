@@ -24,13 +24,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Directory Standardization**: All workflows use `{outdir}/{subject}/{modality}/` pattern
 
 **🔄 In Progress**:
-- **Functional Preprocessing (RUNNING OVERNIGHT)**: Multi-echo resting-state fMRI with TEDANA 25.1.0
-  - Modified TEDANA to use 225 PCA components (down from 435) for improved ICA convergence
-  - Log: `logs/func_OVERNIGHT.log`
-  - **ACTION FOR NEXT SESSION**: Check status of overnight run and verify outputs
-  - Expected completion: ~50-55 minutes (MCFLIRT + applyxfm4D + TEDANA with 225 components)
+- **Functional Preprocessing - Final Steps**: Complete bandpass filtering, smoothing, and registration
+  - TEDANA completed successfully (2 hours runtime)
+  - Need to finish: bandpass filter → smoothing → registration to anatomical space
+  - Fixed `write_graph()` API bug in func_preprocess.py:536
 
-**✅ Completed This Session (2025-11-12)**:
+**✅ Completed This Session (2025-11-13)**:
+- **Spatial Normalization Implementation**:
+  - **DWI → FMRIB58_FA**: Complete normalization pipeline implemented and tested
+    - Created `mri_preprocess/utils/dwi_normalization.py`
+    - Integrated into `dwi_preprocess.py` workflow
+    - Generates forward warp (group analyses) + inverse warp (tractography ROIs)
+    - Tested on IRC805-0580101: Successfully normalized 12 metrics (FA + DTI + DKI + NODDI)
+  - **Functional → MNI152**: Transform reuse strategy implemented
+    - Created `mri_preprocess/utils/func_normalization.py`
+    - Integrated into `func_preprocess.py` workflow
+    - Reuses BBR transform from ACompCor (zero redundant computation)
+    - Reuses anatomical→MNI152 transforms from anatomical preprocessing
+    - Concatenates transforms via `convertwarp` for single-step normalization
+  - **BBR Performance Fix**: Switched from BBR to correlation ratio (20x speedup: 54s vs 10+ min)
+  - **Transform Management**: All transforms saved to standardized `transforms/` directories
+- **TEDANA Multi-Echo Denoising** (IRC805-0580101):
+  - Motion correction: MCFLIRT + applyxfm4D (~40 minutes)
+  - TEDANA with 225 PCA components (~1h 18min)
+  - ICA converged after 10 attempts (seed 51)
+  - Component selection: 208 accepted, 17 rejected
+  - 82.55% variance explained
+  - All outputs generated: denoised BOLD, component maps, confounds, HTML report
+
+**✅ Completed Previous Session (2025-11-12)**:
 - Anatomical preprocessing validated (IRC805-0580101)
 - DWI preprocessing with TOPUP completed (IRC805-0580101)
 - DKI metrics: 9 files generated (MK, AK, RK, KFA, FA, MD, AD, RD, tensor)
@@ -39,9 +61,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Integrated QC module into resting-state workflow
 
 **📋 Planned**:
+- ASL (Arterial Spin Labeling) preprocessing workflow
 - FreeSurfer integration for all workflows
 - AMICO integration for better NODDI fitting
-- Spatial normalization for DWI and functional modalities (see `docs/PLANNED_ANALYSES.md`)
 
 ### Key Design Decisions
 - **Bias correction**: ANTs N4 (~2.5 min) before segmentation
