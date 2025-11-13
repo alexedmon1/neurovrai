@@ -32,6 +32,12 @@ from mri_preprocess.utils.asl_cbf import (
     compute_tissue_specific_cbf,
     save_asl_outputs
 )
+from mri_preprocess.qc.asl_qc import (
+    compute_asl_motion_qc,
+    compute_cbf_qc,
+    compute_perfusion_tsnr,
+    generate_asl_qc_report
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +140,8 @@ def run_asl_preprocessing(
     logger.info("  Registering all volumes to middle volume...")
 
     mcflirt_output = work_dir / 'asl_mcf.nii.gz'
-    mcflirt_params = work_dir / 'asl_mcf.par'
+    # MCFLIRT appends .par to the output name, so if we use 'asl_mcf' it creates 'asl_mcf.nii.par'
+    mcflirt_params = work_dir / 'asl_mcf.nii.par'
 
     mcflirt_cmd = [
         'mcflirt',
@@ -173,6 +180,11 @@ def run_asl_preprocessing(
         label_volumes,
         method='simple'
     )
+
+    # Save 4D perfusion-weighted signal for tSNR calculation
+    perfusion_4d_file = work_dir / 'perfusion_4d.nii.gz'
+    nib.save(nib.Nifti1Image(delta_m_4d, affine, header), perfusion_4d_file)
+    results['perfusion_4d'] = perfusion_4d_file
 
     # Compute mean control and label
     control_mean = np.mean(control_volumes, axis=3)
@@ -371,6 +383,59 @@ def run_asl_preprocessing(
             logger.warning("  Anatomical transforms not found - skipping normalization")
             logger.warning("  Run anatomical preprocessing first to generate transforms")
             logger.info("")
+
+    # Step 8: Quality Control (optional)
+    if config.get('run_qc', True):
+        logger.info("Step 8: Quality Control")
+
+        qc_dir = derivatives_dir / 'qc'
+        qc_dir.mkdir(parents=True, exist_ok=True)
+
+        # Motion QC
+        logger.info("  Computing motion QC metrics...")
+        motion_qc = compute_asl_motion_qc(
+            motion_file=results['motion_params'],
+            output_dir=qc_dir,
+            fd_threshold=0.5
+        )
+
+        # CBF QC
+        logger.info("  Computing CBF QC metrics...")
+        cbf_qc = compute_cbf_qc(
+            cbf_file=results['cbf'],
+            mask_file=results['brain_mask'],
+            output_dir=qc_dir,
+            gm_mask=gm_mask if gm_mask else None,
+            wm_mask=wm_mask if wm_mask else None,
+            csf_mask=csf_mask if csf_mask else None
+        )
+
+        # Perfusion tSNR (if we have the 4D perfusion file)
+        tsnr_qc = None
+        perfusion_4d_file = work_dir / 'perfusion_4d.nii.gz'
+        if perfusion_4d_file.exists():
+            logger.info("  Computing perfusion tSNR...")
+            tsnr_qc = compute_perfusion_tsnr(
+                perfusion_file=perfusion_4d_file,
+                mask_file=results['brain_mask'],
+                output_dir=qc_dir
+            )
+
+        # Generate HTML QC report
+        logger.info("  Generating QC report...")
+        qc_report = qc_dir / f'{subject}_asl_qc_report.html'
+        generate_asl_qc_report(
+            subject=subject,
+            motion_metrics=motion_qc,
+            cbf_metrics=cbf_qc,
+            tsnr_metrics=tsnr_qc,
+            output_file=qc_report
+        )
+
+        results['qc_report'] = qc_report
+        results['qc_dir'] = qc_dir
+        logger.info(f"  QC report: {qc_report}")
+        logger.info("")
 
     logger.info("="*70)
     logger.info("ASL PREPROCESSING COMPLETE")
