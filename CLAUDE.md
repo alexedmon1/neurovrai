@@ -24,13 +24,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Directory Standardization**: All workflows use `{outdir}/{subject}/{modality}/` pattern
 
 **🔄 In Progress**:
-- Testing Atropos segmentation speed vs FAST (current session)
-- Anatomical preprocessing running for IRC805-0580101
+- **Functional Preprocessing (RUNNING OVERNIGHT)**: Multi-echo resting-state fMRI with TEDANA 25.1.0
+  - Modified TEDANA to use 225 PCA components (down from 435) for improved ICA convergence
+  - Log: `logs/func_OVERNIGHT.log`
+  - **ACTION FOR NEXT SESSION**: Check status of overnight run and verify outputs
+  - Expected completion: ~50-55 minutes (MCFLIRT + applyxfm4D + TEDANA with 225 components)
+
+**✅ Completed This Session (2025-11-12)**:
+- Anatomical preprocessing validated (IRC805-0580101)
+- DWI preprocessing with TOPUP completed (IRC805-0580101)
+- DKI metrics: 9 files generated (MK, AK, RK, KFA, FA, MD, AD, RD, tensor)
+- NODDI metrics: 4 files generated (FICVF, ODI, FISO, fiber direction)
+- Enhanced functional QC module with DVARS and carpet plot capabilities
+- Integrated QC module into resting-state workflow
 
 **📋 Planned**:
-- Resting-state fMRI preprocessing with TEDANA (multi-echo) and ACompCor
 - FreeSurfer integration for all workflows
 - AMICO integration for better NODDI fitting
+- Spatial normalization for DWI and functional modalities (see `docs/PLANNED_ANALYSES.md`)
 
 ### Key Design Decisions
 - **Bias correction**: ANTs N4 (~2.5 min) before segmentation

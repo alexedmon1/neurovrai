@@ -38,6 +38,8 @@ from mri_preprocess.utils.workflow import (
 from mri_preprocess.qc.func_qc import (
     compute_motion_qc,
     compute_tsnr,
+    compute_dvars,
+    create_carpet_plot,
     generate_func_qc_report
 )
 from mri_preprocess.utils.acompcor_helper import (
@@ -105,7 +107,7 @@ def run_tedana(
         tes=tes_sec,
         out_dir=str(output_dir),
         mask=str(mask_file) if mask_file else None,
-        tedpca='kundu',
+        tedpca=225,  # Manual PCA: 450 volumes / 2 = 225 components (improved ICA convergence)
         tree='kundu',
         verbose=True,
         prefix='tedana'
@@ -682,6 +684,29 @@ def run_func_preprocessing(
         results['tsnr_qc'] = tsnr_metrics
         logger.info("")
 
+        # DVARS calculation (artifact detection)
+        logger.info("Computing DVARS (artifact detection)...")
+        dvars_metrics = compute_dvars(
+            func_file=results['preprocessed'],
+            mask_file=func_mask,
+            output_dir=qc_dir,
+            dvars_threshold=config.get('dvars_threshold', 1.5)
+        )
+        results['dvars_qc'] = dvars_metrics
+        logger.info("")
+
+        # Carpet plot generation (voxel intensity visualization)
+        logger.info("Creating carpet plot...")
+        carpet_metrics = create_carpet_plot(
+            func_file=results['preprocessed'],
+            mask_file=func_mask,
+            motion_file=results.get('motion_params'),
+            output_dir=qc_dir,
+            tr=config.get('tr', 1.029)
+        )
+        results['carpet_qc'] = carpet_metrics
+        logger.info("")
+
         # Generate QC report (only if we have motion metrics)
         if motion_metrics:
             logger.info("Generating QC report...")
@@ -689,6 +714,8 @@ def run_func_preprocessing(
                 subject=subject,
                 motion_metrics=motion_metrics,
                 tsnr_metrics=tsnr_metrics,
+                dvars_metrics=dvars_metrics,
+                carpet_metrics=carpet_metrics,
                 tedana_report=results.get('tedana_report'),
                 output_file=qc_dir / f'{subject}_func_qc_report.html'
             )

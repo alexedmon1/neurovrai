@@ -327,10 +327,282 @@ def compute_tsnr(
     return metrics
 
 
+def compute_dvars(
+    func_file: Path,
+    mask_file: Optional[Path],
+    output_dir: Path,
+    dvars_threshold: float = 1.5
+) -> Dict[str, Any]:
+    """
+    Compute DVARS (spatial standard deviation of temporal derivative).
+
+    DVARS quantifies how much the brain intensity changes from one volume to the next.
+    High DVARS values indicate artifacts or sudden intensity changes.
+
+    Parameters
+    ----------
+    func_file : Path
+        Functional 4D image file
+    mask_file : Path, optional
+        Brain mask file
+    output_dir : Path
+        Output directory for DVARS plots
+    dvars_threshold : float
+        DVARS threshold for outlier detection (default: 1.5 standard deviations)
+
+    Returns
+    -------
+    dict
+        DVARS metrics:
+        - dvars: DVARS time series
+        - mean_dvars: Mean DVARS
+        - std_dvars: Standard deviation of DVARS
+        - n_outliers_dvars: Number of volumes exceeding threshold
+        - dvars_plot: Path to DVARS plot
+    """
+    logger.info("=" * 70)
+    logger.info("DVARS Computation")
+    logger.info("=" * 70)
+    logger.info(f"Functional file: {func_file}")
+    logger.info(f"Mask file: {mask_file}")
+    logger.info(f"DVARS threshold: {dvars_threshold} SD")
+    logger.info("")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load functional data
+    func_img = nib.load(func_file)
+    func_data = func_img.get_fdata()
+    n_volumes = func_data.shape[3]
+
+    # Load mask
+    if mask_file and mask_file.exists():
+        mask_img = nib.load(mask_file)
+        mask_data = mask_img.get_fdata() > 0
+    else:
+        # Create mask from mean signal
+        mean_img = np.mean(func_data, axis=3)
+        mask_data = mean_img > (0.1 * np.max(mean_img))
+
+    n_voxels = np.sum(mask_data)
+    logger.info(f"  Total volumes: {n_volumes}")
+    logger.info(f"  Masked voxels: {n_voxels}")
+
+    # Compute DVARS
+    # DVARS = sqrt(mean(diff^2)) where diff is the temporal derivative
+    dvars = np.zeros(n_volumes)
+
+    for t in range(1, n_volumes):
+        # Temporal derivative
+        diff = func_data[:, :, :, t] - func_data[:, :, :, t-1]
+        # Masked squared differences
+        diff_squared = diff[mask_data] ** 2
+        # DVARS = sqrt(mean(diff^2))
+        dvars[t] = np.sqrt(np.mean(diff_squared))
+
+    # Standardize DVARS (divide by median for robustness)
+    dvars_robust = dvars / np.median(dvars[dvars > 0])
+
+    # Identify outliers (DVARS > threshold * std)
+    outliers = dvars_robust > dvars_threshold
+    n_outliers = np.sum(outliers)
+
+    # Calculate metrics
+    metrics = {
+        'dvars': dvars,
+        'dvars_robust': dvars_robust,
+        'mean_dvars': np.mean(dvars[1:]),  # Skip first volume (always 0)
+        'median_dvars': np.median(dvars[1:]),
+        'std_dvars': np.std(dvars[1:]),
+        'max_dvars': np.max(dvars),
+        'n_outliers_dvars': n_outliers,
+        'percent_outliers_dvars': (n_outliers / n_volumes) * 100
+    }
+
+    logger.info("DVARS Summary:")
+    logger.info(f"  Mean DVARS: {metrics['mean_dvars']:.2f}")
+    logger.info(f"  Median DVARS: {metrics['median_dvars']:.2f}")
+    logger.info(f"  Max DVARS: {metrics['max_dvars']:.2f}")
+    logger.info(f"  Outlier volumes: {n_outliers} ({metrics['percent_outliers_dvars']:.1f}%)")
+    logger.info("")
+
+    # Create DVARS plot
+    logger.info("Creating DVARS visualization...")
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    timepoints = np.arange(n_volumes)
+    ax.plot(timepoints, dvars_robust, 'k-', linewidth=1.5, label='Standardized DVARS')
+    ax.axhline(y=dvars_threshold, color='r', linestyle='--', linewidth=2,
+               label=f'Threshold ({dvars_threshold} SD)')
+    ax.fill_between(timepoints, 0, dvars_robust, where=outliers,
+                     color='red', alpha=0.3, label='Outliers')
+    ax.set_xlabel('Volume', fontsize=12)
+    ax.set_ylabel('Standardized DVARS', fontsize=12)
+    ax.set_title(f'DVARS (Mean={metrics["mean_dvars"]:.2f}, Outliers={n_outliers})',
+                 fontsize=14, fontweight='bold')
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    dvars_plot = output_dir / 'dvars.png'
+    plt.savefig(dvars_plot, dpi=150, bbox_inches='tight')
+    plt.close()
+    metrics['dvars_plot'] = dvars_plot
+    logger.info(f"  Saved: {dvars_plot}")
+
+    # Save DVARS to CSV
+    dvars_df = pd.DataFrame({
+        'volume': timepoints,
+        'dvars': dvars,
+        'dvars_standardized': dvars_robust,
+        'outlier': outliers
+    })
+    dvars_csv = output_dir / 'dvars.csv'
+    dvars_df.to_csv(dvars_csv, index=False)
+    metrics['dvars_csv'] = dvars_csv
+    logger.info(f"  Saved: {dvars_csv}")
+    logger.info("")
+
+    return metrics
+
+
+def create_carpet_plot(
+    func_file: Path,
+    mask_file: Optional[Path],
+    motion_file: Optional[Path],
+    output_dir: Path,
+    tr: float = 1.0
+) -> Dict[str, Any]:
+    """
+    Create carpet plot (voxel intensity time series visualization).
+
+    A carpet plot displays voxel intensities over time, organized by tissue type.
+    Useful for identifying global signal fluctuations and artifacts.
+
+    Parameters
+    ----------
+    func_file : Path
+        Functional 4D image file
+    mask_file : Path, optional
+        Brain mask file
+    motion_file : Path, optional
+        Motion parameters file (.par) for overlaying FD
+    output_dir : Path
+        Output directory for carpet plot
+    tr : float
+        Repetition time in seconds
+
+    Returns
+    -------
+    dict
+        Carpet plot info:
+        - carpet_plot: Path to carpet plot image
+    """
+    logger.info("=" * 70)
+    logger.info("Carpet Plot Generation")
+    logger.info("=" * 70)
+    logger.info(f"Functional file: {func_file}")
+    logger.info(f"Mask file: {mask_file}")
+    logger.info("")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load functional data
+    func_img = nib.load(func_file)
+    func_data = func_img.get_fdata()
+    n_volumes = func_data.shape[3]
+
+    # Load mask
+    if mask_file and mask_file.exists():
+        mask_img = nib.load(mask_file)
+        mask_data = mask_img.get_fdata() > 0
+    else:
+        # Create mask from mean signal
+        mean_img = np.mean(func_data, axis=3)
+        mask_data = mean_img > (0.1 * np.max(mean_img))
+
+    # Extract voxel time series within mask
+    voxel_timeseries = func_data[mask_data, :]  # Shape: (n_voxels, n_volumes)
+
+    # Downsample voxels for visualization (max 5000 voxels)
+    max_voxels = 5000
+    if voxel_timeseries.shape[0] > max_voxels:
+        # Random sampling
+        indices = np.random.choice(voxel_timeseries.shape[0], max_voxels, replace=False)
+        voxel_timeseries = voxel_timeseries[indices, :]
+
+    # Z-score normalize each voxel's time series
+    voxel_timeseries_norm = (voxel_timeseries - np.mean(voxel_timeseries, axis=1, keepdims=True)) / \
+                             (np.std(voxel_timeseries, axis=1, keepdims=True) + 1e-10)
+
+    # Sort voxels by mean intensity for better visualization
+    mean_intensity = np.mean(voxel_timeseries, axis=1)
+    sort_idx = np.argsort(mean_intensity)
+    voxel_timeseries_sorted = voxel_timeseries_norm[sort_idx, :]
+
+    logger.info(f"  Displaying {voxel_timeseries_sorted.shape[0]} voxels")
+    logger.info(f"  Time series length: {n_volumes} volumes")
+
+    # Create carpet plot
+    logger.info("Creating carpet plot visualization...")
+    fig = plt.figure(figsize=(15, 8))
+
+    # Main carpet plot
+    ax_carpet = plt.subplot2grid((5, 1), (1, 0), rowspan=4)
+
+    timepoints = np.arange(n_volumes) * tr
+    im = ax_carpet.imshow(voxel_timeseries_sorted, aspect='auto', cmap='gray',
+                           extent=[0, timepoints[-1], 0, voxel_timeseries_sorted.shape[0]],
+                           interpolation='nearest', vmin=-3, vmax=3)
+    ax_carpet.set_xlabel('Time (seconds)', fontsize=12)
+    ax_carpet.set_ylabel('Voxels (sorted by intensity)', fontsize=12)
+    ax_carpet.set_title('Carpet Plot: Voxel Intensity Time Series', fontsize=14, fontweight='bold')
+
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax_carpet, orientation='vertical', pad=0.01)
+    cbar.set_label('Z-scored Intensity', fontsize=10)
+
+    # Optional: Overlay framewise displacement on top
+    ax_fd = plt.subplot2grid((5, 1), (0, 0), sharex=ax_carpet)
+    if motion_file and motion_file.exists():
+        motion_params = np.loadtxt(motion_file)
+        fd = compute_framewise_displacement(motion_params)
+        ax_fd.plot(timepoints, fd, 'k-', linewidth=1.5)
+        ax_fd.axhline(y=0.5, color='r', linestyle='--', linewidth=1, alpha=0.5)
+        ax_fd.set_ylabel('FD (mm)', fontsize=10)
+        ax_fd.set_title('Framewise Displacement', fontsize=12)
+        ax_fd.grid(True, alpha=0.3)
+        ax_fd.set_xlim([0, timepoints[-1]])
+    else:
+        ax_fd.text(0.5, 0.5, 'No motion data available',
+                   ha='center', va='center', transform=ax_fd.transAxes, fontsize=12)
+        ax_fd.set_yticks([])
+
+    plt.setp(ax_fd.get_xticklabels(), visible=False)
+
+    plt.tight_layout()
+    carpet_plot = output_dir / 'carpet_plot.png'
+    plt.savefig(carpet_plot, dpi=150, bbox_inches='tight')
+    plt.close()
+
+    logger.info(f"  Saved: {carpet_plot}")
+    logger.info("")
+
+    metrics = {
+        'carpet_plot': carpet_plot,
+        'n_voxels_displayed': voxel_timeseries_sorted.shape[0],
+        'n_volumes': n_volumes
+    }
+
+    return metrics
+
+
 def generate_func_qc_report(
     subject: str,
     motion_metrics: Dict[str, Any],
     tsnr_metrics: Optional[Dict[str, Any]],
+    dvars_metrics: Optional[Dict[str, Any]],
+    carpet_metrics: Optional[Dict[str, Any]],
     tedana_report: Optional[Path],
     output_file: Path
 ) -> Path:
@@ -345,6 +617,10 @@ def generate_func_qc_report(
         Motion QC metrics from compute_motion_qc()
     tsnr_metrics : dict, optional
         tSNR metrics from compute_tsnr()
+    dvars_metrics : dict, optional
+        DVARS metrics from compute_dvars()
+    carpet_metrics : dict, optional
+        Carpet plot metrics from create_carpet_plot()
     tedana_report : Path, optional
         Path to TEDANA HTML report
     output_file : Path
@@ -522,6 +798,44 @@ def generate_func_qc_report(
         <img src="{tsnr_metrics['tsnr_histogram'].name}" alt="tSNR Histogram">
 """
 
+    # Add DVARS section if available
+    if dvars_metrics:
+        html += f"""
+        <h2>DVARS (Artifact Detection)</h2>
+        <div class="metric-grid">
+            <div class="metric-card">
+                <div class="metric-label">Mean DVARS</div>
+                <div class="metric-value">{dvars_metrics['mean_dvars']:.2f}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Median DVARS</div>
+                <div class="metric-value">{dvars_metrics['median_dvars']:.2f}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">DVARS Outliers</div>
+                <div class="metric-value">{dvars_metrics['n_outliers_dvars']} ({dvars_metrics['percent_outliers_dvars']:.1f}%)</div>
+            </div>
+        </div>
+
+        <p><strong>DVARS Quality: </strong>
+        <span class="{'status-good' if dvars_metrics['percent_outliers_dvars'] < 5 else 'status-warning' if dvars_metrics['percent_outliers_dvars'] < 15 else 'status-bad'}">
+            {'GOOD' if dvars_metrics['percent_outliers_dvars'] < 5 else 'ACCEPTABLE' if dvars_metrics['percent_outliers_dvars'] < 15 else 'POOR'}
+        </span>
+        </p>
+
+        <img src="{dvars_metrics['dvars_plot'].name}" alt="DVARS Time Series">
+"""
+
+    # Add carpet plot if available
+    if carpet_metrics:
+        html += f"""
+        <h2>Carpet Plot (Voxel Intensity Visualization)</h2>
+        <p>The carpet plot shows voxel intensities over time, organized by signal intensity.
+        This visualization helps identify global signal fluctuations, artifacts, and motion-related intensity changes.</p>
+
+        <img src="{carpet_metrics['carpet_plot'].name}" alt="Carpet Plot">
+"""
+
     # Add TEDANA link if available
     if tedana_report and tedana_report.exists():
         html += f"""
@@ -540,6 +854,13 @@ def generate_func_qc_report(
             <li><strong>Mean FD:</strong> <span class="status-good">&lt;0.2mm = Good</span>, <span class="status-warning">0.2-0.5mm = Acceptable</span>, <span class="status-bad">&gt;0.5mm = Poor</span></li>
             <li><strong>Outlier Volumes:</strong> <span class="status-good">&lt;5% = Good</span>, <span class="status-warning">5-20% = Acceptable</span>, <span class="status-bad">&gt;20% = Poor</span></li>
             <li><strong>Mean tSNR:</strong> <span class="status-good">&gt;100 = Excellent</span>, <span class="status-warning">50-100 = Good</span>, <span class="status-bad">&lt;50 = Poor</span></li>
+            <li><strong>DVARS Outliers:</strong> <span class="status-good">&lt;5% = Good</span>, <span class="status-warning">5-15% = Acceptable</span>, <span class="status-bad">&gt;15% = Poor</span></li>
+        </ul>
+
+        <h3>Additional Notes:</h3>
+        <ul>
+            <li><strong>DVARS</strong> measures the spatial standard deviation of temporal derivative. High DVARS values indicate sudden intensity changes due to artifacts or motion.</li>
+            <li><strong>Carpet plots</strong> provide a comprehensive view of signal across all voxels over time. Look for global signal fluctuations, respiratory artifacts, or motion-related patterns.</li>
         </ul>
     </div>
 </body>
