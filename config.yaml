@@ -8,6 +8,10 @@ derivatives_dir: ${project_dir}/derivatives
 work_dir: ${project_dir}/work
 transforms_dir: ${project_dir}/transforms
 
+# Path structure for workflows
+paths:
+  logs: ${project_dir}/logs
+
 # Execution settings
 execution:
   plugin: MultiProc

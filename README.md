@@ -5,12 +5,15 @@ A production-ready, config-driven MRI preprocessing pipeline for multiple neuroi
 ## Features
 
 ### Core Features
-- **Config-Driven Architecture**: YAML-based configuration for all processing parameters
+- **Complete End-to-End Pipeline**: From DICOM to analysis-ready outputs
+- **DICOM to NIfTI Conversion**: Automatic modality detection and parameter extraction from scanner files
+- **Continuous Pipeline Architecture**: Streaming workflow execution - preprocessing starts as soon as data is converted
+- **Config-Driven Architecture**: YAML-based configuration for all processing parameters with validation
 - **BIDS-Compatible**: Follows Brain Imaging Data Structure conventions
 - **Transform Registry**: Centralized management of spatial transformations for efficient reuse
 - **Modular Workflows**: Separate pipelines for anatomical, diffusion, functional, and ASL preprocessing
 - **Standardized Output**: Consistent directory hierarchy across all workflows
-- **CLI Interface**: Command-line tools for batch processing
+- **Dual Execution Modes**: Batch processing or continuous streaming pipeline
 - **Production-Ready**: Tested and validated with real-world data
 
 ### Anatomical Preprocessing
@@ -112,6 +115,81 @@ pip install -r requirements.txt
 # Install package in development mode
 pip install -e .
 ```
+
+## Pipeline Execution Modes
+
+The pipeline supports two execution modes optimized for different use cases:
+
+### 1. Continuous Pipeline (Recommended for DICOM)
+
+**Use when**: Starting from raw DICOM files
+**Best for**: Large datasets, real-time processing, optimal resource utilization
+
+```bash
+# Complete end-to-end pipeline from DICOM to preprocessed outputs
+python run_continuous_pipeline.py \
+    --subject sub-001 \
+    --dicom-dir /path/to/dicom/sub-001 \
+    --config config.yaml
+```
+
+**How it works**:
+- Converts DICOM to NIfTI in background thread
+- Starts anatomical preprocessing immediately when anat files are ready
+- Starts other workflows (func, dwi, asl) as their files become available
+- No waiting for batch completion - optimal pipeline efficiency
+
+### 2. Batch Pipeline
+
+**Use when**: Starting from pre-converted NIfTI files or running individual modalities
+**Best for**: Re-running specific workflows, working with existing NIfTI data
+
+```bash
+# Run complete pipeline (waits for all DICOM conversion first)
+python run_full_pipeline.py \
+    --subject sub-001 \
+    --dicom-dir /path/to/dicom/sub-001 \
+    --config config.yaml
+
+# Or start from NIfTI
+python run_full_pipeline.py \
+    --subject sub-001 \
+    --nifti-dir /path/to/nifti/sub-001 \
+    --config config.yaml
+
+# Or run individual modality
+python run_preprocessing.py \
+    --subject sub-001 \
+    --modality anat \
+    --config config.yaml
+```
+
+**How it works**:
+- Converts all DICOM files first (if starting from DICOM)
+- Runs anatomical preprocessing
+- Runs other modalities in parallel after anatomical completes
+
+### DICOM to NIfTI Conversion
+
+The pipeline includes automatic DICOM conversion with:
+- **Automatic modality detection** from SeriesDescription tags
+- **Parameter extraction** from DICOM headers (TR, TE, bvals, bvecs, ASL parameters)
+- **JSON sidecars** with acquisition metadata
+- **BIDS-like organization**: `{study_root}/bids/{subject}/{modality}/`
+
+Supported modalities:
+- Anatomical: T1w, T2w
+- Functional: Multi-echo resting-state fMRI
+- Diffusion: Multi-shell DWI with reverse phase for distortion correction
+- ASL: pCASL with automatic parameter extraction
+
+### Configuration Validation
+
+All pipelines validate configuration before execution:
+- Checks required parameters for each modality
+- Warns about missing optional parameters with defaults
+- Verifies template files exist
+- Ensures proper DICOM parameter availability
 
 ## Quick Start
 
