@@ -62,3 +62,15 @@ functional:
     num_components: 5
     variance_threshold: 0.5
   run_qc: true
+
+# ASL (Arterial Spin Labeling) preprocessing
+asl:
+  labeling_type: pcasl  # 'pcasl' or 'pasl'
+  labeling_duration: 1.8  # τ (tau) in seconds
+  post_labeling_delay: 1.8  # PLD in seconds
+  labeling_efficiency: 0.85  # α (alpha) for pCASL
+  t1_blood: 1.65  # T1 of blood at 3T in seconds
+  blood_brain_partition: 0.9  # λ (lambda) in ml/g
+  label_control_order: control_first  # 'control_first' or 'label_first'
+  normalize_to_mni: false  # Reuse anatomical transforms for normalization
+  run_qc: true
