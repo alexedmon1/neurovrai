@@ -506,7 +506,7 @@ def run_dwi_multishell_topup_preprocessing(
     if work_dir is None:
         work_dir = study_root / 'work' / subject / 'dwi_preprocess'
     else:
-        work_dir = Path(work_dir)
+        work_dir = Path(work_dir) / 'dwi_preprocess'  # Append workflow name to provided work_dir
 
     work_dir.mkdir(parents=True, exist_ok=True)
 

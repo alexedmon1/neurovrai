@@ -297,13 +297,20 @@ human-mri-preprocess/
 
 ## 📝 Recent Activity Log
 
-### 2025-11-14 (Current Session)
+### 2025-11-14 (Current Session - Part 2)
+- **Fixed**: TEDANA NumPy compatibility - upgraded TEDANA 23.0.2 → 25.1.0
+- **Fixed**: NumPy version constraint in pyproject.toml (relaxed to >=1.24,<3.0)
+- **Fixed**: DWI work directory hierarchy bug (now correctly uses `work/{subject}/dwi_preprocess/`)
+- **Updated**: CLAUDE.md - moved ASL and AMICO from "Planned" to "Production-Ready"
+- **Updated**: README.md with latest status and bug fixes
+- **Running**: Functional preprocessing with TEDANA 25.1.0 (in progress)
+
+### 2025-11-14 (Earlier)
 - **Fixed**: Multi-echo DICOM conversion bug
 - **Fixed**: Functional workflow input node selection
 - **Verified**: Single-shell DWI support with proper labeling
 - **Verified**: Single-echo fMRI support with proper labeling
 - **Investigated**: fMRI TOPUP (not applicable - no reversed PE)
-- **Running**: Functional preprocessing test with 3-echo data
 
 ### 2025-11-13 (Overnight Run)
 - **Completed**: Anatomical preprocessing (IRC805-0580101)
