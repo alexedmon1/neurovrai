@@ -24,11 +24,13 @@ A production-ready, config-driven MRI preprocessing pipeline for multiple neuroi
 - Comprehensive quality control
 
 ### Diffusion Preprocessing
-- TOPUP distortion correction for multi-shell data
+- **Optional TOPUP distortion correction** - Auto-enabled when reverse phase-encoding images available
 - GPU-accelerated eddy current correction
 - DTI fitting with standard metrics (FA, MD, AD, RD)
-- Advanced models: DKI and NODDI
+- Advanced models: DKI and NODDI (auto-enabled for multi-shell data)
+- Spatial normalization to FMRIB58_FA template
 - Probabilistic tractography with atlas-based ROI extraction
+- **FreeSurfer integration hooks** (experimental - transform pipeline not yet implemented)
 - Comprehensive QC (TOPUP, motion, DTI metrics)
 
 ### Functional Preprocessing
@@ -244,9 +246,22 @@ anatomical:
 # Diffusion preprocessing
 diffusion:
   denoise_method: dwidenoise
+  topup:
+    enabled: auto  # 'auto', true, or false - auto-detects reverse PE availability
+    readout_time: 0.05
   eddy_config:
     flm: linear
     slm: linear
+    use_cuda: true
+  advanced_models:
+    enabled: auto  # Auto-enables for multi-shell data
+    fit_dki: true
+    fit_noddi: true
+
+# FreeSurfer integration (EXPERIMENTAL - not production ready)
+freesurfer:
+  enabled: false  # Do not enable until transform pipeline implemented
+  subjects_dir: ${project_dir}/freesurfer
 ```
 
 ### 3. Run Anatomical Preprocessing
@@ -562,6 +577,30 @@ human-mri-preprocess/
  TESTING_RESULTS.md        # Validation results
  README.md                 # This file
 ```
+
+## Production Status
+
+**Current Status (2025-11-14)**: Production-ready for anatomical, DWI, and ASL preprocessing. Functional preprocessing in final testing.
+
+### ✅ Production Ready
+- **Anatomical**: T1w preprocessing with N4, BET, segmentation, MNI registration
+- **DWI**: Multi-shell preprocessing with optional TOPUP, eddy, DTI/DKI/NODDI, tractography
+- **ASL**: pCASL preprocessing with M0 calibration and partial volume correction
+
+### 🔄 In Testing
+- **Functional**: Multi-echo TEDANA preprocessing (bug fixes complete, validation in progress)
+
+### ⚠️ Experimental (Not Production Ready)
+- **FreeSurfer Integration**: Detection and extraction hooks implemented, but transform pipeline (anatomical→DWI) not yet complete. Do not enable until spatial transformation workflow is validated.
+
+For detailed project status and implementation notes, see `PROJECT_STATUS.md`.
+
+## Recent Updates (2025-11-14)
+
+- **Optional TOPUP**: DWI preprocessing now gracefully handles missing reverse phase-encoding images
+- **Multi-echo Bug Fixes**: Fixed DICOM converter and workflow routing for multi-echo fMRI
+- **FreeSurfer Hooks**: Added detection utilities for existing FreeSurfer outputs (experimental)
+- **Spatial Normalization**: Implemented DWI→FMRIB58_FA and functional→MNI152 normalization
 
 ## Testing
 
