@@ -5,16 +5,26 @@ Probabilistic tractography workflows using FSL probtrackx2.
 This module provides functions to run tractography analysis using BEDPOSTX
 output and atlas-based or FreeSurfer-based ROIs.
 
-FreeSurfer Integration:
-    - Enabled via config: freesurfer.enabled = true, freesurfer.use_for_tractography = true
-    - Automatically detects FreeSurfer outputs in SUBJECTS_DIR
+FreeSurfer Integration Status:
+    **NOT PRODUCTION READY** - Detection hooks only, transform pipeline not implemented
+
+    Current implementation:
+    - Detects FreeSurfer outputs in SUBJECTS_DIR
     - Extracts ROIs from aparc+aseg.mgz parcellation
     - Falls back to atlas ROIs if FreeSurfer not available
 
-TODO: Complete FreeSurfer ROI warping
-    - Currently ROIs are extracted in FreeSurfer native space
-    - Need to implement anatomical→DWI transform application
-    - Requires integration with anatomical preprocessing transforms
+    CRITICAL MISSING COMPONENTS:
+    - ROIs extracted in FreeSurfer native space (NOT DWI space)
+    - No anatomical→DWI transform pipeline implemented
+    - Results will be INCORRECT if FreeSurfer integration is enabled
+
+    DO NOT USE until transform pipeline is complete.
+
+    Future work needed:
+    1. Implement anatomical→DWI registration and transform extraction
+    2. Warp FreeSurfer ROIs from anatomical to DWI space
+    3. Validate transform accuracy with QC metrics
+    4. Handle FreeSurfer native space vs. preprocessing T1 space
 """
 
 from pathlib import Path

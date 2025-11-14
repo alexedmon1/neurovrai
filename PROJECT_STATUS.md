@@ -125,20 +125,41 @@ Production-ready MRI preprocessing pipeline for anatomical, diffusion, functiona
 
 ## 📋 Planned Features
 
-### 1. FreeSurfer Integration (Priority: Medium)
-**Scope**:
-- Run FreeSurfer recon-all on T1w
-- Warp FreeSurfer parcellations to functional/DWI space
-- Use FreeSurfer ROIs for tractography
-- Integration with existing Transform Registry
+### 1. FreeSurfer Integration (Priority: Medium, Status: HOOKS ONLY)
 
-**Current TODO**: `tractography.py:8`
+**Current Status**: Detection and extraction hooks implemented, **NOT production ready**
+
+**What's Implemented** (2025-11-14):
+- ✅ Detection of existing FreeSurfer outputs (`detect_freesurfer_subject()`)
+- ✅ ROI extraction from aparc+aseg parcellation
+- ✅ Config integration (`freesurfer.enabled`, `freesurfer.subjects_dir`)
+- ✅ Tractography workflow hooks (with fallback to atlas ROIs)
+
+**Critical Missing Components**:
+- ❌ Anatomical→DWI transform pipeline (ROIs in wrong space!)
+- ❌ FreeSurfer native space handling
+- ❌ Transform quality control
+- ❌ Validation that FreeSurfer T1 matches preprocessing T1
+
+**Why This Is Complex**:
+The main challenge is the transformation pipeline:
+1. FreeSurfer outputs are in **native anatomical space**
+2. For tractography, ROIs must be in **DWI space**
+3. Requires: FreeSurfer space → Anatomical T1 → DWI space transforms
+4. Each transform must be validated for accuracy
+5. May need to handle cases where FreeSurfer was run on different T1
 
 **Implementation Path**:
-1. Add FreeSurfer workflow wrapper
-2. Integrate with anatomical preprocessing
-3. Create FreeSurfer → DWI transform utilities
-4. Add FreeSurfer ROI extraction for tractography
+1. ✅ Add FreeSurfer detection and extraction utilities
+2. ⏳ Create anatomical→DWI registration workflow
+3. ⏳ Implement FreeSurfer → DWI transform pipeline
+4. ⏳ Add QC for transform accuracy
+5. ⏳ Integrate with anatomical preprocessing
+6. ⏳ Test on real data with manual validation
+
+**Estimated Development Time**: 2-3 full sessions
+
+**DO NOT ENABLE** `freesurfer.enabled = true` until transform pipeline is complete
 
 ### 2. AMICO Integration (Priority: Low)
 **Scope**:

@@ -2,8 +2,23 @@
 """
 FreeSurfer Integration Utilities
 
-Provides detection and integration hooks for using existing FreeSurfer outputs
-in the preprocessing pipeline (transforms, parcellations, tissue masks, etc.).
+**STATUS: EXPERIMENTAL / NOT PRODUCTION READY**
+
+This module provides detection and extraction hooks for FreeSurfer outputs but
+is NOT a complete integration. Critical missing components:
+
+1. **Transform Pipeline**: No anatomical→DWI transformation implemented
+   - FreeSurfer ROIs are in native anatomical space
+   - Cannot be used for DWI tractography without proper warping
+   - Requires integration with anatomical preprocessing transforms
+
+2. **Space Management**: No handling of FreeSurfer native space vs. anatomical space
+   - May need additional T1→FreeSurfer transform if spaces differ
+   - No validation that FreeSurfer was run on same T1 as preprocessing
+
+3. **Quality Control**: No QC for transform accuracy or ROI alignment
+
+DO NOT ENABLE in production until transform pipeline is fully implemented.
 
 This module does NOT run FreeSurfer - it only detects and uses existing outputs.
 """

@@ -80,11 +80,12 @@ functional:
   run_qc: true
 
 # FreeSurfer integration (use existing FreeSurfer outputs)
+# WARNING: NOT PRODUCTION READY - Integration hooks only, requires transform pipeline development
 freesurfer:
-  enabled: false  # Set to true to use existing FreeSurfer outputs
+  enabled: false  # EXPERIMENTAL - Do not enable until transform pipeline is implemented
   subjects_dir: ${project_dir}/freesurfer  # Path to SUBJECTS_DIR
-  use_for_tractography: true  # Use FreeSurfer ROIs for tractography
-  use_for_masks: true  # Use FreeSurfer tissue masks
+  use_for_tractography: false  # NOT IMPLEMENTED - requires anatomical→DWI transform pipeline
+  use_for_masks: false  # NOT IMPLEMENTED - requires space transformation
 
 # ASL (Arterial Spin Labeling) preprocessing
 asl:
