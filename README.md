@@ -118,80 +118,178 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-## Pipeline Execution Modes
+## How to Run the Pipeline
 
-The pipeline supports two execution modes optimized for different use cases:
+The pipeline provides multiple ways to process MRI data, from simple single-modality runs to complete multi-modal preprocessing.
 
-### 1. Continuous Pipeline (Recommended for DICOM)
+### Prerequisites
 
-**Use when**: Starting from raw DICOM files
-**Best for**: Large datasets, real-time processing, optimal resource utilization
+Before running any preprocessing:
+
+1. **Install dependencies** (see Installation section above)
+2. **Activate environment**: `source .venv/bin/activate` (if not using `uv run`)
+3. **Create config file**: `config.yaml` with your study paths (see Configuration section)
+4. **Organize data**: DICOM files or BIDS-organized NIfTI files
+
+### Running Preprocessing for a Subject
+
+#### Option 1: Individual Modality Preprocessing (Recommended)
+
+Run preprocessing one modality at a time for maximum control:
 
 ```bash
-# Complete end-to-end pipeline from DICOM to preprocessed outputs
-python run_continuous_pipeline.py \
+# IMPORTANT: Use uv run for dependency management
+uv run python run_preprocessing.py --subject IRC805-0580101 --modality anat
+uv run python run_preprocessing.py --subject IRC805-0580101 --modality dwi
+uv run python run_preprocessing.py --subject IRC805-0580101 --modality func
+uv run python run_preprocessing.py --subject IRC805-0580101 --modality asl
+```
+
+**Workflow order**:
+1. **Anatomical first**: Required for functional/ASL registration
+2. **DWI**: Independent, can run in parallel with anatomical
+3. **Functional**: Requires anatomical outputs for registration
+4. **ASL**: Requires anatomical outputs for registration
+
+**Example: Complete subject preprocessing**
+
+```bash
+# Step 1: Run anatomical (foundation for other modalities)
+uv run python run_preprocessing.py --subject sub-001 --modality anat
+
+# Step 2: Run DWI (can run while functional processes)
+uv run python run_preprocessing.py --subject sub-001 --modality dwi &
+
+# Step 3: Run functional (needs anatomical complete)
+uv run python run_preprocessing.py --subject sub-001 --modality func &
+
+# Step 4: Run ASL (needs anatomical complete)
+uv run python run_preprocessing.py --subject sub-001 --modality asl &
+
+# Wait for all background jobs
+wait
+```
+
+#### Option 2: All Modalities at Once
+
+Process all available modalities for a subject:
+
+```bash
+# Run all modalities (anatomical → others in parallel)
+uv run python run_preprocessing.py --subject sub-001 --modality all
+```
+
+**What happens**:
+1. Anatomical preprocessing runs first
+2. After anatomical completes, DWI/functional/ASL run in parallel
+3. Optimal resource utilization for multi-modal data
+
+#### Option 3: Full Pipeline from DICOM
+
+Convert DICOM and preprocess in one command:
+
+```bash
+# Complete pipeline from raw DICOM
+uv run python run_full_pipeline.py \
     --subject sub-001 \
     --dicom-dir /path/to/dicom/sub-001 \
     --config config.yaml
 ```
 
-**How it works**:
-- Converts DICOM to NIfTI in background thread
-- Starts anatomical preprocessing immediately when anat files are ready
-- Starts other workflows (func, dwi, asl) as their files become available
-- No waiting for batch completion - optimal pipeline efficiency
+**Process**:
+1. Converts all DICOM files to NIfTI (with metadata extraction)
+2. Detects available modalities automatically
+3. Runs preprocessing workflows in optimal order
+4. Generates QC reports
 
-### 2. Batch Pipeline
+#### Option 4: Continuous Streaming Pipeline (Advanced)
 
-**Use when**: Starting from pre-converted NIfTI files or running individual modalities
-**Best for**: Re-running specific workflows, working with existing NIfTI data
+For large datasets, start preprocessing as DICOM conversion completes:
 
 ```bash
-# Run complete pipeline (waits for all DICOM conversion first)
-python run_full_pipeline.py \
+# Streaming pipeline - preprocesses as data converts
+uv run python run_continuous_pipeline.py \
     --subject sub-001 \
     --dicom-dir /path/to/dicom/sub-001 \
     --config config.yaml
-
-# Or start from NIfTI
-python run_full_pipeline.py \
-    --subject sub-001 \
-    --nifti-dir /path/to/nifti/sub-001 \
-    --config config.yaml
-
-# Or run individual modality
-python run_preprocessing.py \
-    --subject sub-001 \
-    --modality anat \
-    --config config.yaml
 ```
 
-**How it works**:
-- Converts all DICOM files first (if starting from DICOM)
-- Runs anatomical preprocessing
-- Runs other modalities in parallel after anatomical completes
+**Benefits**:
+- Maximum efficiency - no waiting for full conversion
+- Optimal for large studies with many subjects
+- Anatomical starts as soon as T1w is converted
+- Other modalities start as their files become available
+
+### Command-Line Options
+
+All runner scripts support these options:
+
+```bash
+--subject SUBJECT_ID       # Required: Subject identifier
+--modality {anat,dwi,func,asl,all}  # Preprocessing modality
+--config CONFIG_FILE       # Optional: config.yaml path (default: ./config.yaml)
+--study-root STUDY_ROOT    # Optional: Override project_dir from config
+--skip-qc                  # Optional: Skip quality control generation
+```
+
+### Understanding Data Flow
+
+```
+Raw Data → DICOM Conversion → Preprocessing → Quality Control → Analysis-Ready Data
+```
+
+**Directory structure during processing**:
+
+```
+/mnt/bytopia/IRC805/                    # Study root
+├── dicoms/IRC805-0580101/              # Raw DICOM files
+├── bids/IRC805-0580101/                # Converted NIfTI + JSON
+│   ├── anat/
+│   ├── dwi/
+│   ├── func/
+│   └── asl/
+├── derivatives/IRC805-0580101/         # Preprocessed outputs
+│   ├── anat/                           # Brain masks, segmentations, MNI-registered T1w
+│   ├── dwi/                            # Eddy-corrected DWI, DTI/DKI/NODDI metrics
+│   ├── func/                           # Denoised BOLD, preprocessed time series
+│   └── asl/                            # CBF maps, tissue-specific perfusion
+├── work/IRC805-0580101/                # Temporary Nipype files (can delete after)
+├── qc/IRC805-0580101/                  # Quality control reports
+│   ├── anat/
+│   ├── dwi/
+│   ├── func/
+│   └── asl/
+└── logs/                               # Processing logs
+```
 
 ### DICOM to NIfTI Conversion
 
-The pipeline includes automatic DICOM conversion with:
-- **Automatic modality detection** from SeriesDescription tags
-- **Parameter extraction** from DICOM headers (TR, TE, bvals, bvecs, ASL parameters)
-- **JSON sidecars** with acquisition metadata
-- **BIDS-like organization**: `{study_root}/bids/{subject}/{modality}/`
+If starting from DICOM files, the pipeline automatically:
 
-Supported modalities:
-- Anatomical: T1w, T2w
-- Functional: Multi-echo resting-state fMRI
-- Diffusion: Multi-shell DWI with reverse phase for distortion correction
-- ASL: pCASL with automatic parameter extraction
+- **Detects modalities** from SeriesDescription DICOM tags
+- **Extracts parameters**: TR, TE, bvals, bvecs, ASL timing
+- **Organizes files**: BIDS-like structure with JSON sidecars
+- **Validates completeness**: Ensures all required files present
 
-### Configuration Validation
+**Supported modalities**:
+- **Anatomical**: T1w, T2w (3D structural scans)
+- **Diffusion**: Multi-shell DWI with optional reverse phase-encoding for TOPUP
+- **Functional**: Single-echo or multi-echo resting-state fMRI
+- **ASL**: pCASL with automatic parameter extraction from DICOM headers
 
-All pipelines validate configuration before execution:
-- Checks required parameters for each modality
-- Warns about missing optional parameters with defaults
-- Verifies template files exist
-- Ensures proper DICOM parameter availability
+### Processing Time Estimates
+
+Typical processing times on a modern workstation (GPU-enabled):
+
+| Modality | Time Range | Notes |
+|----------|------------|-------|
+| Anatomical | 15-30 min | N4 bias correction, segmentation, registration |
+| DWI | 30-90 min | Depends on shells, TOPUP enabled, advanced models |
+| Functional (single-echo) | 20-40 min | Motion correction, smoothing, registration |
+| Functional (multi-echo) | 2-4 hours | Includes TEDANA denoising (~1-2 hours) |
+| ASL | 15-30 min | Motion correction, CBF quantification |
+
+**Parallelization**: Run DWI, functional, and ASL simultaneously after anatomical completes to maximize throughput.
 
 ## Quick Start
 
@@ -264,47 +362,32 @@ freesurfer:
   subjects_dir: ${project_dir}/freesurfer
 ```
 
-### 3. Run Anatomical Preprocessing
+### 3. Run Preprocessing
 
 ```bash
+# Run anatomical preprocessing (required first)
+uv run python run_preprocessing.py --subject sub-001 --modality anat
 
-# Using the CLI
-mri-preprocess run anatomical \
-  --config config.yaml \
-  --subject sub-001
-
-# Or using Python
-python -c "
-from pathlib import Path
-from mri_preprocess.config import load_config
-from mri_preprocess.workflows.anat_preprocess import run_anat_preprocessing
-
-config = load_config(Path('config.yaml'))
-results = run_anat_preprocessing(
-    config=config,
-    subject='sub-001',
-    t1w_file=Path('rawdata/sub-001/anat/sub-001_T1w.nii.gz'),
-    output_dir=Path('derivatives'),
-    work_dir=Path('work')
-)
-"
+# Run additional modalities (see "How to Run the Pipeline" section for details)
+uv run python run_preprocessing.py --subject sub-001 --modality dwi
+uv run python run_preprocessing.py --subject sub-001 --modality func
 ```
 
-### 4. Run Diffusion Preprocessing
+### 4. Check Outputs
 
 ```bash
+# View preprocessed outputs
+ls derivatives/sub-001/anat/    # Brain masks, segmentations, registrations
+ls derivatives/sub-001/dwi/     # Eddy-corrected DWI, DTI/DKI/NODDI metrics
+ls derivatives/sub-001/func/    # Denoised BOLD, preprocessed time series
 
-# The diffusion workflow automatically reuses anatomical transforms
-mri-preprocess run diffusion \
-  --config config.yaml \
-  --subject sub-001
-
-# Optional: Enable BEDPOSTX for fiber distributions (slow, requires GPU)
-mri-preprocess run diffusion \
-  --config config.yaml \
-  --subject sub-001 \
-  --bedpostx
+# View quality control reports
+ls qc/sub-001/anat/            # Anatomical QC plots
+ls qc/sub-001/dwi/             # DWI QC plots
+ls qc/sub-001/func/            # Functional QC plots
 ```
+
+**For detailed usage instructions, processing options, and workflow details, see the "How to Run the Pipeline" section above.**
 
 ## Pipeline Workflows
 
