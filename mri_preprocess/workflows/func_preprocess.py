@@ -616,8 +616,13 @@ def run_func_preprocessing(
         is_multiecho=is_multiecho
     )
 
-    # Set input for bandpass filter (first node in the workflow)
-    wf.get_node('bandpass_filter').inputs.in_file = str(func_input)
+    # Set input for the first node in the workflow
+    if is_multiecho:
+        # Multi-echo: bandpass is first node (already motion-corrected by TEDANA)
+        wf.get_node('bandpass_filter').inputs.in_file = str(func_input)
+    else:
+        # Single-echo: motion_correction is first node
+        wf.get_node('motion_correction').inputs.in_file = str(func_input)
 
     # Write workflow graph
     graph_file = derivatives_dir / 'workflow_graph.png'

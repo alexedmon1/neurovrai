@@ -323,14 +323,18 @@ class DICOMConverter:
         output_modality_dir = self.output_dir / self.subject / modality
         output_modality_dir.mkdir(parents=True, exist_ok=True)
 
-        # Run dcm2niix
+        # Run dcm2niix (handles multi-echo automatically)
         nifti_file = self._run_dcm2niix(seq_dir, output_modality_dir)
 
         if not nifti_file:
             return modality, None, None
 
-        # Extract parameters and create JSON sidecar
-        json_file = self._create_json_sidecar(dcm, modality, nifti_file)
+        # Check if dcm2niix created a JSON sidecar (it usually does)
+        json_file = nifti_file.with_suffix('').with_suffix('.json')
+
+        # If no JSON exists, create one with extracted parameters
+        if not json_file.exists():
+            json_file = self._create_json_sidecar(dcm, modality, nifti_file)
 
         return modality, nifti_file, json_file
 
@@ -366,27 +370,39 @@ class DICOMConverter:
                 check=True
             )
 
-            # Find generated NIfTI file
-            nifti_files = list(temp_dir.glob('*.nii.gz'))
+            # Find generated NIfTI files (may be multiple for multi-echo)
+            nifti_files = sorted(list(temp_dir.glob('*.nii.gz')))
             if not nifti_files:
                 logger.warning(f"dcm2niix did not generate NIfTI for {seq_dir}")
                 return None
 
-            # Move to output directory
-            nifti_file = nifti_files[0]
-            output_file = output_dir / nifti_file.name
-            shutil.move(str(nifti_file), str(output_file))
+            # Move ALL files to output directory (handles multi-echo)
+            output_files = []
+            for nifti_file in nifti_files:
+                output_file = output_dir / nifti_file.name
+                shutil.move(str(nifti_file), str(output_file))
+                output_files.append(output_file)
 
-            # Move bval/bvec if present (for DWI)
-            for ext in ['bval', 'bvec']:
-                bval_file = temp_dir / f"{nifti_file.stem.replace('.nii', '')}.{ext}"
-                if bval_file.exists():
-                    shutil.move(str(bval_file), str(output_dir / bval_file.name))
+                # Move corresponding JSON sidecar (dcm2niix creates these)
+                json_file = temp_dir / nifti_file.name.replace('.nii.gz', '.json')
+                if json_file.exists():
+                    shutil.move(str(json_file), str(output_dir / json_file.name))
+
+                # Move bval/bvec if present (for DWI)
+                for ext in ['bval', 'bvec']:
+                    bval_file = temp_dir / f"{nifti_file.stem.replace('.nii', '')}.{ext}"
+                    if bval_file.exists():
+                        shutil.move(str(bval_file), str(output_dir / bval_file.name))
 
             # Clean up temp directory
             shutil.rmtree(temp_dir)
 
-            return output_file
+            # Log multi-echo detection
+            if len(output_files) > 1:
+                logger.info(f"  Multi-echo: converted {len(output_files)} echoes")
+
+            # Return first file for backward compatibility
+            return output_files[0]
 
         except subprocess.CalledProcessError as e:
             logger.error(f"dcm2niix failed: {e.stderr}")
