@@ -367,8 +367,8 @@ def run_dwi_multishell_topup_preprocessing(
     dwi_files: List[Path],
     bval_files: List[Path],
     bvec_files: List[Path],
-    rev_phase_files: List[Path],
-    output_dir: Path,
+    rev_phase_files: Optional[List[Path]] = None,
+    output_dir: Path = None,
     work_dir: Optional[Path] = None,
     session: Optional[str] = None,
     run_bedpostx: bool = False
@@ -399,8 +399,9 @@ def run_dwi_multishell_topup_preprocessing(
         b-value files (corresponding to dwi_files)
     bvec_files : list of Path
         b-vector files (corresponding to dwi_files)
-    rev_phase_files : list of Path
+    rev_phase_files : list of Path, optional
         Reverse phase-encoding SE_EPI files (one per shell, in same order)
+        If not provided or empty, TOPUP will be skipped and eddy will run without it
     output_dir : Path
         Study root directory (e.g., /mnt/bytopia/development/IRC805/)
         Derivatives will be saved to: {output_dir}/derivatives/dwi_topup/{subject}/
@@ -437,21 +438,51 @@ def run_dwi_multishell_topup_preprocessing(
     ... )
     """
     logger = logging.getLogger(__name__)
+
+    # Determine if TOPUP should be used
+    topup_config = config.get('diffusion', {}).get('topup', {})
+    topup_enabled = topup_config.get('enabled', 'auto')  # auto, true, false
+
+    # Auto-detect: use TOPUP if reverse PE files are available
+    has_reverse_pe = rev_phase_files is not None and len(rev_phase_files) > 0
+
+    if topup_enabled == 'auto':
+        use_topup = has_reverse_pe
+    elif topup_enabled is True:
+        use_topup = True
+        if not has_reverse_pe:
+            logger.warning("TOPUP enabled in config but no reverse PE files provided")
+            logger.warning("Proceeding without TOPUP")
+            use_topup = False
+    else:  # topup_enabled is False
+        use_topup = False
+        if has_reverse_pe:
+            logger.info("Reverse PE files available but TOPUP disabled in config")
+
     logger.info("="*70)
-    logger.info(f"STARTING MULTI-SHELL DWI PREPROCESSING WITH TOPUP")
+    logger.info(f"STARTING MULTI-SHELL DWI PREPROCESSING")
     logger.info("="*70)
     logger.info(f"Subject: {subject}")
     logger.info(f"Number of shells: {len(dwi_files)}")
+    logger.info(f"TOPUP distortion correction: {'ENABLED' if use_topup else 'DISABLED'}")
+    if not use_topup and has_reverse_pe:
+        logger.info("  (Reverse PE files available but TOPUP disabled in config)")
+    elif not use_topup:
+        logger.info("  (No reverse PE files available)")
     logger.info("")
     logger.info("Pipeline steps:")
     logger.info("  1. Merge DWI shells")
-    logger.info("  2. Merge reverse phase-encoding images")
-    logger.info("  3-5. Extract and merge b0 volumes")
-    logger.info("  6. Run TOPUP distortion correction (~5-10 min)")
-    logger.info("  7. Run eddy correction with TOPUP (~10-30 min)")
-    logger.info("  8. Brain extraction and DTI fitting (~5 min)")
+    if use_topup:
+        logger.info("  2. Merge reverse phase-encoding images")
+        logger.info("  3-5. Extract and merge b0 volumes")
+        logger.info("  6. Run TOPUP distortion correction (~5-10 min)")
+        logger.info("  7. Run eddy correction with TOPUP (~10-30 min)")
+    else:
+        logger.info("  2. Extract b0 volumes")
+        logger.info("  3. Run eddy correction (~10-30 min)")
+    logger.info("  " + ("8" if use_topup else "4") + ". Brain extraction and DTI fitting (~5 min)")
     if run_bedpostx:
-        logger.info("  9. Run BEDPOSTX (~1-4 hours)")
+        logger.info("  " + ("9" if use_topup else "5") + ". Run BEDPOSTX (~1-4 hours)")
     logger.info("")
     logger.info("Estimated total time: " + ("2-5 hours" if run_bedpostx else "20-45 minutes"))
     logger.info("="*70)
@@ -494,19 +525,8 @@ def run_dwi_multishell_topup_preprocessing(
     )
     logger.info(f"  Merged DWI: {merged_dwi}")
 
-    # Step 2: Merge reverse phase-encoding images
-    logger.info("Step 2: Merging reverse phase-encoding images")
-    merged_rev = work_dir / 'rev_phase_merged.nii.gz'
-    merge_rev = fsl.Merge(
-        in_files=[str(f) for f in rev_phase_files],
-        dimension='t',
-        merged_file=str(merged_rev)
-    )
-    merge_rev.run()
-    logger.info(f"  Merged reverse PE: {merged_rev}")
-
-    # Step 3: Extract b0 from merged DWI
-    logger.info("Step 3: Extracting b0 from merged DWI")
+    # Step 2: Extract b0 from merged DWI (always needed for brain mask)
+    logger.info("Step 2: Extracting b0 from merged DWI")
     b0_dwi = work_dir / 'b0_dwi.nii.gz'
     extract_b0_dwi = fsl.ExtractROI(
         in_file=str(merged_dwi),
@@ -515,38 +535,57 @@ def run_dwi_multishell_topup_preprocessing(
         roi_file=str(b0_dwi)
     )
     extract_b0_dwi.run()
+    logger.info(f"  b0 extracted: {b0_dwi}")
 
-    # Step 4: Extract b0 from merged reverse PE
-    logger.info("Step 4: Extracting b0 from merged reverse PE")
-    b0_rev = work_dir / 'b0_rev.nii.gz'
-    extract_b0_rev = fsl.ExtractROI(
-        in_file=str(merged_rev),
-        t_min=0,
-        t_size=1,
-        roi_file=str(b0_rev)
-    )
-    extract_b0_rev.run()
+    # Initialize TOPUP outputs
+    topup_fieldcoef = None
+    topup_movpar = None
+    b0_merged = None
 
-    # Step 5: Merge b0 volumes for TOPUP (DWI b0 first, then reverse PE b0)
-    logger.info("Step 5: Merging b0 volumes for TOPUP")
-    b0_merged = work_dir / 'b0_merged.nii.gz'
-    merge_b0 = fsl.Merge(
-        in_files=[str(b0_dwi), str(b0_rev)],
-        dimension='t',
-        merged_file=str(b0_merged)
-    )
-    merge_b0.run()
-    logger.info(f"  Merged b0 for TOPUP: {b0_merged}")
+    # Conditional TOPUP steps
+    if use_topup:
+        # Step 3: Merge reverse phase-encoding images
+        logger.info("Step 3: Merging reverse phase-encoding images")
+        merged_rev = work_dir / 'rev_phase_merged.nii.gz'
+        merge_rev = fsl.Merge(
+            in_files=[str(f) for f in rev_phase_files],
+            dimension='t',
+            merged_file=str(merged_rev)
+        )
+        merge_rev.run()
+        logger.info(f"  Merged reverse PE: {merged_rev}")
 
-    # Step 6: Run TOPUP
-    logger.info("Step 6: Running TOPUP")
-    logger.info("  This may take 5-10 minutes...")
-    topup_config = get_node_config('topup', config)
-    encoding_file = topup_config.get('encoding_file')
+        # Step 4: Extract b0 from merged reverse PE
+        logger.info("Step 4: Extracting b0 from merged reverse PE")
+        b0_rev = work_dir / 'b0_rev.nii.gz'
+        extract_b0_rev = fsl.ExtractROI(
+            in_file=str(merged_rev),
+            t_min=0,
+            t_size=1,
+            roi_file=str(b0_rev)
+        )
+        extract_b0_rev.run()
 
-    # Auto-generate acqparams.txt if not provided
-    if not encoding_file or not Path(encoding_file).exists():
-        logger.info("  Auto-generating TOPUP acquisition parameters...")
+        # Step 5: Merge b0 volumes for TOPUP (DWI b0 first, then reverse PE b0)
+        logger.info("Step 5: Merging b0 volumes for TOPUP")
+        b0_merged = work_dir / 'b0_merged.nii.gz'
+        merge_b0 = fsl.Merge(
+            in_files=[str(b0_dwi), str(b0_rev)],
+            dimension='t',
+            merged_file=str(b0_merged)
+        )
+        merge_b0.run()
+        logger.info(f"  Merged b0 for TOPUP: {b0_merged}")
+
+        # Step 6: Run TOPUP
+        logger.info("Step 6: Running TOPUP")
+        logger.info("  This may take 5-10 minutes...")
+        topup_config = get_node_config('topup', config)
+        encoding_file = topup_config.get('encoding_file')
+
+        # Auto-generate acqparams.txt if not provided
+        if not encoding_file or not Path(encoding_file).exists():
+            logger.info("  Auto-generating TOPUP acquisition parameters...")
 
         # Get phase encoding direction and readout time from config
         pe_direction = topup_config.get('pe_direction', 'AP')  # Default: AP
@@ -578,56 +617,66 @@ def run_dwi_multishell_topup_preprocessing(
         config['diffusion']['eddy']['acqp_file'] = str(acqparams_file)
         config['diffusion']['eddy']['index_file'] = str(index_file)
 
-    topup_out = work_dir / 'topup_results'
+        topup_out = work_dir / 'topup_results'
 
-    # Run TOPUP with progress logging
-    topup_cmd = [
-        'topup',
-        '--imain=' + str(b0_merged),
-        '--datain=' + str(encoding_file),
-        '--out=' + str(topup_out),
-        '--fout=' + str(topup_out) + '_field',
-        '--iout=' + str(topup_out) + '_corrected',
-        '--verbose'
-    ]
+        # Run TOPUP with progress logging
+        topup_cmd = [
+            'topup',
+            '--imain=' + str(b0_merged),
+            '--datain=' + str(encoding_file),
+            '--out=' + str(topup_out),
+            '--fout=' + str(topup_out) + '_field',
+            '--iout=' + str(topup_out) + '_corrected',
+            '--verbose'
+        ]
 
-    logger.info("  Running: " + ' '.join(topup_cmd))
-    logger.info("  Progress (SSD = sum of squared differences, lower is better):")
+        logger.info("  Running: " + ' '.join(topup_cmd))
+        logger.info("  Progress (SSD = sum of squared differences, lower is better):")
 
-    import sys
-    process = subprocess.Popen(
-        topup_cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True,
-        bufsize=1
-    )
+        import sys
+        process = subprocess.Popen(
+            topup_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            bufsize=1
+        )
 
-    # Stream output and show progress
-    iteration_count = 0
-    for line in process.stdout:
-        line = line.strip()
-        if line:
-            # Show SSD lines (these indicate progress)
-            if 'SSD' in line:
-                iteration_count += 1
-                logger.info(f"    Iteration {iteration_count}: {line}")
-            # Show important messages
-            elif any(keyword in line.lower() for keyword in ['error', 'warning', 'finished', 'done']):
-                logger.info(f"    {line}")
+        # Stream output and show progress
+        iteration_count = 0
+        for line in process.stdout:
+            line = line.strip()
+            if line:
+                # Show SSD lines (these indicate progress)
+                if 'SSD' in line:
+                    iteration_count += 1
+                    logger.info(f"    Iteration {iteration_count}: {line}")
+                # Show important messages
+                elif any(keyword in line.lower() for keyword in ['error', 'warning', 'finished', 'done']):
+                    logger.info(f"    {line}")
 
-    process.wait()
+        process.wait()
 
-    if process.returncode != 0:
-        logger.error(f"TOPUP failed with return code {process.returncode}")
-        raise RuntimeError(f"TOPUP failed")
+        if process.returncode != 0:
+            logger.error(f"TOPUP failed with return code {process.returncode}")
+            raise RuntimeError(f"TOPUP failed")
 
-    logger.info(f"  TOPUP completed successfully!")
-    logger.info(f"  Field coefficient: {topup_out}_fieldcoef.nii.gz")
-    logger.info(f"  Corrected image: {topup_out}_corrected.nii.gz")
+        logger.info(f"  TOPUP completed successfully!")
+        logger.info(f"  Field coefficient: {topup_out}_fieldcoef.nii.gz")
+        logger.info(f"  Corrected image: {topup_out}_corrected.nii.gz")
 
-    # Step 7: Run eddy with TOPUP outputs
-    logger.info("Step 7: Running eddy correction with TOPUP integration")
+        # Set TOPUP outputs for eddy
+        topup_fieldcoef = Path(str(topup_out) + '_fieldcoef.nii.gz')
+        topup_movpar = Path(str(topup_out) + '_movpar.txt')
+    else:
+        # No TOPUP - eddy will run without distortion correction
+        logger.info("Skipping TOPUP - running eddy without distortion correction")
+        topup_fieldcoef = None
+        topup_movpar = None
+
+    # Step N: Run eddy correction
+    step_num = 7 if use_topup else 3
+    logger.info(f"Step {step_num}: Running eddy correction{' with TOPUP integration' if use_topup else ''}")
     # Pass parent directory so Nipype workflow files go directly in dwi_preprocess/
     # (Nipype would add workflow name as subdirectory, creating dwi_preprocess/dwi_eddy_dtifit/)
     wf = create_dwi_preprocessing_workflow(
@@ -638,8 +687,8 @@ def run_dwi_multishell_topup_preprocessing(
         bvec_file=merged_bvec,
         output_dir=derivatives_dir,  # Pass derivatives directory directly
         work_dir=work_dir.parent,  # Pass {study_root}/work/{subject}/ so workflow creates dwi_eddy_dtifit/ subdirectory
-        topup_fieldcoef=Path(str(topup_out) + '_fieldcoef.nii.gz'),
-        topup_movpar=Path(str(topup_out) + '_movpar.txt'),
+        topup_fieldcoef=topup_fieldcoef,
+        topup_movpar=topup_movpar,
         session=session,
         run_bedpostx=run_bedpostx,
         name='dwi_preprocess'  # Changed from 'dwi_eddy_dtifit' to match expected directory
@@ -668,8 +717,8 @@ def run_dwi_multishell_topup_preprocessing(
         'merged_bval': merged_bval,
         'merged_bvec': merged_bvec,
         'b0_merged': b0_merged,
-        'topup_fieldcoef': Path(str(topup_out) + '_fieldcoef.nii.gz'),
-        'topup_movpar': Path(str(topup_out) + '_movpar.txt'),
+        'topup_fieldcoef': topup_fieldcoef,  # None if TOPUP was skipped
+        'topup_movpar': topup_movpar,  # None if TOPUP was skipped
         'eddy_corrected': eddy_files[0] if eddy_files else None,
         'fa': fa_files[0] if fa_files else None,
         'md': md_files[0] if md_files else None,

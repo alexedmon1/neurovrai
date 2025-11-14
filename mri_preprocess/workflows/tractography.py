@@ -3,14 +3,18 @@
 Probabilistic tractography workflows using FSL probtrackx2.
 
 This module provides functions to run tractography analysis using BEDPOSTX
-output and atlas-based ROIs.
+output and atlas-based or FreeSurfer-based ROIs.
 
-TODO: Add FreeSurfer-based ROI extraction
-    - In the future, add a toggle to use FreeSurfer segmentation instead of atlases
-    - Parameters to add:
-        - use_freesurfer: bool (default: False)
-        - subjects_dir: Path to FreeSurfer SUBJECTS_DIR
-    - When enabled, warp aparc+aseg.mgz to DWI space and extract ROIs from there
+FreeSurfer Integration:
+    - Enabled via config: freesurfer.enabled = true, freesurfer.use_for_tractography = true
+    - Automatically detects FreeSurfer outputs in SUBJECTS_DIR
+    - Extracts ROIs from aparc+aseg.mgz parcellation
+    - Falls back to atlas ROIs if FreeSurfer not available
+
+TODO: Complete FreeSurfer ROI warping
+    - Currently ROIs are extracted in FreeSurfer native space
+    - Need to implement anatomical→DWI transform application
+    - Requires integration with anatomical preprocessing transforms
 """
 
 from pathlib import Path
@@ -25,6 +29,11 @@ from mri_preprocess.utils.workflow import (
     get_execution_config
 )
 from mri_preprocess.utils.atlas_rois import prepare_probtrackx_rois
+from mri_preprocess.utils.freesurfer_utils import (
+    detect_freesurfer_subject,
+    get_freesurfer_rois_for_tractography,
+    check_freesurfer_availability
+)
 
 
 def run_probtrackx2_connectivity(
@@ -375,16 +384,52 @@ def run_atlas_based_tractography(
     output_dir = Path(output_dir)
     roi_dir = output_dir / 'rois'
 
+    # Check if FreeSurfer integration is enabled and available
+    use_freesurfer = False
+    if check_freesurfer_availability(config):
+        fs_config = config.get('freesurfer', {})
+        if fs_config.get('use_for_tractography', False):
+            fs_dir = detect_freesurfer_subject(subject, config=config)
+            if fs_dir:
+                use_freesurfer = True
+                logger.info("✓ FreeSurfer integration enabled - using FreeSurfer parcellations for ROIs")
+            else:
+                logger.info("FreeSurfer enabled but no outputs found for subject - using atlas ROIs")
+
     # Step 1: Prepare ROIs
-    logger.info("Step 1: Preparing atlas-based ROIs")
-    rois = prepare_probtrackx_rois(
-        dwi_reference=dwi_reference,
-        seed_regions=seed_regions,
-        target_regions=target_regions,
-        atlas=atlas,
-        output_dir=roi_dir,
-        mni_to_dwi_warp=mni_to_dwi_warp
-    )
+    if use_freesurfer:
+        logger.info("Step 1: Extracting FreeSurfer-based ROIs")
+        # Get FreeSurfer subject directory
+        fs_dir = detect_freesurfer_subject(subject, config=config)
+
+        # Extract FreeSurfer ROIs
+        all_regions = seed_regions + (target_regions if target_regions else [])
+        fs_rois = get_freesurfer_rois_for_tractography(
+            fs_subject_dir=fs_dir,
+            roi_names=all_regions,
+            output_dir=roi_dir
+        )
+
+        # TODO: Warp FreeSurfer ROIs from native anatomical space to DWI space
+        # This requires anatomical→DWI transform from registration
+        logger.warning("FreeSurfer ROI warping to DWI space not yet implemented")
+        logger.warning("ROIs are in FreeSurfer native space - results may be inaccurate")
+
+        # Split into seeds and targets
+        rois = {
+            'seeds': {k: v for k, v in fs_rois.items() if k in seed_regions},
+            'targets': {k: v for k, v in fs_rois.items() if k in (target_regions or [])}
+        }
+    else:
+        logger.info("Step 1: Preparing atlas-based ROIs")
+        rois = prepare_probtrackx_rois(
+            dwi_reference=dwi_reference,
+            seed_regions=seed_regions,
+            target_regions=target_regions,
+            atlas=atlas,
+            output_dir=roi_dir,
+            mni_to_dwi_warp=mni_to_dwi_warp
+        )
 
     # Step 2: Run connectivity analysis
     logger.info("Step 2: Running tractography")

@@ -40,6 +40,7 @@ anatomical:
 diffusion:
   denoise_method: dwidenoise
   topup:
+    enabled: auto  # 'auto' (use if reverse PE available), true, or false
     readout_time: 0.05
   eddy_config:
     flm: linear
@@ -77,6 +78,13 @@ functional:
     num_components: 5
     variance_threshold: 0.5
   run_qc: true
+
+# FreeSurfer integration (use existing FreeSurfer outputs)
+freesurfer:
+  enabled: false  # Set to true to use existing FreeSurfer outputs
+  subjects_dir: ${project_dir}/freesurfer  # Path to SUBJECTS_DIR
+  use_for_tractography: true  # Use FreeSurfer ROIs for tractography
+  use_for_masks: true  # Use FreeSurfer tissue masks
 
 # ASL (Arterial Spin Labeling) preprocessing
 asl:
