@@ -34,12 +34,14 @@ A production-ready, config-driven MRI preprocessing pipeline for multiple neuroi
 - Comprehensive QC (TOPUP, motion, DTI metrics)
 
 ### Functional Preprocessing
-- Multi-echo TEDANA denoising
+- **Multi-echo**: TEDANA denoising (optimal for multi-echo acquisition)
+- **Single-echo**: ICA-AROMA motion artifact removal (auto-enabled)
 - Motion correction with MCFLIRT
-- ICA-AROMA (optional)
-- CompCor nuisance regression
+- ACompCor nuisance regression using anatomical tissue masks
 - Bandpass temporal filtering
+- Spatial smoothing
 - Registration to anatomical space
+- Optional spatial normalization to MNI152
 
 ### ASL (Arterial Spin Labeling) Preprocessing
 - **Automated DICOM Parameter Extraction**: Auto-extracts acquisition parameters (τ, PLD) from scanner DICOM files
@@ -139,10 +141,10 @@ Run preprocessing one modality at a time for maximum control:
 
 ```bash
 # IMPORTANT: Use uv run for dependency management
-uv run python run_preprocessing.py --subject IRC805-0580101 --modality anat
-uv run python run_preprocessing.py --subject IRC805-0580101 --modality dwi
-uv run python run_preprocessing.py --subject IRC805-0580101 --modality func
-uv run python run_preprocessing.py --subject IRC805-0580101 --modality asl
+uv run python run_preprocessing.py --subject sub-001 --modality anat
+uv run python run_preprocessing.py --subject sub-001 --modality dwi
+uv run python run_preprocessing.py --subject sub-001 --modality func
+uv run python run_preprocessing.py --subject sub-001 --modality asl
 ```
 
 **Workflow order**:

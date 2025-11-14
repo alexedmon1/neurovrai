@@ -5,7 +5,7 @@ Functional (rs-fMRI) preprocessing workflow with multi-echo support.
 Workflow features:
 1. Multi-echo denoising with TEDANA (if multi-echo data)
 2. Motion correction (MCFLIRT)
-3. ICA-AROMA for motion artifact removal
+3. ICA-AROMA for motion artifact removal (auto-enabled for single-echo)
 4. Nuisance regression (ACompCor) using tissue masks from anatomical workflow
 5. Temporal filtering (bandpass)
 6. Spatial smoothing
@@ -15,6 +15,7 @@ Key integrations:
 - Uses CSF/WM masks from anatomical FAST segmentation for ACompCor
 - Reuses T1w→MNI transformations for efficient registration
 - TEDANA enabled by default for multi-echo fMRI
+- ICA-AROMA auto-enabled for single-echo data (primary denoising method)
 """
 
 import logging
@@ -601,12 +602,26 @@ def run_func_preprocessing(
     logger.info("Creating preprocessing workflow...")
 
     # Determine if AROMA should be used
-    # Default: False for multi-echo (TEDANA handles denoising)
-    # Can be explicitly enabled via config
-    use_aroma = config.get('aroma', {}).get('enabled', False)
-    if is_multiecho and use_aroma:
-        logger.warning("ICA-AROMA is redundant with TEDANA for multi-echo data")
-        logger.warning("Consider disabling AROMA to reduce processing time")
+    # Auto-enable for single-echo (primary denoising method)
+    # Disabled for multi-echo (TEDANA handles denoising)
+    aroma_config = config.get('aroma', {}).get('enabled', 'auto')
+
+    if aroma_config == 'auto':
+        # Auto: Use AROMA for single-echo, skip for multi-echo
+        use_aroma = not is_multiecho
+        if use_aroma:
+            logger.info("ICA-AROMA enabled for single-echo data (auto-detected)")
+    elif aroma_config is True:
+        # Explicitly enabled
+        use_aroma = True
+        if is_multiecho:
+            logger.warning("ICA-AROMA enabled for multi-echo data - this is redundant with TEDANA")
+            logger.warning("Consider using 'auto' setting to skip AROMA for multi-echo")
+    else:
+        # Explicitly disabled
+        use_aroma = False
+        if not is_multiecho:
+            logger.warning("ICA-AROMA disabled for single-echo data - no motion artifact removal")
 
     wf = create_func_preprocessing_workflow(
         name='func_preproc',

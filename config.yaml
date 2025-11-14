@@ -72,7 +72,8 @@ functional:
     tedpca: kundu
     tree: kundu
   aroma:
-    enabled: false  # Redundant with TEDANA
+    enabled: auto  # 'auto' (enable for single-echo), true, or false
+    # Auto: Uses AROMA for single-echo, skips for multi-echo (TEDANA handles it)
   acompcor:
     enabled: true
     num_components: 5
