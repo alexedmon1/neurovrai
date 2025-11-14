@@ -97,9 +97,53 @@ This repository contains Python-based MRI preprocessing pipelines built with Nip
 # Install dependencies with uv
 uv sync
 
-# Activate virtual environment
+# Activate virtual environment (optional - see "Using uv" below)
 source .venv/bin/activate
 ```
+
+### Using uv (IMPORTANT)
+
+**All Python execution and dependency management should be handled via `uv`.**
+
+This ensures consistent dependency resolution and avoids environment issues.
+
+#### Running Python Scripts
+```bash
+# ✅ CORRECT - Use uv run
+uv run python script.py
+uv run python -m pytest tests/
+
+# ❌ INCORRECT - Don't manually activate and run
+source .venv/bin/activate
+python script.py
+```
+
+#### Managing Dependencies
+```bash
+# ✅ CORRECT - Use uv pip
+uv pip install package_name
+uv pip install 'package_name<version'
+uv pip list
+uv pip show package_name
+
+# ❌ INCORRECT - Don't use pip directly
+pip install package_name
+```
+
+#### Why This Matters
+- **Dependency Resolution**: uv ensures all dependencies are compatible with `pyproject.toml` and `uv.lock`
+- **Consistency**: Avoids "works on my machine" issues from version mismatches
+- **Lock File**: uv automatically updates `uv.lock` when dependencies change
+- **Common Issue**: Running scripts without uv may use wrong Python version or miss dependencies
+
+#### Dependency Version Conflicts
+**Example**: TEDANA 23.0.2 requires `nilearn<0.11` due to API changes in nilearn 0.12+
+
+When encountering import errors:
+1. Check versions: `uv pip list | grep package_name`
+2. Install compatible version: `uv pip install 'package_name<version'`
+3. Verify import works: `uv run python -c "import package_name"`
+4. Document in `pyproject.toml` if it's a permanent constraint
 
 ## Configuration
 
