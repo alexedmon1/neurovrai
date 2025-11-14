@@ -22,15 +22,18 @@ def recon_all(subject_folder, sub_dir):
     reconall.inputs.directive = 'all'
     reconall.inputs.subjects_dir = sub_dir
     reconall.inputs.T1_files = glob(i+'/nifti/anat/*_T1_*.nii.gz')[0]  #CUSTOM
-    reconall.inputs.T2_file = glob(i+'/nifti/anat/*_T2W_Sagittal_*.nii.gz')[0] #CUSTOM
-    reconall.inputs.use_T2 = True
+    try:
+    	reconall.inputs.T2_file = glob(i+'/nifti/anat/*_T2W_Sagittal_*.nii.gz')[0] #CUSTOM
+    	reconall.inputs.use_T2 = True
+    except:
+    	next
     reconall.inputs.parallel = True
     reconall.inputs.hires = True
     reconall.inputs.openmp = 10
     reconall.run()    
     
 SUBJECTS_DIR = '/mnt/bytopia/IRC805/freesurfer/' #INSERT SUBJECTS_DIR
-subjects = glob('/mnt/bytopia/IRC805/subjects/*') #INSERT FOLDER WITH SUBJECTS NIFTI DATA
+subjects = glob('/mnt/bytopia/IRC805/archive/subjects/*') #INSERT FOLDER WITH SUBJECTS NIFTI DATA
 
 completed = []
 for i in subjects:
@@ -41,7 +44,7 @@ for i in subjects:
     else:
         print(str(s))
         recon_all(i, SUBJECTS_DIR)
-        outfile = open('/mnt/bytopia/IRC805/status/freesurfer_complete.txt', 'a') #CUSTOM
+        outfile = open('/mnt/bytopia/IRC805/archive/status/freesurfer_complete.txt', 'a') #CUSTOM
         outfile.write(str(s)+' \n')
         outfile.close()
         

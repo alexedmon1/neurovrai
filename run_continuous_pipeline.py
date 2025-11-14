@@ -87,7 +87,7 @@ class ContinuousPipelineOrchestrator:
         # Setup directories
         self.bids_dir = self.study_root / 'bids' / subject
         self.derivatives_dir = self.study_root / 'derivatives'
-        self.work_dir = self.study_root / 'work'
+        self.work_dir = self.study_root / 'work' / subject  # Subject-specific work directory
         self.qc_dir = self.study_root / 'qc'
 
         # Create directories
@@ -320,23 +320,23 @@ class ContinuousPipelineOrchestrator:
                 logger.info("  All workflows started - monitoring completion...")
                 break
 
-            # Check if conversion is complete but not all files ready
+            # Check if we've been monitoring too long
+            # Continue monitoring while workflows are running, even if conversion is complete
+            # Only exit if max_checks reached AND conversion is complete
             with self.lock:
-                if self.conversion_complete and not all_started:
-                    # Give a grace period for file system sync
-                    time.sleep(5)
+                conversion_done = self.conversion_complete
 
-                    # Check one more time
-                    missing = []
-                    for mod in self.modalities:
-                        workflow_name = 'anatomical' if mod == 'anat' else 'functional' if mod == 'func' else mod
-                        if workflow_name not in running_futures:
-                            if not self._check_modality_ready(mod):
-                                missing.append(mod)
-
-                    if missing:
-                        logger.warning(f"  ⚠ Conversion complete but missing files for: {', '.join(missing)}")
-                    break
+            if checks >= max_checks and conversion_done:
+                logger.warning(f"  ⚠ Max monitoring time reached ({max_checks * check_interval}s)")
+                # List any modalities that didn't start
+                missing = []
+                for mod in self.modalities:
+                    workflow_name = 'anatomical' if mod == 'anat' else 'functional' if mod == 'func' else mod
+                    if workflow_name not in running_futures:
+                        missing.append(mod)
+                if missing:
+                    logger.warning(f"  ⚠ Workflows not started: {', '.join(missing)}")
+                break
 
         # Store futures for completion check
         self.running_futures = running_futures
@@ -448,12 +448,16 @@ class ContinuousPipelineOrchestrator:
                 logger.warning("    No functional files found")
                 return None
 
-            # Get anatomical reference
-            anat_dir = self.derivatives_dir / self.subject / 'anat'
-            t1w_brain = anat_dir / 'brain.nii.gz'
+            # Get anatomical reference from anatomical workflow results
+            if 'anatomical' not in self.results or not self.results['anatomical']:
+                logger.error("    Anatomical preprocessing not completed")
+                return None
 
-            if not t1w_brain.exists():
-                logger.error("    Anatomical preprocessing outputs not found")
+            anat_results = self.results['anatomical']
+            t1w_brain = anat_results.get('brain')
+
+            if not t1w_brain or not Path(t1w_brain).exists():
+                logger.error("    Anatomical brain file not found")
                 return None
 
             # Multi-echo detection
@@ -465,9 +469,9 @@ class ContinuousPipelineOrchestrator:
             results = run_func_preprocessing(
                 config=self.config,
                 subject=self.subject,
-                func_files=func_files,
+                func_file=func_files,  # Fixed: parameter name is 'func_file' (singular)
                 output_dir=self.derivatives_dir,
-                t1w_brain=t1w_brain,
+                anat_derivatives=self.derivatives_dir / self.subject / 'anat',
                 work_dir=self.work_dir
             )
 
@@ -494,14 +498,20 @@ class ContinuousPipelineOrchestrator:
             source_files = [f for f in asl_files if 'SOURCE' in f.name]
             asl_file = source_files[0] if source_files else asl_files[0]
 
-            # Get anatomical reference and tissue masks
-            anat_dir = self.derivatives_dir / self.subject / 'anat'
-            t1w_brain = anat_dir / 'brain.nii.gz'
-            seg_dir = anat_dir / 'segmentation'
+            # Get anatomical reference and tissue masks from anatomical workflow results
+            if 'anatomical' not in self.results or not self.results['anatomical']:
+                logger.error("    Anatomical preprocessing not completed")
+                return None
 
-            gm_mask = seg_dir / 'POSTERIOR_02.nii.gz'
-            wm_mask = seg_dir / 'POSTERIOR_03.nii.gz'
-            csf_mask = seg_dir / 'POSTERIOR_01.nii.gz'
+            anat_results = self.results['anatomical']
+            t1w_brain = anat_results.get('brain')
+            gm_mask = anat_results.get('gm_prob')
+            wm_mask = anat_results.get('wm_prob')
+            csf_mask = anat_results.get('csf_prob')
+
+            if not t1w_brain or not Path(t1w_brain).exists():
+                logger.error("    Anatomical brain file not found")
+                return None
 
             # Find DICOM directory for parameter extraction
             dicom_asl_dir = None
@@ -523,9 +533,9 @@ class ContinuousPipelineOrchestrator:
                 asl_file=asl_file,
                 output_dir=self.derivatives_dir,
                 t1w_brain=t1w_brain,
-                gm_mask=gm_mask if gm_mask.exists() else None,
-                wm_mask=wm_mask if wm_mask.exists() else None,
-                csf_mask=csf_mask if csf_mask.exists() else None,
+                gm_mask=gm_mask if gm_mask and Path(gm_mask).exists() else None,
+                wm_mask=wm_mask if wm_mask and Path(wm_mask).exists() else None,
+                csf_mask=csf_mask if csf_mask and Path(csf_mask).exists() else None,
                 dicom_dir=dicom_asl_dir
             )
 
@@ -622,9 +632,17 @@ def main():
     if args.study_root:
         study_root = args.study_root
     else:
-        # Assume study root is 2 levels up from subject DICOM dir
-        # E.g., /study/raw/dicom/subject → /study
-        study_root = args.dicom_dir.parent.parent
+        # Infer study root from DICOM directory structure
+        # Expected: {study_root}/raw/dicom/{subject} → {study_root}
+        # E.g., /mnt/bytopia/IRC805/raw/dicom/IRC805-1580101 → /mnt/bytopia/IRC805
+        dicom_parent = args.dicom_dir.parent  # .../raw/dicom
+        if dicom_parent.name == 'dicom':
+            study_root = dicom_parent.parent.parent  # 3 levels up: .../raw/dicom → .../raw → .../study
+        else:
+            # Fallback: assume 2 levels up
+            study_root = args.dicom_dir.parent.parent
+
+        logger.info(f"Auto-detected study root: {study_root}")
 
     # Override study root in config if provided
     if args.study_root:

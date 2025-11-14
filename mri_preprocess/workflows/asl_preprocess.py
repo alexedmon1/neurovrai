@@ -45,6 +45,7 @@ from mri_preprocess.qc.asl_qc import (
     compute_perfusion_tsnr,
     generate_asl_qc_report
 )
+from mri_preprocess.utils.transforms import create_transform_registry
 
 logger = logging.getLogger(__name__)
 
@@ -134,14 +135,21 @@ def run_asl_preprocessing(
     logger.info("")
 
     # Setup directory structure
+    # output_dir is the derivatives base (e.g., /mnt/bytopia/IRC805/derivatives)
+    # Use standardized hierarchy: {outdir}/{subject}/{modality}/
     outdir = Path(output_dir)
-    derivatives_dir = outdir / 'derivatives' / subject / 'asl'
+    derivatives_dir = outdir / subject / 'asl'
     derivatives_dir.mkdir(parents=True, exist_ok=True)
 
+    # Derive study root from output_dir (derivatives directory)
+    # output_dir is derivatives, so study_root is one level up
+    study_root = outdir.parent
+
     # Work directory
-    work_dir = outdir / 'work' / subject / 'asl_preprocess'
+    work_dir = study_root / 'work' / subject / 'asl_preprocess'
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    logger.info(f"Study root: {study_root}")
     logger.info(f"Derivatives output: {derivatives_dir}")
     logger.info(f"Working directory: {work_dir}")
     logger.info("")
@@ -506,21 +514,32 @@ def run_asl_preprocessing(
         logger.info("Step 8: Registration to anatomical space")
         logger.info("  Registering mean control to T1w...")
 
-        transforms_dir = derivatives_dir / 'transforms'
-        transforms_dir.mkdir(parents=True, exist_ok=True)
-
-        asl_to_anat_mat = transforms_dir / f'{subject}_asl_to_anat.mat'
+        # Create temp transform file
+        import tempfile
+        temp_mat = Path(tempfile.mktemp(suffix='_asl_to_anat.mat'))
 
         flirt_cmd = [
             'flirt',
             '-in', str(control_mean_file),
             '-ref', str(t1w_brain),
-            '-omat', str(asl_to_anat_mat),
+            '-omat', str(temp_mat),
             '-dof', '6',
             '-cost', 'corratio'  # Good for different contrasts
         ]
 
         subprocess.run(flirt_cmd, check=True, capture_output=True)
+
+        # Save to TransformRegistry
+        registry = create_transform_registry(config, subject)
+        asl_to_anat_mat = registry.save_linear_transform(
+            transform_file=temp_mat,
+            source_space='ASL',
+            target_space='T1w',
+            source_image=control_mean_file,
+            reference=t1w_brain
+        )
+        temp_mat.unlink()  # Clean up temp file
+
         logger.info(f"  ASL→anatomical transform: {asl_to_anat_mat}")
         results['asl_to_anat'] = asl_to_anat_mat
         logger.info("")
@@ -547,14 +566,12 @@ def run_asl_preprocessing(
     if normalize_to_mni and t1w_brain and asl_to_anat_mat:
         logger.info("Step 9: Spatial normalization to MNI152")
 
-        # Get anatomical transforms
-        anat_derivatives_dir = outdir / 'derivatives' / subject / 'anat'
-        anat_transforms_dir = anat_derivatives_dir / 'transforms'
+        # Get anatomical transforms from TransformRegistry
+        registry = create_transform_registry(config, subject)
+        anat_transforms = registry.get_nonlinear_transform('T1w', 'MNI152')
 
-        t1w_to_mni_affine = anat_transforms_dir / f'{subject}_T1w_to_MNI152_affine.mat'
-        t1w_to_mni_warp = anat_transforms_dir / f'{subject}_T1w_to_MNI152_warp.nii.gz'
-
-        if t1w_to_mni_affine.exists() and t1w_to_mni_warp.exists():
+        if anat_transforms:
+            t1w_to_mni_warp, t1w_to_mni_affine = anat_transforms
             logger.info("  Reusing anatomical transforms for normalization")
             logger.info(f"  ASL→anat: {asl_to_anat_mat}")
             logger.info(f"  Anat→MNI affine: {t1w_to_mni_affine}")
@@ -565,17 +582,29 @@ def run_asl_preprocessing(
             fsldir = os.environ.get('FSLDIR', '/usr/local/fsl')
             mni_template = Path(fsldir) / 'data' / 'standard' / 'MNI152_T1_2mm.nii.gz'
 
-            asl_to_mni_warp = transforms_dir / f'{subject}_asl_to_MNI152_warp.nii.gz'
+            # Create temp file for concatenated warp
+            import tempfile
+            temp_warp = Path(tempfile.mktemp(suffix='_asl_to_mni_warp.nii.gz'))
 
             convertwarp_cmd = [
                 'convertwarp',
                 '--ref=' + str(mni_template),
                 '--premat=' + str(asl_to_anat_mat),
                 '--warp1=' + str(t1w_to_mni_warp),
-                '--out=' + str(asl_to_mni_warp)
+                '--out=' + str(temp_warp)
             ]
 
             subprocess.run(convertwarp_cmd, check=True, capture_output=True)
+
+            # Save concatenated warp to TransformRegistry
+            # Note: This is a composite warp, so we save it as a special case
+            # For now, just copy to registry directory manually since it's composite
+            registry_dir = registry.subject_dir
+            asl_to_mni_warp = registry_dir / f'ASL_to_MNI152_warp.nii.gz'
+            import shutil
+            shutil.copy2(temp_warp, asl_to_mni_warp)
+            temp_warp.unlink()
+
             logger.info(f"  Concatenated warp: {asl_to_mni_warp}")
 
             # Apply to CBF
@@ -606,7 +635,8 @@ def run_asl_preprocessing(
     if config.get('run_qc', True):
         logger.info("Step 10: Quality Control")
 
-        qc_dir = derivatives_dir / 'qc'
+        # QC goes to study-level QC directory: {study_root}/qc/{subject}/asl/
+        qc_dir = outdir.parent / 'qc' / subject / 'asl'
         qc_dir.mkdir(parents=True, exist_ok=True)
 
         # Motion QC

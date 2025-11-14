@@ -6,11 +6,11 @@ project_dir: /mnt/bytopia/IRC805
 rawdata_dir: ${project_dir}/subjects  # IRC805 uses 'subjects' instead of 'rawdata'
 derivatives_dir: ${project_dir}/derivatives
 work_dir: ${project_dir}/work
-transforms_dir: ${project_dir}/transforms
 
 # Path structure for workflows
 paths:
   logs: ${project_dir}/logs
+  transforms: ${project_dir}/transforms
 
 # Execution settings
 execution:
@@ -45,6 +45,17 @@ diffusion:
     flm: linear
     slm: linear
     use_cuda: true
+
+  # Advanced diffusion models (DKI, NODDI, SANDI, ActiveAx)
+  # Auto-enabled for multi-shell data (≥2 non-zero b-values)
+  advanced_models:
+    enabled: auto  # true, false, or 'auto' (default: auto-detect multi-shell)
+    fit_dki: true  # Diffusion Kurtosis Imaging (DIPY)
+    fit_noddi: true  # NODDI via AMICO (100x faster) or DIPY
+    fit_sandi: false  # SANDI via AMICO (requires ≥3 shells)
+    fit_activeax: false  # ActiveAx via AMICO (requires specific protocol)
+    use_amico: true  # Use AMICO for NODDI/SANDI/ActiveAx (recommended)
+
   run_qc: true
 
 # Functional preprocessing

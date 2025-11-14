@@ -64,12 +64,8 @@ class TransformRegistry:
 
     def _get_subject_dir(self) -> Path:
         """Get subject-specific transforms directory."""
-        if not self.subject.startswith('sub-'):
-            subject = f'sub-{self.subject}'
-        else:
-            subject = self.subject
-
-        subject_dir = self.transforms_dir / subject
+        # Use subject ID directly without adding 'sub-' prefix
+        subject_dir = self.transforms_dir / self.subject
 
         if self.session:
             if not self.session.startswith('ses-'):

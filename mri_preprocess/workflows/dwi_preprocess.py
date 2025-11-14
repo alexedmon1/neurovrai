@@ -41,6 +41,7 @@ from mri_preprocess.utils.dwi_normalization import (
     normalize_dwi_to_fmrib58,
     apply_warp_to_metrics
 )
+from mri_preprocess.workflows.advanced_diffusion import run_advanced_diffusion_models
 
 
 def merge_dwi_files(
@@ -360,272 +361,6 @@ def create_apply_warp_node(
     return applywarp
 
 
-def create_dwi_multishell_topup_workflow(
-    config: Dict[str, Any],
-    subject: str,
-    dwi_files: List[Path],
-    bval_files: List[Path],
-    bvec_files: List[Path],
-    rev_phase_files: List[Path],
-    output_dir: Path,
-    work_dir: Path,
-    session: Optional[str] = None,
-    run_bedpostx: bool = False,
-    run_probtrackx: bool = False,
-    name: str = 'dwi_multishell_topup'
-) -> Workflow:
-    """
-    Create comprehensive multi-shell DWI preprocessing workflow with TOPUP.
-
-    This workflow implements the complete preprocessing pipeline:
-    1. Extract b0 volumes from each DWI shell and reverse phase-encoding image
-    2. Merge b0 volumes for TOPUP estimation
-    3. Run TOPUP to estimate susceptibility distortion field
-    4. Apply TOPUP correction to each DWI shell
-    5. Merge corrected DWI shells (bval, bvec, nifti)
-    6. Run eddy correction with TOPUP integration
-    7. Brain extraction
-    8. DTI tensor fitting
-    9. Optionally run BEDPOSTX for probabilistic tractography modeling
-    10. Optionally run probtrackx2 for tractography (requires segmentation)
-
-    Parameters
-    ----------
-    config : dict
-        Configuration dictionary
-    subject : str
-        Subject identifier
-    dwi_files : list of Path
-        List of DWI NIfTI files (one per shell, e.g., b1000, b2000, b3000)
-    bval_files : list of Path
-        List of b-value files corresponding to dwi_files
-    bvec_files : list of Path
-        List of b-vector files corresponding to dwi_files
-    rev_phase_files : list of Path
-        List of reverse phase-encoding files (SE_EPI) for TOPUP (one per shell)
-    output_dir : Path
-        Output directory for derivatives
-    work_dir : Path
-        Working directory
-    session : str, optional
-        Session identifier
-    run_bedpostx : bool
-        Run BEDPOSTX (default: False, computationally expensive)
-    run_probtrackx : bool
-        Run probtrackx2 (default: False, requires BEDPOSTX output and segmentation)
-    name : str
-        Workflow name
-
-    Returns
-    -------
-    Workflow
-        Nipype workflow ready to run
-
-    Examples
-    --------
-    >>> wf = create_dwi_multishell_topup_workflow(
-    ...     config=config,
-    ...     subject="sub-001",
-    ...     dwi_files=[
-    ...         Path("sub-001_dwi_b1000.nii.gz"),
-    ...         Path("sub-001_dwi_b2000.nii.gz")
-    ...     ],
-    ...     bval_files=[Path("b1000.bval"), Path("b2000.bval")],
-    ...     bvec_files=[Path("b1000.bvec"), Path("b2000.bvec")],
-    ...     rev_phase_files=[Path("b1000_PA.nii.gz"), Path("b2000_PA.nii.gz")],
-    ...     output_dir=Path("/data/derivatives"),
-    ...     work_dir=Path("/tmp/work")
-    ... )
-    >>> wf.run()
-    """
-    # Validate inputs
-    assert len(dwi_files) == len(bval_files) == len(bvec_files), \
-        "Must have equal number of DWI, bval, and bvec files"
-
-    for f in dwi_files + bval_files + bvec_files + rev_phase_files:
-        validate_inputs(f)
-
-    # Setup logging
-    log_dir = Path(config['paths']['logs'])
-    logger = setup_logging(log_dir, subject, name)
-    logger.info(f"Creating multi-shell DWI preprocessing workflow with TOPUP for {subject}")
-    logger.info(f"  Number of shells: {len(dwi_files)}")
-
-    # Create workflow
-    wf = Workflow(name=name)
-    wf.base_dir = str(work_dir)
-
-    # === Extract b0 volumes from each shell ===
-    extract_b0_nodes = []
-    for i, dwi_file in enumerate(dwi_files):
-        extract_b0 = Node(
-            fsl.ExtractROI(t_min=0, t_size=1),
-            name=f'extract_b0_shell{i}'
-        )
-        extract_b0.inputs.in_file = str(dwi_file)
-        extract_b0_nodes.append(extract_b0)
-
-    # Extract b0 from reverse phase-encoding images
-    extract_b0_rev_nodes = []
-    for i, rev_file in enumerate(rev_phase_files):
-        extract_b0_rev = Node(
-            fsl.ExtractROI(t_min=0, t_size=1),
-            name=f'extract_b0_rev{i}'
-        )
-        extract_b0_rev.inputs.in_file = str(rev_file)
-        extract_b0_rev_nodes.append(extract_b0_rev)
-
-    # === Merge all b0 volumes for TOPUP ===
-    # Create list: [b0_shell0, b0_rev0, b0_shell1, b0_rev1, ...]
-    merge_b0_for_topup = Node(
-        fsl.Merge(dimension='t'),
-        name='merge_b0_for_topup'
-    )
-
-    # We'll collect outputs from extract nodes dynamically
-    # For now, create the TOPUP node
-    topup = create_topup_node(config, name='topup')
-
-    # === Apply TOPUP to each DWI shell ===
-    applytopup_nodes = []
-    for i in range(len(dwi_files)):
-        applytopup = create_applytopup_node(name=f'applytopup_shell{i}')
-        applytopup.inputs.in_files = [str(dwi_files[i])]
-        applytopup.inputs.encoding_file = config['diffusion']['topup']['encoding_file']
-        applytopup_nodes.append(applytopup)
-
-    # === Merge corrected DWI files ===
-    # This will be done outside Nipype using the merge_dwi_files function
-    # because we need to collect outputs and merge them
-
-    # === Continue with standard workflow after merging ===
-    # Input node for merged data
-    inputnode = Node(
-        niu.IdentityInterface(fields=['merged_dwi', 'merged_bval', 'merged_bvec']),
-        name='inputnode'
-    )
-
-    # Eddy correction with TOPUP
-    eddy = create_eddy_node(config, use_topup=True)
-
-    # Connect TOPUP outputs to eddy
-    wf.connect([
-        (topup, eddy, [
-            ('out_fieldcoef', 'in_topup_fieldcoef'),
-            ('out_movpar', 'in_topup_movpar')
-        ])
-    ])
-
-    # Brain extraction
-    extract_b0 = Node(
-        fsl.ExtractROI(t_min=0, t_size=1),
-        name='extract_b0_merged'
-    )
-
-    bet_dwi = Node(
-        fsl.BET(frac=0.3, mask=True, robust=True),
-        name='bet_dwi'
-    )
-
-    wf.connect([
-        (inputnode, eddy, [
-            ('merged_dwi', 'in_file'),
-            ('merged_bval', 'in_bval'),
-            ('merged_bvec', 'in_bvec')
-        ]),
-        (eddy, extract_b0, [('out_corrected', 'in_file')]),
-        (extract_b0, bet_dwi, [('roi_file', 'in_file')])
-    ])
-
-    # DTI fitting
-    dtifit = create_dtifit_node()
-
-    wf.connect([
-        (eddy, dtifit, [
-            ('out_corrected', 'dwi'),
-            ('out_rotated_bvecs', 'bvecs')
-        ]),
-        (inputnode, dtifit, [('merged_bval', 'bvals')]),
-        (bet_dwi, dtifit, [('mask_file', 'mask')])
-    ])
-
-    # BEDPOSTX (optional)
-    if run_bedpostx:
-        bedpostx = create_bedpostx_node(config)
-        wf.connect([
-            (eddy, bedpostx, [
-                ('out_corrected', 'dwi'),
-                ('out_rotated_bvecs', 'bvecs')
-            ]),
-            (inputnode, bedpostx, [('merged_bval', 'bvals')]),
-            (bet_dwi, bedpostx, [('mask_file', 'mask')])
-        ])
-
-    # Output node
-    outputnode = Node(
-        niu.IdentityInterface(
-            fields=[
-                'eddy_corrected',
-                'rotated_bvec',
-                'dwi_mask',
-                'fa',
-                'md',
-                'l1',
-                'l2',
-                'l3',
-                'tensor'
-            ]
-        ),
-        name='outputnode'
-    )
-
-    wf.connect([
-        (eddy, outputnode, [
-            ('out_corrected', 'eddy_corrected'),
-            ('out_rotated_bvecs', 'rotated_bvec')
-        ]),
-        (bet_dwi, outputnode, [('mask_file', 'dwi_mask')]),
-        (dtifit, outputnode, [
-            ('FA', 'fa'),
-            ('MD', 'md'),
-            ('L1', 'l1'),
-            ('L2', 'l2'),
-            ('L3', 'l3'),
-            ('tensor', 'tensor')
-        ])
-    ])
-
-    # DataSink
-    datasink = Node(
-        DataSink(),
-        name='datasink'
-    )
-    datasink.inputs.base_directory = str(
-        get_derivatives_dir(output_dir, 'mri-preprocess', subject, session, create=True)
-    )
-    datasink.inputs.container = 'dwi'
-
-    wf.connect([
-        (outputnode, datasink, [
-            ('eddy_corrected', 'eddy_corrected'),
-            ('rotated_bvec', 'rotated_bvec'),
-            ('dwi_mask', 'mask'),
-            ('fa', 'dti.@fa'),
-            ('md', 'dti.@md'),
-            ('l1', 'dti.@l1'),
-            ('l2', 'dti.@l2'),
-            ('l3', 'dti.@l3'),
-            ('tensor', 'dti.@tensor')
-        ])
-    ])
-
-    logger.info("Multi-shell DWI preprocessing workflow with TOPUP created")
-    logger.warning("NOTE: This workflow requires manual TOPUP step completion")
-    logger.warning("  Use run_dwi_multishell_topup_preprocessing() for automated processing")
-
-    return wf
-
-
 def run_dwi_multishell_topup_preprocessing(
     config: Dict[str, Any],
     subject: str,
@@ -731,17 +466,20 @@ def run_dwi_multishell_topup_preprocessing(
     derivatives_dir = outdir / subject / 'dwi'
     derivatives_dir.mkdir(parents=True, exist_ok=True)
 
-    # Work directory: {study_root}/work/{subject}/
-    # Nipype will add workflow name as subdirectory
+    # Derive study root from output_dir (derivatives directory)
+    # output_dir is derivatives, so study_root is one level up
+    study_root = outdir.parent
+
+    # Work directory for preprocessing
+    # TOPUP files go in dwi_preprocess/, Nipype workflow creates subdirectory
     if work_dir is None:
-        study_root = outdir.parent
-        work_dir = study_root / 'work' / subject
+        work_dir = study_root / 'work' / subject / 'dwi_preprocess'
     else:
         work_dir = Path(work_dir)
 
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Study root: {study_root if work_dir is None else work_dir.parent.parent}")
+    logger.info(f"Study root: {study_root}")
     logger.info(f"Derivatives output: {derivatives_dir}")
     logger.info(f"Working directory: {work_dir}")
     logger.info("")
@@ -890,6 +628,8 @@ def run_dwi_multishell_topup_preprocessing(
 
     # Step 7: Run eddy with TOPUP outputs
     logger.info("Step 7: Running eddy correction with TOPUP integration")
+    # Pass parent directory so Nipype workflow files go directly in dwi_preprocess/
+    # (Nipype would add workflow name as subdirectory, creating dwi_preprocess/dwi_eddy_dtifit/)
     wf = create_dwi_preprocessing_workflow(
         config=config,
         subject=subject,
@@ -897,12 +637,12 @@ def run_dwi_multishell_topup_preprocessing(
         bval_file=merged_bval,
         bvec_file=merged_bvec,
         output_dir=derivatives_dir,  # Pass derivatives directory directly
-        work_dir=work_dir / 'workflow',
+        work_dir=work_dir.parent,  # Pass {study_root}/work/{subject}/ so workflow creates dwi_eddy_dtifit/ subdirectory
         topup_fieldcoef=Path(str(topup_out) + '_fieldcoef.nii.gz'),
         topup_movpar=Path(str(topup_out) + '_movpar.txt'),
         session=session,
         run_bedpostx=run_bedpostx,
-        name='dwi_eddy_dtifit'
+        name='dwi_preprocess'  # Changed from 'dwi_eddy_dtifit' to match expected directory
     )
 
     # Get execution configuration
@@ -936,6 +676,61 @@ def run_dwi_multishell_topup_preprocessing(
         'mask': mask_files[0] if mask_files else None,
         'rotated_bvec': bvec_files[0] if bvec_files else None,
     }
+
+    # Step 7.5: Advanced diffusion models (DKI, NODDI) if multi-shell
+    adv_config = config.get('diffusion', {}).get('advanced_models', {})
+    adv_enabled = adv_config.get('enabled', 'auto')
+
+    # Auto-detect multi-shell: check if ≥2 non-zero b-values
+    is_multishell = False
+    if merged_bval and merged_bval.exists():
+        bvals = np.loadtxt(merged_bval)
+        unique_bvals = np.unique(bvals[bvals > 50])  # Ignore b=0 and noise
+        is_multishell = len(unique_bvals) >= 2
+        logger.info(f"  Detected {len(unique_bvals)} unique b-values: {unique_bvals}")
+        logger.info(f"  Multi-shell data: {is_multishell}")
+
+    # Determine if we should run advanced models
+    run_advanced = False
+    if adv_enabled == 'auto':
+        run_advanced = is_multishell
+    elif adv_enabled is True:
+        run_advanced = True
+
+    if run_advanced and outputs['eddy_corrected'] and outputs['mask']:
+        logger.info("")
+        logger.info("="*70)
+        logger.info("Step 7.5: Advanced Diffusion Models (DKI/NODDI)")
+        logger.info("="*70)
+        logger.info("")
+
+        try:
+            # Run advanced diffusion models
+            adv_results = run_advanced_diffusion_models(
+                dwi_file=outputs['eddy_corrected'],
+                bval_file=merged_bval,
+                bvec_file=outputs['rotated_bvec'],
+                mask_file=outputs['mask'],
+                output_dir=derivatives_dir,  # Will create dki/ and noddi/ subdirs
+                fit_dki=adv_config.get('fit_dki', True),
+                fit_noddi=adv_config.get('fit_noddi', True),
+                fit_sandi=adv_config.get('fit_sandi', False),
+                fit_activeax=adv_config.get('fit_activeax', False),
+                use_amico=adv_config.get('use_amico', True)
+            )
+
+            # Add advanced model outputs to results
+            outputs['advanced_models'] = adv_results
+            logger.info("  ✓ Advanced diffusion models completed")
+
+        except Exception as e:
+            logger.warning(f"  Advanced diffusion models failed: {e}")
+            logger.warning("  Continuing with standard DTI metrics only")
+    elif adv_enabled is not False:
+        if not is_multishell:
+            logger.info("  Skipping advanced models: single-shell data (requires ≥2 b-values)")
+        elif not outputs['eddy_corrected']:
+            logger.warning("  Skipping advanced models: eddy correction output not found")
 
     # Step 8: Spatial normalization to FMRIB58_FA template
     if outputs['fa'] and outputs['fa'].exists():

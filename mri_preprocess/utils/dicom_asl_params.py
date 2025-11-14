@@ -20,7 +20,7 @@ References:
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Union
 import pydicom
 from pydicom.dataset import FileDataset
 import json
@@ -28,14 +28,14 @@ import json
 logger = logging.getLogger(__name__)
 
 
-def extract_asl_parameters(dicom_file: Path) -> Dict[str, Any]:
+def extract_asl_parameters(dicom_file: Union[Path, pydicom.Dataset]) -> Dict[str, Any]:
     """
     Extract ASL acquisition parameters from DICOM file.
 
     Parameters
     ----------
-    dicom_file : Path
-        Path to ASL DICOM file
+    dicom_file : Path or pydicom.Dataset
+        Path to ASL DICOM file or already-loaded Dataset
 
     Returns
     -------
@@ -60,10 +60,13 @@ def extract_asl_parameters(dicom_file: Path) -> Dict[str, Any]:
     - (2005,10xx): Philips private creator
     - Specific ASL parameters may vary by software version
     """
-    logger.info(f"Extracting ASL parameters from: {dicom_file}")
-
-    # Load DICOM file
-    dcm = pydicom.dcmread(dicom_file, force=True)
+    # Load DICOM file if path is provided, otherwise use existing Dataset
+    if isinstance(dicom_file, pydicom.Dataset):
+        dcm = dicom_file
+        logger.info(f"Extracting ASL parameters from: {dcm.get('SeriesDescription', 'Unknown series')}")
+    else:
+        logger.info(f"Extracting ASL parameters from: {dicom_file}")
+        dcm = pydicom.dcmread(dicom_file, force=True)
 
     params = {}
 

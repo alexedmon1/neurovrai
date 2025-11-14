@@ -146,13 +146,20 @@ class DICOMParameterExtractor:
         except Exception as e:
             logger.warning(f"Could not extract DWI timing parameters: {e}")
 
+        # Get b-value (try tag first, then string key)
+        bval = 0
+        if (0x0018, 0x9087) in dcm:
+            bval = float(dcm[0x0018, 0x9087].value)
+        else:
+            bval = float(dcm.get('DiffusionBValue', 0))
+
         params.update({
             'RepetitionTime': float(dcm.get('RepetitionTime', 0)),
             'EchoTime': float(dcm.get('EchoTime', 0)),
             'PhaseEncodingDirection': phase_encoding,
             'EstimatedPEDirection': pe_direction,
             'EstimatedReadoutTime': readout_time,
-            'DiffusionBValue': float(dcm.get([0x0018, 0x9087], dcm.get('DiffusionBValue', 0))),
+            'DiffusionBValue': bval,
         })
         return params
 

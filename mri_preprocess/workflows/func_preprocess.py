@@ -50,6 +50,7 @@ from mri_preprocess.utils.acompcor_helper import (
     regress_out_components
 )
 from mri_preprocess.utils.func_normalization import normalize_func_to_mni152
+from mri_preprocess.utils.transforms import create_transform_registry
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +174,7 @@ def run_tedana(
 def create_func_preprocessing_workflow(
     name: str,
     config: Dict[str, Any],
-    base_dir: Path,
+    work_dir: Path,
     use_aroma: bool = False,
     is_multiecho: bool = False
 ) -> Workflow:
@@ -186,7 +187,7 @@ def create_func_preprocessing_workflow(
         Workflow name
     config : dict
         Configuration dictionary with parameters
-    base_dir : Path
+    work_dir : Path
         Working directory for Nipype
     use_aroma : bool
         Whether to include ICA-AROMA (default: False, redundant with TEDANA)
@@ -209,7 +210,7 @@ def create_func_preprocessing_workflow(
     - Motion correction is done within this workflow
     - Optional ICA-AROMA can be added for motion artifact removal
     """
-    wf = Workflow(name=name, base_dir=str(base_dir))
+    wf = Workflow(name=name, base_dir=str(work_dir))
 
     # Extract configuration
     tr = config.get('tr', 1.029)
@@ -371,17 +372,20 @@ def run_func_preprocessing(
     derivatives_dir = outdir / subject / 'func'
     derivatives_dir.mkdir(parents=True, exist_ok=True)
 
+    # Derive study root from output_dir (derivatives directory)
+    # output_dir is derivatives, so study_root is one level up
+    study_root = outdir.parent
+
     # Work directory: {study_root}/work/{subject}/
     # Nipype will add workflow name as subdirectory
     if work_dir is None:
-        study_root = outdir.parent
         work_dir = study_root / 'work' / subject
     else:
         work_dir = Path(work_dir)
 
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Study root: {study_root if work_dir is None else work_dir.parent.parent}")
+    logger.info(f"Study root: {study_root}")
     logger.info(f"Derivatives: {derivatives_dir}")
     logger.info(f"Working dir: {work_dir}")
     logger.info("")
@@ -607,7 +611,7 @@ def run_func_preprocessing(
     wf = create_func_preprocessing_workflow(
         name='func_preproc',
         config=config,
-        base_dir=work_dir,
+        work_dir=work_dir,
         use_aroma=use_aroma,
         is_multiecho=is_multiecho
     )
@@ -666,15 +670,17 @@ def run_func_preprocessing(
         results['csf_func_mask'] = csf_func
         results['wm_func_mask'] = wm_func
 
-        # Save BBR transform to transforms directory for reuse in normalization
-        transforms_dir = derivatives_dir / 'transforms'
-        transforms_dir.mkdir(parents=True, exist_ok=True)
-
-        bbr_transform = transforms_dir / f'{subject}_func_to_anat_bbr.mat'
-        import shutil
-        shutil.copy2(func_to_anat_bbr, bbr_transform)
+        # Save BBR transform to TransformRegistry for reuse in normalization
+        registry = create_transform_registry(config, subject)
+        bbr_transform = registry.save_linear_transform(
+            transform_file=func_to_anat_bbr,
+            source_space='func',
+            target_space='T1w',
+            source_image=tedana_output,
+            reference=t1w_brain
+        )
         results['func_to_anat_bbr'] = bbr_transform
-        logger.info(f"  BBR transform saved: {bbr_transform}")
+        logger.info(f"  BBR transform saved to registry: {bbr_transform}")
         logger.info("")
 
         # Step 4b: Prepare masks (threshold and erode)
@@ -839,18 +845,16 @@ def run_func_preprocessing(
         logger.info("=" * 70)
         logger.info("")
 
-        # Check for required transforms
+        # Check for required transforms from TransformRegistry
         bbr_transform = results.get('func_to_anat_bbr')
 
-        # Get anatomical transforms from derivatives
-        anat_derivatives_dir = derivatives_dir.parent.parent / 'anat'
-        anat_transforms_dir = anat_derivatives_dir / 'transforms'
-
-        t1w_to_mni_affine = anat_transforms_dir / f'{subject}_T1w_to_MNI152_affine.mat'
-        t1w_to_mni_warp = anat_transforms_dir / f'{subject}_T1w_to_MNI152_warp.nii.gz'
+        # Get anatomical transforms from TransformRegistry
+        registry = create_transform_registry(config, subject)
+        anat_transforms = registry.get_nonlinear_transform('T1w', 'MNI152')
 
         # Verify all transforms exist
-        if bbr_transform and bbr_transform.exists() and t1w_to_mni_affine.exists() and t1w_to_mni_warp.exists():
+        if bbr_transform and bbr_transform.exists() and anat_transforms:
+            t1w_to_mni_warp, t1w_to_mni_affine = anat_transforms
             logger.info("All required transforms found - proceeding with normalization")
             logger.info(f"  BBR (func→anat): {bbr_transform}")
             logger.info(f"  Affine (anat→MNI): {t1w_to_mni_affine}")
