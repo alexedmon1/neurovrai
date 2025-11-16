@@ -751,6 +751,48 @@ human-mri-preprocess/
 
 **For detailed status and implementation notes, see `PROJECT_STATUS.md`.**
 
+## Planned Analysis Features
+
+The following analysis features are planned for future development. Core preprocessing workflows are production-ready; these features will add advanced group-level and connectivity analyses.
+
+### Myelin Mapping
+- **T1w/T2w Ratio Images**: Modernize existing legacy implementation to current architecture
+  - Myelin content proxy from T1w/T2w intensity ratio
+  - Integration with config-driven workflow system
+
+### DWI Analysis
+- **MNI-Space Tractography**: Group-level probabilistic tractography for cross-subject comparisons
+  - Standard space connectivity matrices
+  - Population-level fiber tract analyses
+- **TBSS (Tract-Based Spatial Statistics)**: FA group analysis pipeline
+  - Skeleton-based voxelwise statistics
+  - Multi-subject white matter comparisons
+
+### Functional Analysis
+- **MELODIC (Group ICA)**: Identify consistent resting-state networks across subjects
+  - Temporal concatenation approach
+  - Component spatial maps and time courses
+- **ReHo (Regional Homogeneity)**: Local functional connectivity
+  - Kendall's coefficient of concordance
+  - Voxelwise or ROI-based measurements
+- **fALFF (Fractional ALFF)**: Low-frequency fluctuation analysis
+  - Ratio of low-frequency to total power
+  - Frequency-domain connectivity measures
+
+### Anatomical Analysis
+- **VBM (Voxel-Based Morphometry)**: Statistical comparison of brain structure
+  - FSL (fslvbm) or ANTs implementation
+  - Gray matter and white matter concentration analysis
+  - Multi-subject group studies
+
+### ASL Analysis
+- **Group-Level CBF Analysis**: Perfusion comparisons and modeling (TBD)
+  - CBF group statistics and test-retest reliability
+  - Arterial transit time analysis
+  - Perfusion-based connectivity
+
+**Note**: These features are not currently prioritized as core preprocessing is production-ready and meets current research needs. See `PROJECT_STATUS.md` for detailed implementation status.
+
 ## Recent Updates
 
 ### 2025-11-15: 🎊 Production Release Milestone

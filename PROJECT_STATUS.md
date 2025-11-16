@@ -240,6 +240,55 @@ The main challenge is the transformation pipeline:
 - ⏳ Interactive HTML dashboards with plotly/bokeh
 - ⏳ Automated outlier detection with statistical thresholds
 
+### 3. Additional Analysis Features (Priority: Low-Medium)
+
+**Preprocessing:**
+- ⏳ **T1w/T2w Myelin Mapping**: Modernize existing myelin/myelin_workflow.py to current architecture
+  - Review legacy implementation
+  - Update to functional workflow pattern
+  - Integrate with config system
+  - Add to production workflows
+
+**DWI Analysis:**
+- ⏳ **MNI-Space Tractography**: Group-level probabilistic tractography for cross-subject comparisons
+  - Warp subject ROIs to MNI space
+  - Run probtrackx2 in standard space
+  - Generate group connectivity matrices
+- ⏳ **TBSS Pipeline**: Tract-Based Spatial Statistics for FA group analysis
+  - Modernize legacy TBSS utilities
+  - Implement skeleton projection
+  - Voxelwise statistical testing
+  - Multi-subject group comparisons
+
+**Functional Analysis:**
+- ⏳ **MELODIC (Group ICA)**: Identify consistent brain networks across subjects
+  - Temporal concatenation of preprocessed BOLD data
+  - Group-level independent component analysis
+  - Component spatial maps and time courses
+- ⏳ **ReHo (Regional Homogeneity)**: Local connectivity analysis
+  - Kendall's coefficient of concordance within clusters
+  - Voxelwise or ROI-based ReHo maps
+  - Group-level statistical comparisons
+- ⏳ **fALFF (Fractional ALFF)**: Frequency-domain analysis
+  - Ratio of low-frequency power to total power
+  - ALFF and fALFF maps
+  - Group-level comparisons
+
+**Anatomical Analysis:**
+- ⏳ **VBM (Voxel-Based Morphometry)**: Structural group analysis
+  - Choose between FSL (fslvbm) or ANTs (more accurate)
+  - Tissue segmentation and normalization
+  - Statistical comparison of GM/WM concentration
+  - Multi-subject group studies
+
+**ASL Analysis:**
+- ⏳ **Group-Level ASL Analysis**: To be determined based on research needs
+  - Common approaches: CBF group comparisons, test-retest reliability, arterial transit time analysis
+  - CBF as connectivity regressor
+  - Perfusion territory mapping
+
+**Note**: These features are not currently prioritized as the core preprocessing workflows (anatomical, DWI, functional, ASL) are production-ready and meet current research needs.
+
 ---
 
 ## 🐛 Known Issues & Limitations
