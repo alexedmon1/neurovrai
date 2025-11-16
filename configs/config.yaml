@@ -1,0 +1,126 @@
+# MRI Preprocessing Pipeline Configuration
+# Generated for: /mnt/bytopia/IRC805
+#
+# IMPORTANT: Review and customize before using!
+# - Verify all paths are correct
+# - Check sequence-specific parameters (TR, TE, readout_time)
+# - Adjust processing parameters based on your needs
+#
+# Directory Structure:
+#   /mnt/bytopia/IRC805/
+#   ├── raw/dicom/           # Raw DICOM files (input)
+#   ├── bids/                # Converted NIfTI files (created by pipeline)
+#   ├── derivatives/         # Preprocessed outputs
+#   ├── work/                # Temporary Nipype files (can be deleted)
+#   ├── qc/                  # Quality control reports
+#   ├── logs/                # Log files
+#   └── transforms/          # Spatial transformation matrices
+#
+# Usage:
+#   # Single subject
+#   uv run python run_simple_pipeline.py --subject SUB_ID --dicom-dir /mnt/bytopia/IRC805/raw/dicom/SUB_ID --config config.yaml
+#
+#   # Batch processing
+#   uv run python run_batch_simple.py --config config.yaml
+#
+
+project_dir: /mnt/bytopia/IRC805
+dicom_dir: /mnt/bytopia/IRC805/raw/dicom
+bids_dir: /mnt/bytopia/IRC805/bids
+derivatives_dir: /mnt/bytopia/IRC805/derivatives
+work_dir: /mnt/bytopia/IRC805/work
+paths:
+  logs: /mnt/bytopia/IRC805/logs
+  transforms: /mnt/bytopia/IRC805/transforms
+  qc: /mnt/bytopia/IRC805/qc
+execution:
+  plugin: MultiProc
+  n_procs: 6
+templates:
+  mni152_t1_2mm: /usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz
+  mni152_t1_1mm: /usr/local/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz
+  fmrib58_fa: /usr/local/fsl/data/standard/FMRIB58_FA_1mm.nii.gz
+anatomical:
+  bet:
+    frac: 0.5
+    reduce_bias: true
+    robust: true
+  bias_correction:
+    n_iterations: [50, 50, 30, 20]  # N4 multi-resolution iterations
+    shrink_factor: 3                 # Downsampling for speed
+    convergence_threshold: 0.001     # Convergence criterion
+    bspline_fitting_distance: 300    # B-spline mesh resolution
+  segmentation_method: ants
+  atropos:
+    number_of_tissue_classes: 3      # CSF, GM, WM
+    initialization: KMeans           # KMeans, Otsu, or PriorProbabilityImages
+    n_iterations: 5
+    convergence_threshold: 0.001
+    mrf_smoothing_factor: 0.1
+    mrf_radius: [1, 1, 1]            # Markov Random Field spatial smoothing radius
+  registration_method: fsl
+  run_qc: true
+diffusion:
+  denoise_method: dwidenoise
+  bet:
+    frac: 0.3  # Lower than anatomical (0.5) - DWI has lower contrast
+  topup:
+    enabled: auto
+    readout_time: 0.05
+  eddy_config:
+    flm: linear
+    slm: linear
+    use_cuda: true
+  advanced_models:
+    enabled: auto
+    fit_dki: true
+    fit_noddi: true
+    fit_sandi: false
+    fit_activeax: false
+    use_amico: true
+  run_qc: true
+functional:
+  tr: 1.029
+  te:
+  - 10.0
+  - 30.0
+  - 50.0
+  bet:
+    frac: 0.3  # Lower than anatomical - functional has lower contrast
+  highpass: 0.001
+  lowpass: 0.08
+  fwhm: 6
+  normalize_to_mni: true
+  tedana:
+    enabled: true
+    tedpca: 225  # Manual PCA: 450 volumes / 2 = 225 components (improved ICA convergence)
+                 # Options: 'kundu' (auto), 'aic', 'kic', 'mdl', float (0-1 variance), or int (num components)
+    tree: kundu
+  aroma:
+    enabled: auto
+  acompcor:
+    enabled: true
+    num_components: 5
+    variance_threshold: 0.5
+  run_qc: true
+asl:
+  labeling_type: pcasl
+  labeling_duration: 1.932
+  post_labeling_delay: 2.031
+  bet:
+    frac: 0.3  # Lower than anatomical - ASL has lower contrast
+  labeling_efficiency: 0.85
+  t1_blood: 1.65
+  blood_brain_partition: 0.9
+  label_control_order: control_first
+  background_suppression_pulses: 1
+  apply_m0_calibration: true
+  wm_cbf_reference: 25.0
+  apply_pvc: false
+  normalize_to_mni: false
+  run_qc: true
+freesurfer:
+  enabled: false
+  subjects_dir: /mnt/bytopia/IRC805/freesurfer
+  use_for_tractography: false
+  use_for_masks: false

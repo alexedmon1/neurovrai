@@ -251,7 +251,7 @@ class PipelineOrchestrator:
         """Run anatomical preprocessing workflow."""
         try:
             # Find T1w file
-            t1w_file = self._find_file('anat', '*T1*')
+            t1w_file = self._find_file('anat', '*T1*.nii.gz')
             if not t1w_file:
                 logger.error("T1w file not found")
                 return None
@@ -555,16 +555,23 @@ def main():
     config = load_config(args.config)
 
     # Determine study root
+    # Priority: 1) --study-root argument, 2) config project_dir, 3) infer from paths
     if args.study_root:
         study_root = args.study_root
+    elif 'project_dir' in config:
+        # Use project_dir from config (most reliable)
+        study_root = Path(config['project_dir'])
+        logger.info(f"Using study root from config: {study_root}")
     elif args.dicom_dir:
-        # Assume study root is 2 levels up from subject DICOM dir
+        # Fallback: Assume study root is 2 levels up from subject DICOM dir
         study_root = args.dicom_dir.parent.parent
+        logger.warning(f"Inferring study root from DICOM path: {study_root}")
     else:
-        # Assume study root is 1 level up from subject NIfTI dir
+        # Fallback: Assume study root is 1 level up from subject NIfTI dir
         study_root = args.nifti_dir.parent
+        logger.warning(f"Inferring study root from NIfTI path: {study_root}")
 
-    # Override study root in config if provided
+    # Override study root in config if provided via argument
     if args.study_root:
         config['project_dir'] = str(study_root)
 

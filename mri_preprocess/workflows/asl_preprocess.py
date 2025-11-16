@@ -154,6 +154,10 @@ def run_asl_preprocessing(
     logger.info(f"Working directory: {work_dir}")
     logger.info("")
 
+    # Extract BET parameters from config
+    asl_config = config.get('asl', {})
+    bet_frac = asl_config.get('bet', {}).get('frac', 0.3)  # Default: 0.3 for ASL
+
     # Automatic DICOM parameter extraction (if available)
     dicom_params = None
     if dicom_dir and dicom_dir.exists():
@@ -288,7 +292,7 @@ def run_asl_preprocessing(
         'bet',
         str(control_mean_file),
         str(work_dir / 'brain'),
-        '-f', '0.3',  # Aggressive for low-intensity ASL
+        '-f', str(bet_frac),  # Configurable - ASL has low contrast
         '-m',  # Generate mask
         '-R'   # Robust
     ]

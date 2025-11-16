@@ -1,9 +1,68 @@
 # MRI Preprocessing Pipeline - Project Status
-**Last Updated**: 2025-11-15
+**Last Updated**: 2025-11-16
 
 ## 🎯 Project Overview
 
 Production-ready MRI preprocessing pipeline for anatomical, diffusion, functional, and ASL data with comprehensive QC and standardized outputs.
+
+---
+
+## 📝 Latest Updates (2025-11-16)
+
+### Configuration System Enhancement ✅
+**Goal**: Make all critical processing parameters configurable via `config.yaml`
+
+**Completed**:
+1. **Config File Location**: Config now lives in study root (`{study_root}/config.yaml`)
+   - Auto-created by `create_config.py --study-root /path/to/study`
+   - Each study has its own config co-located with data
+   - No more confusion about which config goes with which study
+
+2. **Configurable Parameters** (Option 1 Implementation):
+   - ✅ **BET fractional intensity** - Now configurable per modality:
+     - `anatomical.bet.frac` (default: 0.5)
+     - `diffusion.bet.frac` (default: 0.3)
+     - `functional.bet.frac` (default: 0.3)
+     - `asl.bet.frac` (default: 0.3)
+   - ✅ **N4 bias correction** - 4 parameters now configurable:
+     - `anatomical.bias_correction.n_iterations` (default: [50, 50, 30, 20])
+     - `anatomical.bias_correction.shrink_factor` (default: 3)
+     - `anatomical.bias_correction.convergence_threshold` (default: 0.001)
+     - `anatomical.bias_correction.bspline_fitting_distance` (default: 300)
+   - ✅ **Atropos segmentation** - 6 parameters now configurable:
+     - `anatomical.atropos.number_of_tissue_classes` (default: 3)
+     - `anatomical.atropos.initialization` (default: 'KMeans')
+     - `anatomical.atropos.n_iterations` (default: 5)
+     - `anatomical.atropos.convergence_threshold` (default: 0.001)
+     - `anatomical.atropos.mrf_smoothing_factor` (default: 0.1)
+     - `anatomical.atropos.mrf_radius` (default: [1, 1, 1])
+   - ✅ **TEDANA PCA components** - Already configurable:
+     - `functional.tedana.tedpca` (updated default: 225 for 450 volumes)
+
+3. **Future Enhancements Documented**: `docs/FUTURE_ENHANCEMENTS.md`
+   - Tractography parameters (n_samples, n_steps, step_length, curvature_threshold)
+   - AMICO model parameters (NODDI, SANDI, ActiveAx diffusivities)
+
+4. **Project Cleanup**:
+   - ✅ Archived old runner scripts → `archive/runners/`
+   - ✅ Archived old documentation → `docs/archive/`
+   - ✅ Clean root directory with only current production files
+   - ✅ Updated README with current Quick Start and project structure
+
+**Files Modified**:
+- `config.yaml` - Added all new config sections
+- `create_config.py` - Auto-populates all defaults
+- `mri_preprocess/workflows/dwi_preprocess.py` - Reads BET frac from config
+- `mri_preprocess/workflows/func_preprocess.py` - Reads BET frac from config (2 locations)
+- `mri_preprocess/workflows/asl_preprocess.py` - Reads BET frac from config
+- `mri_preprocess/workflows/anat_preprocess.py` - Reads N4 and Atropos params from config
+- `README.md` - Updated Quick Start, added Project Structure
+- `QUICKSTART.md` - Updated with config location
+- `docs/FUTURE_ENHANCEMENTS.md` - Created for Option 2 parameters
+
+**Total Hardcoded Values Fixed**: 13 → Now configurable
+**Legacy Scripts Archived**: 5 (run_preprocessing.py, run_full_pipeline.py, etc.)
+**Old Docs Archived**: 3 (CONFIG_SETUP.md, CONFIG_SUMMARY.md, SIMPLE_PIPELINE_GUIDE.md)
 
 ---
 

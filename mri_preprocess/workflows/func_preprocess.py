@@ -60,7 +60,9 @@ def run_tedana(
     echo_files: List[Path],
     echo_times: List[float],
     output_dir: Path,
-    mask_file: Optional[Path] = None
+    mask_file: Optional[Path] = None,
+    tedpca: any = 0.95,  # Can be 'kundu', 'aic', 'kic', 'mdl', float (variance), or int (n_components)
+    tree: str = 'kundu'
 ) -> Dict[str, Path]:
     """
     Run TEDANA multi-echo denoising.
@@ -75,6 +77,16 @@ def run_tedana(
         Output directory for TEDANA results
     mask_file : Path, optional
         Brain mask file
+    tedpca : str, int, or float, optional
+        PCA component selection method:
+        - 'kundu': Kundu decision tree (auto, may be unstable)
+        - 'aic', 'kic', 'mdl': Information criteria methods
+        - float (0-1): Variance explained (e.g., 0.95 = 95%)
+        - int: Specific number of components (e.g., 225)
+        Default: 0.95 (95% variance)
+    tree : str, optional
+        Decision tree for component classification
+        Default: 'kundu'
 
     Returns
     -------
@@ -112,8 +124,8 @@ def run_tedana(
     param_dict = {
         'echo_files': [str(f) for f in echo_files],
         'echo_times': echo_times,
-        'tedpca': 225,
-        'tree': 'kundu',
+        'tedpca': tedpca,
+        'tree': tree,
         'mask': str(mask_file) if mask_file else None
     }
     param_hash = hashlib.md5(json.dumps(param_dict, sort_keys=True).encode()).hexdigest()
@@ -152,8 +164,8 @@ def run_tedana(
             tes=tes_sec,
             out_dir=str(output_dir),
             mask=str(mask_file) if mask_file else None,
-            tedpca=225,  # Manual PCA: 450 volumes / 2 = 225 components (improved ICA convergence)
-            tree='kundu',
+            tedpca=tedpca,  # Configurable: can be 'kundu', 'aic', 'kic', 'mdl', float (0-1), or int (num components)
+            tree=tree,  # Configurable: 'kundu' (default) or 'kundu_tedort'
             verbose=True,
             prefix='tedana',
             overwrite=True  # Allow overwriting partial outputs from failed runs
@@ -219,6 +231,7 @@ def create_func_preprocessing_workflow(
     highpass = config.get('highpass', 0.001)
     lowpass = config.get('lowpass', 0.08)
     fwhm = config.get('fwhm', 6)
+    bet_frac = config.get('bet', {}).get('frac', 0.3)  # Default: 0.3 for functional
 
     # Temporal filtering (bandpass)
     bandpass = Node(afni.Bandpass(
@@ -252,7 +265,7 @@ def create_func_preprocessing_workflow(
         ), name='motion_correction')
 
         bet = Node(fsl.BET(
-            frac=0.3,
+            frac=bet_frac,
             functional=True,
             mask=True,
             output_type='NIFTI_GZ'
@@ -400,6 +413,9 @@ def run_func_preprocessing(
     # Detect multi-echo vs single-echo
     is_multiecho = isinstance(func_file, list) and len(func_file) > 1
 
+    # Extract BET parameters from config
+    bet_frac = config.get('bet', {}).get('frac', 0.3)  # Default: 0.3 for functional
+
     # Step 1: Multi-echo motion correction and TEDANA
     if is_multiecho and config.get('tedana', {}).get('enabled', True):
         echo_files = [Path(f) for f in func_file]
@@ -526,7 +542,7 @@ def run_func_preprocessing(
                 'bet',
                 str(mcflirt_out),
                 str(derivatives_dir / 'func_brain'),
-                '-f', '0.3',
+                '-f', str(bet_frac),
                 '-m',
                 '-R'
             ]
@@ -541,11 +557,18 @@ def run_func_preprocessing(
 
         # Step 1d: Run TEDANA on motion-corrected echoes
         tedana_dir = derivatives_dir / 'tedana'
+        # Extract TEDANA config (with defaults)
+        tedana_config = config.get('tedana', {})
+        tedpca = tedana_config.get('tedpca', 0.95)  # Default: 95% variance (auto)
+        tree = tedana_config.get('tree', 'kundu')   # Default: kundu decision tree
+
         tedana_results = run_tedana(
             echo_files=motion_corrected_echoes,
             echo_times=echo_times,
             output_dir=tedana_dir,
-            mask_file=mask_file
+            mask_file=mask_file,
+            tedpca=tedpca,
+            tree=tree
         )
 
         # Use optimally combined data for further processing

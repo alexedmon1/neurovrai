@@ -74,6 +74,52 @@ A production-ready, config-driven MRI preprocessing pipeline for multiple neuroi
 - **Quality Control Framework**: Automated QC for all modalities with HTML reports and metric tracking
 - **Multi-Echo Support**: TEDANA 25.1.0 with automatic component classification and ICA-AROMA fallback
 
+## Project Structure
+
+```
+human-mri-preprocess/
+├── README.md                    # This file
+├── QUICKSTART.md                # Fast-track setup guide
+├── SETUP_GUIDE.md               # Detailed setup instructions
+├── DEPENDENCIES.md              # Package reference
+├── PROJECT_STATUS.md            # Implementation status
+├── CLAUDE.md                    # AI assistant guidelines
+│
+├── create_config.py             # Config generator
+├── verify_environment.py        # Environment validation
+├── run_simple_pipeline.py       # Single-subject runner
+├── run_batch_simple.py          # Batch processor
+│
+├── mri_preprocess/              # Production code
+│   ├── workflows/               # Preprocessing workflows
+│   │   ├── anat_preprocess.py
+│   │   ├── dwi_preprocess.py
+│   │   ├── func_preprocess.py
+│   │   ├── asl_preprocess.py
+│   │   ├── advanced_diffusion.py
+│   │   ├── amico_models.py
+│   │   └── tractography.py
+│   ├── utils/                   # Helper functions
+│   ├── qc/                      # Quality control
+│   └── dicom/                   # DICOM conversion
+│
+├── docs/                        # Documentation
+│   ├── workflows.md             # Workflow details
+│   ├── FUTURE_ENHANCEMENTS.md   # Planned features
+│   ├── implementation/          # Technical docs
+│   ├── status/                  # Progress tracking
+│   └── archive/                 # Old documentation
+│
+├── archive/                     # Legacy code (preserved)
+│   ├── runners/                 # Old pipeline runners
+│   ├── anat/                    # Legacy workflows
+│   ├── dwi/
+│   ├── rest/
+│   └── tests/
+│
+└── examples/                    # Usage examples
+```
+
 ## Prerequisites
 
 ### System Requirements
@@ -135,66 +181,69 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
+## Quick Start
+
+See [QUICKSTART.md](QUICKSTART.md) for the fastest way to get started!
+
+**TL;DR**:
+```bash
+# 1. Create config (creates /mnt/bytopia/IRC805/config.yaml)
+python create_config.py --study-root /mnt/bytopia/IRC805
+
+# 2. Install dependencies
+uv sync
+
+# 3. Run single subject
+uv run python run_simple_pipeline.py \
+    --subject IRC805-0580101 \
+    --dicom-dir /mnt/bytopia/IRC805/raw/dicom/IRC805-0580101 \
+    --config /mnt/bytopia/IRC805/config.yaml
+
+# 4. Run batch processing
+uv run python run_batch_simple.py --config /mnt/bytopia/IRC805/config.yaml
+```
+
 ## How to Run the Pipeline
 
-The pipeline provides multiple ways to process MRI data, from simple single-modality runs to complete multi-modal preprocessing.
-
-### Prerequisites
-
-Before running any preprocessing:
-
-1. **Install dependencies** (see Installation section above)
-2. **Activate environment**: `source .venv/bin/activate` (if not using `uv run`)
-3. **Create config file**: `config.yaml` with your study paths (see Configuration section)
-4. **Organize data**: DICOM files or BIDS-organized NIfTI files
-
-### Running Preprocessing for a Subject
-
-#### Option 1: Individual Modality Preprocessing (Recommended)
-
-Run preprocessing one modality at a time for maximum control:
+### Step 1: Create Configuration
 
 ```bash
-# IMPORTANT: Use uv run for dependency management
-uv run python run_preprocessing.py --subject sub-001 --modality anat
-uv run python run_preprocessing.py --subject sub-001 --modality dwi
-uv run python run_preprocessing.py --subject sub-001 --modality func
-uv run python run_preprocessing.py --subject sub-001 --modality asl
+# Create study-specific config.yaml
+python create_config.py --study-root /mnt/bytopia/IRC805
+
+# This creates /mnt/bytopia/IRC805/config.yaml
+# Edit it to customize TR, TE, readout_time, and other parameters
 ```
 
-**Workflow order**:
-1. **Anatomical first**: Required for functional/ASL registration
-2. **DWI**: Independent, can run in parallel with anatomical
-3. **Functional**: Requires anatomical outputs for registration
-4. **ASL**: Requires anatomical outputs for registration
-
-**Example: Complete subject preprocessing**
+### Step 2: Single Subject Processing
 
 ```bash
-# Step 1: Run anatomical (foundation for other modalities)
-uv run python run_preprocessing.py --subject sub-001 --modality anat
-
-# Step 2: Run DWI (can run while functional processes)
-uv run python run_preprocessing.py --subject sub-001 --modality dwi &
-
-# Step 3: Run functional (needs anatomical complete)
-uv run python run_preprocessing.py --subject sub-001 --modality func &
-
-# Step 4: Run ASL (needs anatomical complete)
-uv run python run_preprocessing.py --subject sub-001 --modality asl &
-
-# Wait for all background jobs
-wait
+# Process one subject with all modalities
+uv run python run_simple_pipeline.py \
+    --subject IRC805-0580101 \
+    --dicom-dir /mnt/bytopia/IRC805/raw/dicom/IRC805-0580101 \
+    --config /mnt/bytopia/IRC805/config.yaml
 ```
 
-#### Option 2: All Modalities at Once
+**What it does:**
+1. Converts DICOM to NIfTI
+2. Runs anatomical preprocessing (required first)
+3. Runs DWI preprocessing (if DWI data exists)
+4. Runs functional preprocessing (if functional data exists)
+5. Runs ASL preprocessing (if ASL data exists)
 
-Process all available modalities for a subject:
+### Step 3: Batch Processing
 
 ```bash
-# Run all modalities (anatomical → others in parallel)
-uv run python run_preprocessing.py --subject sub-001 --modality all
+# Process all subjects in the DICOM directory
+uv run python run_batch_simple.py --config /mnt/bytopia/IRC805/config.yaml
 ```
+
+**Features:**
+- Auto-discovers subjects from DICOM directory
+- Processes subjects sequentially
+- Continues on errors
+- Generates summary report
 
 **What happens**:
 1. Anatomical preprocessing runs first

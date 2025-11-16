@@ -133,12 +133,15 @@ def create_bias_correction_node(
         name=name
     )
 
-    # Set parameters for fast processing
+    # Extract bias correction parameters from config
+    bias_config = config.get('anatomical', {}).get('bias_correction', {})
+
+    # Set parameters from config
     n4.inputs.dimension = 3
-    n4.inputs.n_iterations = [50, 50, 30, 20]  # Reduced iterations for speed
-    n4.inputs.shrink_factor = 3  # Downsample for speed
-    n4.inputs.convergence_threshold = 0.001
-    n4.inputs.bspline_fitting_distance = 300
+    n4.inputs.n_iterations = bias_config.get('n_iterations', [50, 50, 30, 20])
+    n4.inputs.shrink_factor = bias_config.get('shrink_factor', 3)
+    n4.inputs.convergence_threshold = bias_config.get('convergence_threshold', 0.001)
+    n4.inputs.bspline_fitting_distance = bias_config.get('bspline_fitting_distance', 300)
 
     return n4
 
@@ -173,16 +176,18 @@ def create_segmentation_node(
         name=name
     )
 
-    # Set parameters for 3-class segmentation
-    # Input will be the N4-bias-corrected image
+    # Extract Atropos parameters from config
+    atropos_config = config.get('anatomical', {}).get('atropos', {})
+
+    # Set parameters from config
     atropos.inputs.dimension = 3
-    atropos.inputs.number_of_tissue_classes = 3  # CSF, GM, WM
-    atropos.inputs.initialization = 'KMeans'  # Nipype expects just the method name
-    atropos.inputs.likelihood_model = 'Gaussian'
-    atropos.inputs.mrf_smoothing_factor = 0.1
-    atropos.inputs.mrf_radius = [1, 1, 1]
-    atropos.inputs.convergence_threshold = 0.001
-    atropos.inputs.n_iterations = 5
+    atropos.inputs.number_of_tissue_classes = atropos_config.get('number_of_tissue_classes', 3)
+    atropos.inputs.initialization = atropos_config.get('initialization', 'KMeans')
+    atropos.inputs.likelihood_model = 'Gaussian'  # Standard choice
+    atropos.inputs.mrf_smoothing_factor = atropos_config.get('mrf_smoothing_factor', 0.1)
+    atropos.inputs.mrf_radius = atropos_config.get('mrf_radius', [1, 1, 1])
+    atropos.inputs.convergence_threshold = atropos_config.get('convergence_threshold', 0.001)
+    atropos.inputs.n_iterations = atropos_config.get('n_iterations', 5)
     atropos.inputs.save_posteriors = True  # Save probability maps
     atropos.inputs.output_posteriors_name_template = 'POSTERIOR_%02d.nii.gz'
 

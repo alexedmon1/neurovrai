@@ -1067,8 +1067,12 @@ def create_dwi_preprocessing_workflow(
         name='extract_b0'
     )
 
+    # Get BET parameters from config
+    bet_config = config.get('diffusion', {}).get('bet', {})
+    bet_frac = bet_config.get('frac', 0.3)  # Default: 0.3 for DWI
+
     bet_dwi = Node(
-        fsl.BET(frac=0.3, mask=True, robust=True),
+        fsl.BET(frac=bet_frac, mask=True, robust=True),
         name='bet_dwi'
     )
 

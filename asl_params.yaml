@@ -1,8 +1,0 @@
-asl:
-  labeling_type: pcasl
-  labeling_duration: 1.93162393162393
-  post_labeling_delay: 2.0306763648986816
-  labeling_efficiency: 0.85
-  t1_blood: 1.65
-  blood_brain_partition: 0.9
-  label_control_order: control_first
