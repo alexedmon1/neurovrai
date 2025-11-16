@@ -155,7 +155,8 @@ def run_tedana(
             tedpca=225,  # Manual PCA: 450 volumes / 2 = 225 components (improved ICA convergence)
             tree='kundu',
             verbose=True,
-            prefix='tedana'
+            prefix='tedana',
+            overwrite=True  # Allow overwriting partial outputs from failed runs
         )
 
         logger.info("TEDANA completed successfully")
@@ -696,8 +697,8 @@ def run_func_preprocessing(
             transform_file=func_to_anat_bbr,
             source_space='func',
             target_space='T1w',
-            source_image=tedana_output,
-            reference=t1w_brain
+            source_image=func_input,
+            reference=brain_file
         )
         results['func_to_anat_bbr'] = bbr_transform
         logger.info(f"  BBR transform saved to registry: {bbr_transform}")
@@ -789,7 +790,7 @@ def run_func_preprocessing(
         logger.info("=" * 70)
         logger.info("")
 
-        qc_dir = derivatives_dir / 'qc'
+        qc_dir = study_root / 'qc' / subject / 'func'
         qc_dir.mkdir(parents=True, exist_ok=True)
 
         # Motion QC (if motion params available)

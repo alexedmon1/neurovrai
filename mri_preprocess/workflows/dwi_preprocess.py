@@ -851,6 +851,92 @@ def run_dwi_multishell_topup_preprocessing(
         logger.info(f"  Normalized metrics saved to: {derivatives_dir / 'normalized'}")
         logger.info("")
 
+    # Step 9: Quality Control
+    run_qc = config.get('diffusion', {}).get('run_qc', True)
+    if run_qc:
+        logger.info("")
+        logger.info("="*70)
+        logger.info("Step 9: Quality Control")
+        logger.info("="*70)
+        logger.info("")
+
+        # Setup QC directory (study-level)
+        qc_dir = study_root / 'qc' / subject / 'dwi'
+        qc_dir.mkdir(parents=True, exist_ok=True)
+
+        # Import QC modules
+        from mri_preprocess.qc.dwi import TOPUPQualityControl, MotionQualityControl, DTIQualityControl
+
+        # 1. TOPUP QC (if TOPUP was used)
+        if use_topup and outputs.get('topup_fieldcoef'):
+            logger.info("Running TOPUP QC...")
+            topup_qc_dir = qc_dir / 'topup'
+            topup_qc_dir.mkdir(parents=True, exist_ok=True)
+
+            topup_qc = TOPUPQualityControl(
+                subject=subject,
+                work_dir=work_dir / 'dwi_preprocess',
+                qc_dir=topup_qc_dir
+            )
+
+            try:
+                topup_results = topup_qc.run_qc(
+                    topup_log=None,  # Will auto-detect
+                    fieldcoef_file=outputs.get('topup_fieldcoef')
+                )
+                outputs['topup_qc'] = topup_results
+                logger.info(f"  ✓ TOPUP QC complete: {topup_qc_dir}")
+            except Exception as e:
+                logger.warning(f"  TOPUP QC failed: {e}")
+
+        # 2. Motion QC (eddy parameters)
+        if outputs.get('eddy_corrected'):
+            logger.info("Running Motion QC...")
+            motion_qc_dir = qc_dir / 'motion'
+            motion_qc_dir.mkdir(parents=True, exist_ok=True)
+
+            motion_qc = MotionQualityControl(
+                subject=subject,
+                work_dir=work_dir / 'dwi_preprocess',
+                qc_dir=motion_qc_dir
+            )
+
+            try:
+                motion_results = motion_qc.run_qc(
+                    eddy_params_file=None,  # Will auto-detect
+                    fd_threshold=config.get('diffusion', {}).get('fd_threshold', 1.0)
+                )
+                outputs['motion_qc'] = motion_results
+                logger.info(f"  ✓ Motion QC complete: {motion_qc_dir}")
+            except Exception as e:
+                logger.warning(f"  Motion QC failed: {e}")
+
+        # 3. DTI QC (metrics validation)
+        if outputs.get('fa') and outputs.get('md'):
+            logger.info("Running DTI QC...")
+            dti_qc_dir = qc_dir / 'dti'
+            dti_qc_dir.mkdir(parents=True, exist_ok=True)
+
+            dti_qc = DTIQualityControl(
+                subject=subject,
+                metrics_dir=derivatives_dir / 'dti',
+                qc_dir=dti_qc_dir
+            )
+
+            try:
+                dti_results = dti_qc.run_qc(
+                    metrics=['FA', 'MD', 'AD', 'RD'],
+                    mask_file=outputs.get('mask')
+                )
+                outputs['dti_qc'] = dti_results
+                logger.info(f"  ✓ DTI QC complete: {dti_qc_dir}")
+            except Exception as e:
+                logger.warning(f"  DTI QC failed: {e}")
+
+        logger.info("")
+        logger.info(f"QC reports saved to: {qc_dir}")
+        logger.info("")
+
     logger.info("")
     logger.info("="*70)
     logger.info("PREPROCESSING COMPLETED SUCCESSFULLY!")
