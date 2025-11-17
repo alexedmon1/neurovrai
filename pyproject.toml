@@ -1,7 +1,7 @@
 [project]
-name = "human-mri-preprocess"
-version = "0.1.0"
-description = "MRI preprocessing pipeline with multi-echo fMRI (TEDANA), diffusion tractography, and config-driven workflows"
+name = "neurovrai"
+version = "2.0.0-alpha"
+description = "Comprehensive MRI preprocessing, analysis, and connectivity package: from raw DICOM to group statistics and network neuroscience"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -26,4 +26,4 @@ dependencies = [
 ]
 
 [project.scripts]
-mri-preprocess = "mri_preprocess.cli:main"
+neurovrai = "neurovrai.preprocess.cli:main"

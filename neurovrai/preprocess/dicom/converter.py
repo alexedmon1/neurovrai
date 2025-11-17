@@ -445,7 +445,7 @@ def batch_convert_subjects(
     >>> for subject, result in results.items():
     ...     print(f"{subject}: {len(result['nifti_files'])} files")
     """
-    from mri_preprocess.utils.bids import get_subject_dir
+    from neurovrai.preprocess.utils.bids import get_subject_dir
 
     results = {}
 

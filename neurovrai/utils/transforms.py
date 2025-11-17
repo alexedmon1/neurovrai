@@ -237,6 +237,118 @@ class TransformRegistry:
 
         return dest_warp, dest_affine
 
+    def save_ants_composite_transform(
+        self,
+        composite_file: Path,
+        source_space: str,
+        target_space: str,
+        reference: Optional[Path] = None,
+        source_image: Optional[Path] = None
+    ) -> Path:
+        """
+        Save an ANTs composite transformation (includes all stages).
+
+        Parameters
+        ----------
+        composite_file : Path
+            Path to ANTs composite transform (.h5 or .mat)
+        source_space : str
+            Source coordinate space
+        target_space : str
+            Target coordinate space
+        reference : Path, optional
+            Reference image
+        source_image : Path, optional
+            Source image
+
+        Returns
+        -------
+        Path
+            Path to saved composite transform
+
+        Examples
+        --------
+        >>> registry.save_ants_composite_transform(
+        ...     composite_file=Path("ants_Composite.h5"),
+        ...     source_space="T1w",
+        ...     target_space="MNI152"
+        ... )
+        """
+        composite_file = Path(composite_file)
+
+        if not composite_file.exists():
+            raise FileNotFoundError(f"Composite transform file not found: {composite_file}")
+
+        # Build destination path
+        key = self._get_transform_key(source_space, target_space)
+        # Preserve original extension (.h5 or .mat)
+        ext = composite_file.suffix
+        dest_file = self.subject_dir / f"{key}_composite{ext}"
+
+        # Copy file
+        shutil.copy2(composite_file, dest_file)
+
+        # Update metadata
+        self.metadata['transforms'][key] = {
+            'type': 'ants_composite',
+            'method': 'ants',
+            'source_space': source_space,
+            'target_space': target_space,
+            'composite_file': str(dest_file),
+            'reference': str(reference) if reference else None,
+            'source_image': str(source_image) if source_image else None,
+            'created': datetime.now().isoformat()
+        }
+
+        self._save_metadata()
+
+        return dest_file
+
+    def get_transform_method(
+        self,
+        source_space: str,
+        target_space: str
+    ) -> Optional[str]:
+        """
+        Get the registration method used for a transformation.
+
+        Parameters
+        ----------
+        source_space : str
+            Source coordinate space
+        target_space : str
+            Target coordinate space
+
+        Returns
+        -------
+        str or None
+            'ants', 'fsl', or None if not found
+
+        Examples
+        --------
+        >>> method = registry.get_transform_method("T1w", "MNI152")
+        >>> if method == 'ants':
+        ...     # Use ANTs tools
+        >>> elif method == 'fsl':
+        ...     # Use FSL tools
+        """
+        key = self._get_transform_key(source_space, target_space)
+
+        if key not in self.metadata['transforms']:
+            return None
+
+        transform_info = self.metadata['transforms'][key]
+
+        # Check explicit method field
+        if 'method' in transform_info:
+            return transform_info['method']
+
+        # Infer from type for backward compatibility
+        if transform_info['type'] == 'ants_composite':
+            return 'ants'
+        else:
+            return 'fsl'  # Default for linear/nonlinear types
+
     def get_linear_transform(
         self,
         source_space: str,
@@ -284,7 +396,10 @@ class TransformRegistry:
         target_space: str
     ) -> Optional[Tuple[Path, Path]]:
         """
-        Get a nonlinear transformation (warp + affine).
+        Get a nonlinear transformation.
+
+        For FSL: Returns (warp_file, affine_file)
+        For ANTs: Returns (composite_file, composite_file) for compatibility
 
         Parameters
         ----------
@@ -296,14 +411,15 @@ class TransformRegistry:
         Returns
         -------
         tuple or None
-            (warp_file, affine_file) or None if not found
+            (warp/composite, affine/composite) or None if not found
 
         Examples
         --------
         >>> result = registry.get_nonlinear_transform("T1w", "MNI152")
         >>> if result:
         ...     warp, affine = result
-        ...     # Use transformations
+        ...     # Check registration method to determine how to use these
+        ...     method = registry.get_transform_method("T1w", "MNI152")
         """
         key = self._get_transform_key(source_space, target_space)
 
@@ -312,8 +428,18 @@ class TransformRegistry:
 
         transform_info = self.metadata['transforms'][key]
 
+        # Handle ANTs composite transforms
+        if transform_info['type'] == 'ants_composite':
+            composite_file = Path(transform_info['composite_file'])
+            if not composite_file.exists():
+                print(f"Warning: Composite transform missing: {composite_file}")
+                return None
+            # Return composite file as both warp and affine for compatibility
+            return composite_file, composite_file
+
+        # Handle FSL nonlinear transforms
         if transform_info['type'] != 'nonlinear':
-            print(f"Warning: Transform {key} is not nonlinear")
+            print(f"Warning: Transform {key} is not nonlinear or ants_composite")
             return None
 
         warp_file = Path(transform_info['warp_file'])
@@ -369,7 +495,10 @@ class TransformRegistry:
         if transform_info['type'] == 'linear':
             affine_file = Path(transform_info['affine_file'])
             return affine_file.exists()
-        else:  # nonlinear
+        elif transform_info['type'] == 'ants_composite':
+            composite_file = Path(transform_info['composite_file'])
+            return composite_file.exists()
+        else:  # nonlinear (FSL)
             warp_file = Path(transform_info['warp_file'])
             affine_file = Path(transform_info['affine_file'])
             return warp_file.exists() and affine_file.exists()
@@ -522,6 +651,11 @@ class TransformRegistry:
                 affine_file = Path(info['affine_file'])
                 if not affine_file.exists():
                     missing_files.append(str(affine_file))
+
+            elif info['type'] == 'ants_composite':
+                composite_file = Path(info['composite_file'])
+                if not composite_file.exists():
+                    missing_files.append(str(composite_file))
 
             elif info['type'] == 'nonlinear':
                 warp_file = Path(info['warp_file'])

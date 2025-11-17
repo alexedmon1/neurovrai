@@ -11,12 +11,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import logging
 
-from mri_preprocess.utils.bids import (
+from neurovrai.preprocess.utils.bids import (
     get_modality_dir,
     build_bids_filename,
     save_json_sidecar
 )
-from mri_preprocess.utils.file_finder import match_sequence
+from neurovrai.preprocess.utils.file_finder import match_sequence
 
 
 class BIDSConverter:
@@ -350,7 +350,7 @@ class BIDSConverter:
             issues.append("Missing dataset_description.json")
 
         # Check subject directory exists
-        from mri_preprocess.utils.bids import get_subject_dir
+        from neurovrai.preprocess.utils.bids import get_subject_dir
         subject_dir = get_subject_dir(self.rawdata_dir, self.subject, self.session)
         if not subject_dir.exists():
             issues.append(f"Subject directory not found: {subject_dir}")
@@ -414,7 +414,7 @@ def convert_and_organize(
     ... )
     >>> print(f"Organized {len(result['organized_files'])} files")
     """
-    from mri_preprocess.dicom.converter import convert_dicom_to_nifti
+    from neurovrai.preprocess.dicom.converter import convert_dicom_to_nifti
     import tempfile
 
     # Use temp directory for initial conversion

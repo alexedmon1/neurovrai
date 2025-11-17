@@ -30,28 +30,28 @@ from nipype.algorithms import confounds
 import nibabel as nib
 import numpy as np
 
-from mri_preprocess.utils.workflow import (
+from neurovrai.utils.workflow import (
     setup_logging,
     get_node_config,
     get_execution_config,
     validate_inputs
 )
-from mri_preprocess.qc.func_qc import (
+from neurovrai.preprocess.qc.func_qc import (
     compute_motion_qc,
     compute_tsnr,
     compute_dvars,
     create_carpet_plot,
     generate_func_qc_report
 )
-from mri_preprocess.utils.acompcor_helper import (
+from neurovrai.preprocess.utils.acompcor_helper import (
     run_fast_segmentation,
     register_masks_to_functional,
     prepare_acompcor_masks,
     extract_acompcor_components,
     regress_out_components
 )
-from mri_preprocess.utils.func_normalization import normalize_func_to_mni152
-from mri_preprocess.utils.transforms import create_transform_registry
+from neurovrai.preprocess.utils.func_normalization import normalize_func_to_mni152
+from neurovrai.utils.transforms import create_transform_registry
 
 logger = logging.getLogger(__name__)
 
@@ -647,6 +647,10 @@ def run_func_preprocessing(
         if not is_multiecho:
             logger.warning("ICA-AROMA disabled for single-echo data - no motion artifact removal")
 
+    # Get execution configuration and set Nipype config BEFORE creating workflow
+    # This ensures hash_method is set when nodes are instantiated
+    exec_config = get_execution_config(config)
+
     wf = create_func_preprocessing_workflow(
         name='func_preproc',
         config=config,
@@ -671,7 +675,6 @@ def run_func_preprocessing(
 
     # Run workflow
     logger.info("Running bandpass filtering and smoothing...")
-    exec_config = get_execution_config(config)
     wf_result = wf.run(**exec_config)
 
     # Get outputs from work directory (result pickle may be in temp location)
@@ -899,10 +902,15 @@ def run_func_preprocessing(
         # Verify all transforms exist
         if bbr_transform and bbr_transform.exists() and anat_transforms:
             t1w_to_mni_warp, t1w_to_mni_affine = anat_transforms
+
+            # Get registration method from registry
+            registration_method = registry.get_transform_method('T1w', 'MNI152') or 'fsl'
+
             logger.info("All required transforms found - proceeding with normalization")
             logger.info(f"  BBR (func→anat): {bbr_transform}")
             logger.info(f"  Affine (anat→MNI): {t1w_to_mni_affine}")
             logger.info(f"  Warp (anat→MNI): {t1w_to_mni_warp}")
+            logger.info(f"  Registration method: {registration_method}")
             logger.info("")
 
             try:
@@ -913,7 +921,8 @@ def run_func_preprocessing(
                     t1w_to_mni_warp=t1w_to_mni_warp,
                     output_dir=derivatives_dir,
                     mni152_template=None,  # Uses $FSLDIR default
-                    interpolation='spline'
+                    interpolation='spline',
+                    registration_method=registration_method
                 )
 
                 results['func_to_mni_warp'] = norm_results['func_to_mni_warp']

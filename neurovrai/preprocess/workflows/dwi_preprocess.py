@@ -28,20 +28,20 @@ from nipype import Workflow, Node, MapNode
 from nipype.interfaces import fsl, utility as niu
 from nipype.interfaces.io import DataSink
 
-from mri_preprocess.utils.workflow import (
+from neurovrai.utils.workflow import (
     setup_logging,
     get_node_config,
     get_execution_config,
     validate_inputs
 )
-from mri_preprocess.utils.transforms import TransformRegistry, create_transform_registry
-from mri_preprocess.utils.bids import get_derivatives_dir
-from mri_preprocess.utils.topup_helper import create_topup_files_for_multishell
-from mri_preprocess.utils.dwi_normalization import (
+from neurovrai.utils.transforms import TransformRegistry, create_transform_registry
+from neurovrai.preprocess.utils.bids import get_derivatives_dir
+from neurovrai.preprocess.utils.topup_helper import create_topup_files_for_multishell
+from neurovrai.preprocess.utils.dwi_normalization import (
     normalize_dwi_to_fmrib58,
     apply_warp_to_metrics
 )
-from mri_preprocess.workflows.advanced_diffusion import run_advanced_diffusion_models
+from neurovrai.preprocess.workflows.advanced_diffusion import run_advanced_diffusion_models
 
 
 def merge_dwi_files(
@@ -321,6 +321,7 @@ def create_bedpostx_node(
     bedpostx.inputs.n_fibres = bedpostx_config.get('n_fibres', 2)
     bedpostx.inputs.n_jumps = bedpostx_config.get('n_jumps', 1250)
     bedpostx.inputs.burn_in = bedpostx_config.get('burn_in', 1000)
+    bedpostx.inputs.use_gpu = bedpostx_config.get('use_gpu', True)
 
     return bedpostx
 
@@ -687,6 +688,11 @@ def run_dwi_multishell_topup_preprocessing(
     # Step N: Run eddy correction
     step_num = 7 if use_topup else 3
     logger.info(f"Step {step_num}: Running eddy correction{' with TOPUP integration' if use_topup else ''}")
+
+    # Get execution configuration and set Nipype config BEFORE creating workflow
+    # This ensures hash_method is set when nodes are instantiated
+    exec_config = get_execution_config(config)
+
     # Pass parent directory so Nipype workflow files go directly in dwi_preprocess/
     # (Nipype would add workflow name as subdirectory, creating dwi_preprocess/dwi_eddy_dtifit/)
     wf = create_dwi_preprocessing_workflow(
@@ -703,9 +709,6 @@ def run_dwi_multishell_topup_preprocessing(
         run_bedpostx=run_bedpostx,
         name='dwi_preprocess'  # Changed from 'dwi_eddy_dtifit' to match expected directory
     )
-
-    # Get execution configuration
-    exec_config = get_execution_config(config)
 
     # Run workflow
     logger.info("  Running Nipype workflow (eddy, brain extraction, DTI fitting)...")
@@ -875,7 +878,7 @@ def run_dwi_multishell_topup_preprocessing(
         qc_dir.mkdir(parents=True, exist_ok=True)
 
         # Import QC modules
-        from mri_preprocess.qc.dwi import TOPUPQualityControl, MotionQualityControl, DTIQualityControl
+        from neurovrai.preprocess.qc.dwi import TOPUPQualityControl, MotionQualityControl, DTIQualityControl
 
         # 1. TOPUP QC (if TOPUP was used)
         if use_topup and outputs.get('topup_fieldcoef'):
@@ -1264,6 +1267,10 @@ def run_dwi_preprocessing(
     """
     logger = logging.getLogger(__name__)
 
+    # Get execution configuration and set Nipype config BEFORE creating workflow
+    # This ensures hash_method is set when nodes are instantiated
+    exec_config = get_execution_config(config)
+
     # Create workflow
     wf = create_dwi_preprocessing_workflow(
         config=config,
@@ -1276,9 +1283,6 @@ def run_dwi_preprocessing(
         session=session,
         run_bedpostx=run_bedpostx
     )
-
-    # Get execution configuration
-    exec_config = get_execution_config(config)
 
     # Run workflow
     wf.run(**exec_config)
@@ -1311,7 +1315,7 @@ def run_dwi_preprocessing(
 
             warp_file, affine_file = registry.get_nonlinear_transform('T1w', 'MNI152')
 
-            from mri_preprocess.utils.workflow import get_reference_template
+            from neurovrai.utils.workflow import get_reference_template
             mni_ref = get_reference_template('mni152_t1_2mm', config)
 
             # Warp FA to MNI

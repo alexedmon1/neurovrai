@@ -437,7 +437,7 @@ def anonymize_subject_data(
     ... )
     >>> print(f"Cleaned {results['nifti_json']} JSON files")
     """
-    from mri_preprocess.utils.bids import get_subject_dir
+    from neurovrai.preprocess.utils.bids import get_subject_dir
 
     results = {
         'nifti_json': 0,

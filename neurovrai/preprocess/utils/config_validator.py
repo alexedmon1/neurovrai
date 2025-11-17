@@ -395,7 +395,7 @@ def validate_all_workflows(config: Dict, has_dicom: bool = False) -> Dict[str, b
 
 if __name__ == '__main__':
     # Example usage
-    from mri_preprocess.config import load_config
+    from neurovrai.config import load_config
 
     logging.basicConfig(
         level=logging.INFO,

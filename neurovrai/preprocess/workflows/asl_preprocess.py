@@ -29,7 +29,7 @@ from typing import Dict, Optional, Any
 import nibabel as nib
 import numpy as np
 
-from mri_preprocess.utils.asl_cbf import (
+from neurovrai.preprocess.utils.asl_cbf import (
     separate_label_control,
     compute_perfusion_weighted_signal,
     quantify_cbf,
@@ -38,14 +38,14 @@ from mri_preprocess.utils.asl_cbf import (
     apply_partial_volume_correction,
     save_asl_outputs
 )
-from mri_preprocess.utils.dicom_asl_params import extract_asl_parameters
-from mri_preprocess.qc.asl_qc import (
+from neurovrai.preprocess.utils.dicom_asl_params import extract_asl_parameters
+from neurovrai.preprocess.qc.asl_qc import (
     compute_asl_motion_qc,
     compute_cbf_qc,
     compute_perfusion_tsnr,
     generate_asl_qc_report
 )
-from mri_preprocess.utils.transforms import create_transform_registry
+from neurovrai.utils.transforms import create_transform_registry
 
 logger = logging.getLogger(__name__)
 

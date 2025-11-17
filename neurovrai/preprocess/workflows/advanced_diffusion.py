@@ -487,7 +487,7 @@ def run_advanced_diffusion_models(
     if use_amico:
         # Use AMICO for fast, accurate microstructure modeling
         try:
-            from mri_preprocess.workflows.amico_models import (
+            from neurovrai.preprocess.workflows.amico_models import (
                 fit_noddi_amico,
                 fit_sandi_amico,
                 fit_activeax_amico

@@ -243,8 +243,11 @@ def get_execution_config(config: Dict[str, Any]) -> Dict[str, Any]:
     >>> print(exec_config['plugin_args'])
     {'n_procs': 4}
     """
+    from nipype import config as nipype_config
+
     if 'execution' not in config:
         # Defaults
+        nipype_config.set('execution', 'hash_method', 'content')
         return {
             'plugin': 'MultiProc',
             'plugin_args': {'n_procs': 2}
@@ -254,6 +257,17 @@ def get_execution_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     plugin = exec_section.get('plugin', 'MultiProc')
     n_procs = exec_section.get('n_procs', 2)
+
+    # Set Nipype execution options for caching
+    hash_method = exec_section.get('hash_method', 'content')
+    stop_on_first_crash = exec_section.get('stop_on_first_crash', False)
+    keep_inputs = exec_section.get('keep_inputs', False)
+    remove_unnecessary_outputs = exec_section.get('remove_unnecessary_outputs', True)
+
+    nipype_config.set('execution', 'hash_method', hash_method)
+    nipype_config.set('execution', 'stop_on_first_crash', str(stop_on_first_crash).lower())
+    nipype_config.set('execution', 'keep_inputs', str(keep_inputs).lower())
+    nipype_config.set('execution', 'remove_unnecessary_outputs', str(remove_unnecessary_outputs).lower())
 
     return {
         'plugin': plugin,

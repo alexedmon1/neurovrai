@@ -324,4 +324,4 @@ if __name__ == '__main__':
         print("\nUsage:")
         print("  Edit this script to set your study directory and DWI files")
         print("  Or import functions in your own script:")
-        print("    from mri_preprocess.utils.topup_helper import create_topup_files_for_multishell")
+        print("    from neurovrai.preprocess.utils.topup_helper import create_topup_files_for_multishell")

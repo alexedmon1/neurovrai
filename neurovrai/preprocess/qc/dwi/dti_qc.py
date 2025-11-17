@@ -59,7 +59,9 @@ class DTIQualityControl:
         Parameters
         ----------
         metric : str
-            DTI metric name: 'FA', 'MD', 'L1', 'L2', 'L3'
+            DTI metric name: 'FA', 'MD', 'L1', 'L2', 'L3', 'AD', 'RD'
+            - AD (Axial Diffusivity) = L1
+            - RD (Radial Diffusivity) = (L2 + L3) / 2
 
         Returns
         -------
@@ -68,6 +70,29 @@ class DTIQualityControl:
         img : nib.Nifti1Image or None
             NIfTI image object
         """
+        # Special handling for derived metrics
+        if metric == 'AD':
+            # AD (Axial Diffusivity) is the same as L1
+            logger.info(f"Loading AD (using L1)...")
+            return self.load_dti_map('L1')
+
+        elif metric == 'RD':
+            # RD (Radial Diffusivity) = (L2 + L3) / 2
+            logger.info(f"Loading RD (calculating from L2 and L3)...")
+            l2_data, l2_img = self.load_dti_map('L2')
+            l3_data, l3_img = self.load_dti_map('L3')
+
+            if l2_data is None or l3_data is None:
+                logger.warning("Cannot calculate RD: L2 or L3 missing")
+                return None, None
+
+            # Calculate RD as average of L2 and L3
+            rd_data = (l2_data + l3_data) / 2.0
+            logger.info(f"Calculated RD from L2 and L3")
+
+            # Return data with L2 image header (same geometry)
+            return rd_data, l2_img
+
         # Common DTIFit output patterns
         patterns = [
             f'*dtifit__{metric}.nii.gz',
@@ -330,11 +355,13 @@ class DTIQualityControl:
 
         # Expected physiological ranges
         expected_ranges = {
-            'FA': (0.0, 1.0),  # FA is bounded [0, 1]
-            'MD': (0.0, 0.003),  # MD in mm²/s, typical brain range
-            'L1': (0.0, 0.003),  # Axial diffusivity
-            'L2': (0.0, 0.003),  # Radial diffusivity
-            'L3': (0.0, 0.003)   # Radial diffusivity
+            'FA': (0.0, 1.0),   # FA is bounded [0, 1]
+            'MD': (0.0, 0.003), # MD in mm²/s, typical brain range
+            'L1': (0.0, 0.003), # Primary eigenvector
+            'L2': (0.0, 0.003), # Secondary eigenvector
+            'L3': (0.0, 0.003), # Tertiary eigenvector
+            'AD': (0.0, 0.003), # Axial diffusivity (= L1)
+            'RD': (0.0, 0.003)  # Radial diffusivity (= (L2 + L3) / 2)
         }
 
         all_stats = {'subject': self.subject, 'metrics': {}}

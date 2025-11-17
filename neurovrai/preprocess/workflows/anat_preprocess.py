@@ -22,7 +22,7 @@ from nipype import Workflow, Node, MapNode
 from nipype.interfaces import fsl, ants, utility as niu
 from nipype.interfaces.io import DataSink
 
-from mri_preprocess.utils.workflow import (
+from neurovrai.utils.workflow import (
     setup_logging,
     get_fsl_config,
     get_node_config,
@@ -30,7 +30,7 @@ from mri_preprocess.utils.workflow import (
     get_execution_config,
     validate_inputs
 )
-from mri_preprocess.utils.transforms import TransformRegistry
+from neurovrai.utils.transforms import TransformRegistry
 
 
 def create_reorient_node(name: str = 'reorient') -> Node:
@@ -290,6 +290,95 @@ def create_nonlinear_registration_node(
     return fnirt
 
 
+def create_ants_registration_node(
+    config: Dict[str, Any],
+    name: str = 'ants_reg'
+) -> Node:
+    """
+    Create ANTs registration node using antsRegistration (SyN).
+
+    Performs robust nonlinear registration to MNI152 template using
+    Symmetric Normalization (SyN), which is often more robust than FNIRT.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary
+    name : str
+        Node name
+
+    Returns
+    -------
+    Node
+        Nipype Node for ANTs registration
+
+    Examples
+    --------
+    >>> ants_reg = create_ants_registration_node(config)
+    >>> ants_reg.inputs.moving_image = "T1w_brain.nii.gz"
+    >>> ants_reg.inputs.fixed_image = "/path/to/MNI152_T1_2mm.nii.gz"
+    """
+    # Get ANTs configuration
+    ants_config = get_node_config('ants_registration', config)
+
+    ants_reg = Node(
+        ants.Registration(),
+        name=name
+    )
+
+    # ANTs SyN registration parameters
+    # These are optimized for T1w -> MNI152 registration
+    ants_reg.inputs.dimension = 3
+    ants_reg.inputs.float = True  # Use float precision for speed
+    ants_reg.inputs.output_transform_prefix = 'ants_'
+    ants_reg.inputs.output_warped_image = True
+    ants_reg.inputs.interpolation = 'Linear'
+    ants_reg.inputs.use_histogram_matching = True
+    ants_reg.inputs.winsorize_lower_quantile = 0.005
+    ants_reg.inputs.winsorize_upper_quantile = 0.995
+
+    # Multi-stage registration: Rigid → Affine → SyN
+    ants_reg.inputs.transforms = ['Rigid', 'Affine', 'SyN']
+    ants_reg.inputs.transform_parameters = [
+        (0.1,),  # Rigid: gradient step
+        (0.1,),  # Affine: gradient step
+        (0.1, 3.0, 0.0)  # SyN: gradient step, flow sigma, total sigma
+    ]
+
+    # Similarity metrics for each stage
+    ants_reg.inputs.metric = ['MI', 'MI', 'CC']  # Mutual Info for linear, CC for nonlinear
+    ants_reg.inputs.metric_weight = [1.0, 1.0, 1.0]
+    ants_reg.inputs.radius_or_number_of_bins = [32, 32, 4]  # MI bins for linear, CC radius for SyN
+
+    # Convergence criteria for each stage
+    ants_reg.inputs.number_of_iterations = [
+        [1000, 500, 250, 100],  # Rigid
+        [1000, 500, 250, 100],  # Affine
+        [100, 70, 50, 20]  # SyN
+    ]
+    ants_reg.inputs.convergence_threshold = [1e-6, 1e-6, 1e-6]
+    ants_reg.inputs.convergence_window_size = [10, 10, 10]
+
+    # Smoothing sigmas (in voxels) for multi-resolution
+    ants_reg.inputs.smoothing_sigmas = [
+        [3, 2, 1, 0],  # Rigid
+        [3, 2, 1, 0],  # Affine
+        [3, 2, 1, 0]  # SyN
+    ]
+
+    # Shrink factors for multi-resolution
+    ants_reg.inputs.shrink_factors = [
+        [8, 4, 2, 1],  # Rigid
+        [8, 4, 2, 1],  # Affine
+        [8, 4, 2, 1]  # SyN
+    ]
+
+    # Output settings
+    ants_reg.inputs.write_composite_transform = True
+
+    return ants_reg
+
+
 def create_anat_preprocessing_workflow(
     config: Dict[str, Any],
     subject: str,
@@ -333,7 +422,7 @@ def create_anat_preprocessing_workflow(
 
     Examples
     --------
-    >>> from mri_preprocess.config import load_config
+    >>> from neurovrai.config import load_config
     >>> config = load_config("study.yaml")
     >>> wf = create_anat_preprocessing_workflow(
     ...     config=config,
@@ -383,13 +472,20 @@ def create_anat_preprocessing_workflow(
     # 4. Tissue segmentation (ANTs Atropos)
     segment = create_segmentation_node(config)
 
-    # 5. Linear registration
-    linear_reg = create_linear_registration_node(config)
-    linear_reg.inputs.reference = str(mni_brain_template)
+    # 5. Registration to MNI152 (ANTs or FSL)
+    registration_method = config.get('anatomical', {}).get('registration_method', 'ants')
 
-    # 6. Nonlinear registration
-    nonlinear_reg = create_nonlinear_registration_node(config)
-    nonlinear_reg.inputs.ref_file = str(mni_template)
+    if registration_method == 'ants':
+        # ANTs SyN registration (single node: rigid + affine + SyN)
+        registration = create_ants_registration_node(config)
+        registration.inputs.fixed_image = str(mni_brain_template)
+    else:
+        # FSL registration (two nodes: FLIRT + FNIRT)
+        linear_reg = create_linear_registration_node(config)
+        linear_reg.inputs.reference = str(mni_brain_template)
+
+        nonlinear_reg = create_nonlinear_registration_node(config)
+        nonlinear_reg.inputs.ref_file = str(mni_template)
 
     # Output node
     outputnode = Node(
@@ -485,15 +581,26 @@ def create_anat_preprocessing_workflow(
     wf.connect(extract_gm, 'tissue_map', outputnode, 'gm_prob')
     wf.connect(extract_wm, 'tissue_map', outputnode, 'wm_prob')
 
-    # Linear registration (use bias-corrected brain)
-    wf.connect(bias_correct, 'output_image', linear_reg, 'in_file')
-    wf.connect(linear_reg, 'out_matrix_file', outputnode, 'mni_affine_mat')
+    # Registration connections (method-specific)
+    if registration_method == 'ants':
+        # ANTs registration (use bias-corrected brain as moving image)
+        wf.connect(bias_correct, 'output_image', registration, 'moving_image')
+        wf.connect(registration, 'composite_transform', outputnode, 'mni_warp')
+        wf.connect(registration, 'warped_image', outputnode, 'mni_warped')
+        # ANTs doesn't have separate affine matrix, composite_transform includes all stages
+        # For compatibility, we'll save the composite transform as both outputs
+        wf.connect(registration, 'composite_transform', outputnode, 'mni_affine_mat')
+    else:
+        # FSL registration (FLIRT + FNIRT)
+        # Linear registration (use bias-corrected brain)
+        wf.connect(bias_correct, 'output_image', linear_reg, 'in_file')
+        wf.connect(linear_reg, 'out_matrix_file', outputnode, 'mni_affine_mat')
 
-    # Nonlinear registration
-    wf.connect(reorient, 'out_file', nonlinear_reg, 'in_file')
-    wf.connect(linear_reg, 'out_matrix_file', nonlinear_reg, 'affine_file')
-    wf.connect(nonlinear_reg, 'fieldcoeff_file', outputnode, 'mni_warp')
-    wf.connect(nonlinear_reg, 'warped_file', outputnode, 'mni_warped')
+        # Nonlinear registration
+        wf.connect(reorient, 'out_file', nonlinear_reg, 'in_file')
+        wf.connect(linear_reg, 'out_matrix_file', nonlinear_reg, 'affine_file')
+        wf.connect(nonlinear_reg, 'fieldcoeff_file', outputnode, 'mni_warp')
+        wf.connect(nonlinear_reg, 'warped_file', outputnode, 'mni_warped')
 
     # Save outputs
     wf.connect(outputnode, 'reoriented_t1w', datasink, 'reoriented')
@@ -558,7 +665,7 @@ def run_anat_preprocessing(
 
     Examples
     --------
-    >>> from mri_preprocess.config import load_config
+    >>> from neurovrai.config import load_config
     >>> config = load_config("study.yaml")
     >>> results = run_anat_preprocessing(
     ...     config=config,
@@ -591,6 +698,10 @@ def run_anat_preprocessing(
 
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    # Get execution configuration and set Nipype config BEFORE creating workflow
+    # This ensures hash_method is set when nodes are instantiated
+    exec_config = get_execution_config(config)
+
     # Create workflow
     wf = create_anat_preprocessing_workflow(
         config=config,
@@ -600,9 +711,6 @@ def run_anat_preprocessing(
         work_dir=work_dir,
         session=session
     )
-
-    # Get execution configuration
-    exec_config = get_execution_config(config)
 
     # Run workflow
     wf.run(**exec_config)
@@ -629,28 +737,46 @@ def run_anat_preprocessing(
         'gm_prob': list(derivatives_dir.glob('**/segmentation/POSTERIOR_02.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_02.nii.gz')) else None,
         'wm_prob': list(derivatives_dir.glob('**/segmentation/POSTERIOR_03.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_03.nii.gz')) else None,
         'tissue_class_map': list(derivatives_dir.glob('**/segmentation/*labeled.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/*labeled.nii.gz')) else None,
-        'mni_affine': list(derivatives_dir.glob('**/transforms/*.mat'))[0] if list(derivatives_dir.glob('**/transforms/*.mat')) else None,
-        'mni_warp': list(derivatives_dir.glob('**/transforms/*warp.nii.gz'))[0] if list(derivatives_dir.glob('**/transforms/*warp.nii.gz')) else None,
+        # For FSL: look for .mat and warp.nii.gz
+        # For ANTs: look for .h5 composite transform
+        'mni_affine': (list(derivatives_dir.glob('**/transforms/*.mat'))[0] if list(derivatives_dir.glob('**/transforms/*.mat')) else
+                       list(derivatives_dir.glob('**/transforms/*.h5'))[0] if list(derivatives_dir.glob('**/transforms/*.h5')) else None),
+        'mni_warp': (list(derivatives_dir.glob('**/transforms/*warp.nii.gz'))[0] if list(derivatives_dir.glob('**/transforms/*warp.nii.gz')) else
+                     list(derivatives_dir.glob('**/transforms/*.h5'))[0] if list(derivatives_dir.glob('**/transforms/*.h5')) else None),
         'mni_warped': list(derivatives_dir.glob('**/mni_space/*.nii.gz'))[0] if list(derivatives_dir.glob('**/mni_space/*.nii.gz')) else None
     }
 
     # Save transformations to registry
     if save_transforms and outputs['mni_affine'] and outputs['mni_warp']:
-        from mri_preprocess.utils.transforms import create_transform_registry
+        from neurovrai.utils.transforms import create_transform_registry
 
         registry = create_transform_registry(config, subject, session)
 
-        # Save nonlinear transformation
-        registry.save_nonlinear_transform(
-            warp_file=outputs['mni_warp'],
-            affine_file=outputs['mni_affine'],
-            source_space='T1w',
-            target_space='MNI152',
-            reference=get_reference_template('mni152_t1_2mm', config),
-            source_image=t1w_file
-        )
+        # Get registration method
+        registration_method = config.get('anatomical', {}).get('registration_method', 'ants')
 
-        logging.info(f"Saved T1w�MNI152 transformation to registry")
+        # Save transform based on method
+        if registration_method == 'ants':
+            # ANTs: save composite transform
+            registry.save_ants_composite_transform(
+                composite_file=outputs['mni_warp'],  # For ANTs, this is the composite .h5
+                source_space='T1w',
+                target_space='MNI152',
+                reference=get_reference_template('mni152_t1_2mm', config),
+                source_image=t1w_file
+            )
+            logging.info(f"Saved ANTs T1w->MNI152 composite transformation to registry")
+        else:
+            # FSL: save separate warp and affine
+            registry.save_nonlinear_transform(
+                warp_file=outputs['mni_warp'],
+                affine_file=outputs['mni_affine'],
+                source_space='T1w',
+                target_space='MNI152',
+                reference=get_reference_template('mni152_t1_2mm', config),
+                source_image=t1w_file
+            )
+            logging.info(f"Saved FSL T1w->MNI152 transformation to registry")
 
     # Run Quality Control
     if run_qc:
@@ -664,7 +790,7 @@ def run_anat_preprocessing(
         try:
             # 1. Skull Strip QC
             if outputs.get('brain_mask'):
-                from mri_preprocess.qc.anat.skull_strip_qc import SkullStripQualityControl
+                from neurovrai.preprocess.qc.anat.skull_strip_qc import SkullStripQualityControl
 
                 logging.info("Running Skull Strip QC...")
                 skull_qc = SkullStripQualityControl(
@@ -681,7 +807,7 @@ def run_anat_preprocessing(
 
             # 2. Segmentation QC
             if outputs.get('csf_prob') or outputs.get('gm_prob') or outputs.get('wm_prob'):
-                from mri_preprocess.qc.anat.segmentation_qc import SegmentationQualityControl
+                from neurovrai.preprocess.qc.anat.segmentation_qc import SegmentationQualityControl
 
                 logging.info("Running Segmentation QC...")
                 seg_qc = SegmentationQualityControl(
@@ -698,7 +824,7 @@ def run_anat_preprocessing(
 
             # 3. Registration QC
             if outputs.get('mni_warped'):
-                from mri_preprocess.qc.anat.registration_qc import RegistrationQualityControl
+                from neurovrai.preprocess.qc.anat.registration_qc import RegistrationQualityControl
 
                 logging.info("Running Registration QC...")
                 reg_qc = RegistrationQualityControl(

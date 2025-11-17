@@ -10,7 +10,7 @@ This module provides functions for:
 5. Outlier detection (framewise displacement, DVARS)
 
 Usage:
-    from mri_preprocess.qc.func_qc import compute_motion_qc, compute_tsnr, generate_func_qc_report
+    from neurovrai.preprocess.qc.func_qc import compute_motion_qc, compute_tsnr, generate_func_qc_report
 """
 
 import logging

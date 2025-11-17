@@ -10,7 +10,7 @@ This module provides functions for:
 5. Automated HTML QC report generation
 
 Usage:
-    from mri_preprocess.qc.asl_qc import compute_asl_motion_qc, compute_cbf_qc, generate_asl_qc_report
+    from neurovrai.preprocess.qc.asl_qc import compute_asl_motion_qc, compute_cbf_qc, generate_asl_qc_report
 """
 
 import logging

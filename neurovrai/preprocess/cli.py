@@ -16,13 +16,13 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from mri_preprocess.config import load_config
-from mri_preprocess.config_generator import auto_generate_config
-from mri_preprocess.dicom.bids_converter import convert_and_organize
-from mri_preprocess.workflows.anat_preprocess import run_anat_preprocessing
-from mri_preprocess.workflows.dwi_preprocess import run_dwi_preprocessing
-from mri_preprocess.utils.file_finder import find_subject_files
-from mri_preprocess.utils.bids import get_subject_dir, get_workflow_dir
+from neurovrai.config import load_config
+from neurovrai.config_generator import auto_generate_config
+from neurovrai.preprocess.dicom.bids_converter import convert_and_organize
+from neurovrai.preprocess.workflows.anat_preprocess import run_anat_preprocessing
+from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_preprocessing
+from neurovrai.preprocess.utils.file_finder import find_subject_files
+from neurovrai.preprocess.utils.bids import get_subject_dir, get_workflow_dir
 
 
 # Configure logging

@@ -196,7 +196,7 @@ class DICOMParameterExtractor:
         Extract ASL-specific parameters.
         Uses the validated ASL parameter extractor.
         """
-        from mri_preprocess.utils.dicom_asl_params import extract_asl_parameters
+        from neurovrai.preprocess.utils.dicom_asl_params import extract_asl_parameters
 
         params = DICOMParameterExtractor.extract_common_params(dcm)
 
