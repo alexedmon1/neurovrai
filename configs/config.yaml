@@ -36,6 +36,10 @@ paths:
 execution:
   plugin: MultiProc
   n_procs: 6
+  hash_method: content  # Enable caching based on file content (not timestamps)
+  stop_on_first_crash: false
+  keep_inputs: false
+  remove_unnecessary_outputs: true
 templates:
   mni152_t1_2mm: /usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz
   mni152_t1_1mm: /usr/local/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz
@@ -58,7 +62,7 @@ anatomical:
     convergence_threshold: 0.001
     mrf_smoothing_factor: 0.1
     mrf_radius: [1, 1, 1]            # Markov Random Field spatial smoothing radius
-  registration_method: fsl
+  registration_method: ants  # Default: 'ants' (SyN) for robust registration; 'fsl' for FLIRT+FNIRT
   run_qc: true
 diffusion:
   denoise_method: dwidenoise
@@ -128,5 +132,4 @@ asl:
 freesurfer:
   enabled: false
   subjects_dir: /mnt/bytopia/IRC805/freesurfer
-  use_for_tractography: false
   use_for_masks: false
