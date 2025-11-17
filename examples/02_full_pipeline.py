@@ -8,7 +8,7 @@ for a single subject across all modalities with proper dependency management.
 
 import logging
 from pathlib import Path
-from mri_preprocess.config import load_config
+from neurovrai.config import load_config
 
 # Setup logging
 logging.basicConfig(
@@ -38,7 +38,7 @@ logger.info("="*70)
 logger.info("Step 1: Anatomical Preprocessing")
 logger.info("="*70)
 
-from mri_preprocess.workflows.anat_preprocess import run_anat_preprocessing
+from neurovrai.preprocess.workflows.anat_preprocess import run_anat_preprocessing
 
 nifti_dir = study_root / 'bids' / subject / 'anat'
 t1w_files = list(nifti_dir.glob('*T1*.nii.gz'))
@@ -74,7 +74,7 @@ logger.info("="*70)
 logger.info("Step 2: DWI Preprocessing")
 logger.info("="*70)
 
-from mri_preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
+from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
 
 dwi_dir = study_root / 'bids' / subject / 'dwi'
 dwi_files = sorted(list(dwi_dir.glob('*DTI*.nii.gz')))
@@ -114,7 +114,7 @@ logger.info("="*70)
 logger.info("Step 3: Functional Preprocessing")
 logger.info("="*70)
 
-from mri_preprocess.workflows.func_preprocess import run_func_preprocessing
+from neurovrai.preprocess.workflows.func_preprocess import run_func_preprocessing
 
 func_dir = study_root / 'bids' / subject / 'func'
 func_files = sorted(list(func_dir.glob('*RESTING*.nii.gz')))
@@ -147,7 +147,7 @@ logger.info("="*70)
 logger.info("Step 4: ASL Preprocessing")
 logger.info("="*70)
 
-from mri_preprocess.workflows.asl_preprocess import run_asl_preprocessing
+from neurovrai.preprocess.workflows.asl_preprocess import run_asl_preprocessing
 
 asl_dir = study_root / 'bids' / subject / 'asl'
 asl_files = list(asl_dir.glob('*ASL*.nii.gz'))

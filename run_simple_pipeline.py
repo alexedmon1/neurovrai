@@ -30,12 +30,12 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Import configuration and workflow functions
-from mri_preprocess.config import load_config
-from mri_preprocess.utils.dicom_converter import convert_subject_dicoms
-from mri_preprocess.workflows.anat_preprocess import run_anat_preprocessing
-from mri_preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
-from mri_preprocess.workflows.func_preprocess import run_func_preprocessing
-from mri_preprocess.workflows.asl_preprocess import run_asl_preprocessing
+from neurovrai.config import load_config
+from neurovrai.preprocess.utils.dicom_converter import convert_subject_dicoms
+from neurovrai.preprocess.workflows.anat_preprocess import run_anat_preprocessing
+from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
+from neurovrai.preprocess.workflows.func_preprocess import run_func_preprocessing
+from neurovrai.preprocess.workflows.asl_preprocess import run_asl_preprocessing
 
 
 # Setup simple logging

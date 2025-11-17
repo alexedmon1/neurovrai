@@ -25,8 +25,8 @@ import yaml
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mri_preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
-from mri_preprocess.utils.workflow import load_config
+from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
+from neurovrai.preprocess.utils.workflow import load_config
 
 
 def main():

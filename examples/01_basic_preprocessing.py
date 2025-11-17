@@ -7,13 +7,13 @@ using the production workflows.
 """
 
 from pathlib import Path
-from mri_preprocess.config import load_config
+from neurovrai.config import load_config
 
 # ============================================================================
 # Example 1a: Anatomical Preprocessing
 # ============================================================================
 
-from mri_preprocess.workflows.anat_preprocess import run_anat_preprocessing
+from neurovrai.preprocess.workflows.anat_preprocess import run_anat_preprocessing
 
 # Load configuration
 config = load_config(Path('config.yaml'))
@@ -45,7 +45,7 @@ if t1w_files:
 # Example 1b: DWI Preprocessing
 # ============================================================================
 
-from mri_preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
+from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
 
 # Find DWI files
 dwi_dir = study_root / 'bids' / subject / 'dwi'
@@ -76,7 +76,7 @@ if dwi_files and bval_files and bvec_files:
 # Example 1c: Functional Preprocessing
 # ============================================================================
 
-from mri_preprocess.workflows.func_preprocess import run_func_preprocessing
+from neurovrai.preprocess.workflows.func_preprocess import run_func_preprocessing
 
 # Find functional files
 func_dir = study_root / 'bids' / subject / 'func'
@@ -102,7 +102,7 @@ if func_files and anat_derivatives.exists():
 # Example 1d: ASL Preprocessing
 # ============================================================================
 
-from mri_preprocess.workflows.asl_preprocess import run_asl_preprocessing
+from neurovrai.preprocess.workflows.asl_preprocess import run_asl_preprocessing
 
 # Find ASL files
 asl_dir = study_root / 'bids' / subject / 'asl'

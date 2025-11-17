@@ -46,7 +46,11 @@ def create_config_template(study_root: Path, output_file: Path = None):
         # Execution settings
         'execution': {
             'plugin': 'MultiProc',
-            'n_procs': 6  # Adjust based on your system
+            'n_procs': 6,  # Adjust based on your system
+            'hash_method': 'content',  # Enable caching based on file content (not timestamps)
+            'stop_on_first_crash': False,
+            'keep_inputs': False,
+            'remove_unnecessary_outputs': True
         },
 
         # Template files (FSL standard templates)
@@ -78,7 +82,7 @@ def create_config_template(study_root: Path, output_file: Path = None):
                 'mrf_smoothing_factor': 0.1,
                 'mrf_radius': [1, 1, 1]  # Markov Random Field spatial smoothing radius
             },
-            'registration_method': 'fsl',  # or 'ants'
+            'registration_method': 'ants',  # Default: 'ants' (SyN) for robust registration; 'fsl' for FLIRT+FNIRT
             'run_qc': True
         },
 

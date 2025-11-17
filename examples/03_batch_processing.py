@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Dict
 import json
 from datetime import datetime
-from mri_preprocess.config import load_config
+from neurovrai.config import load_config
 
 # Setup logging
 log_dir = Path('logs')
@@ -77,7 +77,7 @@ def process_anatomical(subject: str, progress: Dict) -> bool:
         logger.info(f"  Anatomical already complete for {subject}, skipping")
         return True
 
-    from mri_preprocess.workflows.anat_preprocess import run_anat_preprocessing
+    from neurovrai.preprocess.workflows.anat_preprocess import run_anat_preprocessing
 
     nifti_dir = bids_root / subject / 'anat'
     t1w_files = list(nifti_dir.glob('*T1*.nii.gz'))
@@ -117,7 +117,7 @@ def process_dwi(subject: str, progress: Dict) -> bool:
         logger.info(f"  DWI already complete for {subject}, skipping")
         return True
 
-    from mri_preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
+    from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
 
     dwi_dir = bids_root / subject / 'dwi'
     if not dwi_dir.exists():
@@ -172,7 +172,7 @@ def process_functional(subject: str, progress: Dict) -> bool:
         logger.info(f"  Functional already complete for {subject}, skipping")
         return True
 
-    from mri_preprocess.workflows.func_preprocess import run_func_preprocessing
+    from neurovrai.preprocess.workflows.func_preprocess import run_func_preprocessing
 
     func_dir = bids_root / subject / 'func'
     if not func_dir.exists():

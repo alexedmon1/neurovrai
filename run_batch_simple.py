@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-from mri_preprocess.config import load_config
+from neurovrai.config import load_config
 
 
 def find_subjects(dicom_root):
