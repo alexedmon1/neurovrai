@@ -227,12 +227,16 @@ def preprocess_functional(subject, config, nifti_dir, derivatives_dir, work_dir)
     logger.info(f"Multi-echo: {is_multi_echo}")
 
     try:
+        # Pass anatomical derivatives for ACompCor tissue masks
+        anat_derivatives = derivatives_dir / subject / 'anat'
+
         results = run_func_preprocessing(
             config=config,
             subject=subject,
             func_file=func_files_selected,  # Pass only selected run's files
             output_dir=derivatives_dir,
-            work_dir=work_dir
+            work_dir=work_dir,
+            anat_derivatives=anat_derivatives  # For ACompCor tissue masks
         )
         logger.info("✓ Functional preprocessing complete\n")
         return results
