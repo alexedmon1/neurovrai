@@ -5,7 +5,7 @@
 
 Production-ready MRI preprocessing pipeline for anatomical, diffusion, functional, and ASL data with comprehensive QC and standardized outputs.
 
-**Planned Rename**: Project will be renamed to **neuroVrai** with three-part architecture:
+**Planned Rename**: Project will be renamed to **neurovrai** with three-part architecture:
 - `neurovrai.preprocess` (current - mostly complete)
 - `neurovrai.analysis` (planned - group-level statistics)
 - `neurovrai.connectome` (planned - connectivity & network analysis)

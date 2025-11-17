@@ -1,4 +1,4 @@
-# neuroVrai Architecture & Roadmap
+# neurovrai Architecture & Roadmap
 
 **Date**: 2025-11-16
 **Status**: Planning Document
@@ -6,15 +6,15 @@
 ## Project Rename
 
 **Current Name**: `human-mri-preprocess`
-**New Name**: `neuroVrai`
+**New Name**: `neurovrai`
 
-The project is being renamed to better reflect its comprehensive scope beyond just preprocessing. "neuroVrai" (French: "true neuro") emphasizes the complete, accurate neuroimaging analysis pipeline.
+The project is being renamed to better reflect its comprehensive scope beyond just preprocessing. "neurovrai" (French: "true neuro") emphasizes the complete, accurate neuroimaging analysis pipeline.
 
 ---
 
-## neuroVrai: Three-Part Architecture
+## neurovrai: Three-Part Architecture
 
-neuroVrai will be organized as a **single integrated package** with three main submodules, sharing configuration, data formats, and directory hierarchies.
+neurovrai will be organized as a **single integrated package** with three main submodules, sharing configuration, data formats, and directory hierarchies.
 
 ### Part 1: `neurovrai.preprocess` (Current - Mostly Complete ✅)
 
@@ -550,13 +550,13 @@ from neurovrai.connectome.structural import matrix_builder
 
 ---
 
-## Future: neuroFaune (Animal MRI Pipeline)
+## Future: neurofaune (Animal MRI Pipeline)
 
-**Project**: `neuroFaune`
+**Project**: `neurofaune`
 **Purpose**: MRI preprocessing and analysis for animal (rodent) neuroimaging
-**Status**: Planned (after neuroVrai completion)
+**Status**: Planned (after neurovrai completion)
 
-### Key Differences from neuroVrai
+### Key Differences from neurovrai
 
 **Species-Specific Considerations**:
 - **Rodent brain templates**: Allen Brain Atlas, Waxholm Space (rat), SIGMA (mouse)
@@ -585,9 +585,9 @@ neurofaune/
 - Parcellation based on rodent atlases
 - Species-specific connectivity analysis
 
-**Timeline**: Begin development after neuroVrai analysis module is stable
+**Timeline**: Begin development after neurovrai analysis module is stable
 
-**Collaboration Potential**: Share utilities, QC framework, visualization tools between neuroVrai and neuroFaune
+**Collaboration Potential**: Share utilities, QC framework, visualization tools between neurovrai and neurofaune
 
 ---
 
@@ -605,7 +605,7 @@ neurofaune/
 - Regression tests: Ensure analyses match established tools (FSL, SPM)
 
 ### Documentation
-- **User Guide**: `docs/user_guide.md` - How to use neuroVrai
+- **User Guide**: `docs/user_guide.md` - How to use neurovrai
 - **API Reference**: Auto-generated from docstrings
 - **Workflows**: `docs/workflows.md` - Detailed pipeline descriptions
 - **Examples**: `examples/` - Complete analysis examples
@@ -655,7 +655,7 @@ neurofaune/
 
 ### Migration Strategy
 
-**Phase 1: Preserve Current Functionality** (During restructure to neuroVrai)
+**Phase 1: Preserve Current Functionality** (During restructure to neurovrai)
 - Mark `mri_preprocess/workflows/tractography.py` as **deprecated**
 - Add warning message when imported
 - Keep functional for backward compatibility
@@ -695,10 +695,10 @@ warnings.warn(
 ## Next Steps
 
 1. **Immediate**: Finish preprocessing bug fixes and testing
-2. **Week 1**: Rename project to neuroVrai, restructure package
+2. **Week 1**: Rename project to neurovrai, restructure package
 3. **Week 2-7**: Implement `neurovrai.analysis` module (TBSS → VBM → MELODIC → ReHo/fALFF)
 4. **Week 8-15**: Implement `neurovrai.connectome` module (SC matrices → FC matrices → graph metrics)
-5. **Future**: Begin neuroFaune planning and development
+5. **Future**: Begin neurofaune planning and development
 
 ---
 

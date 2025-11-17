@@ -2,7 +2,7 @@
 
 A production-ready, config-driven MRI preprocessing pipeline for multiple neuroimaging modalities: anatomical (T1w), diffusion-weighted imaging (DWI), resting-state fMRI, and arterial spin labeling (ASL). Built with Nipype for workflow orchestration, supporting both FSL and ANTs for neuroimaging processing.
 
-> **🚀 Future**: This project will be renamed to **neuroVrai** and expanded with group-level analysis (`neurovrai.analysis`) and connectivity/network modules (`neurovrai.connectome`). See `docs/NEUROVRAI_ARCHITECTURE.md` for roadmap.
+> **🚀 Future**: This project will be renamed to **neurovrai** and expanded with group-level analysis (`neurovrai.analysis`) and connectivity/network modules (`neurovrai.connectome`). See `docs/NEUROVRAI_ARCHITECTURE.md` for roadmap.
 
 ## Features
 
