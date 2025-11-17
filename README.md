@@ -1,647 +1,563 @@
-# Human MRI Preprocessing Pipeline
+# neurovrai
 
-A production-ready, config-driven MRI preprocessing pipeline for multiple neuroimaging modalities: anatomical (T1w), diffusion-weighted imaging (DWI), resting-state fMRI, and arterial spin labeling (ASL). Built with Nipype for workflow orchestration, supporting both FSL and ANTs for neuroimaging processing.
+**Comprehensive MRI preprocessing, analysis, and connectivity package for neuroimaging research.**
 
-> **🚀 Future**: This project will be renamed to **neurovrai** and expanded with group-level analysis (`neurovrai.analysis`) and connectivity/network modules (`neurovrai.connectome`). See `docs/NEUROVRAI_ARCHITECTURE.md` for roadmap.
+From raw DICOM to group statistics and network neuroscience - a complete, production-ready pipeline for multi-modal MRI data analysis.
 
-## Features
+[![Version](https://img.shields.io/badge/version-2.0.0--alpha-blue.svg)](https://github.com/alexedmon1/neurovrai)
+[![Python](https://img.shields.io/badge/python-3.13%2B-brightgreen.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-### Core Features
-- **Complete End-to-End Pipeline**: From DICOM to analysis-ready outputs for all modalities
-- **Production-Ready**: All workflows (anatomical, DWI, functional, ASL) fully validated
-- **DICOM to NIfTI Conversion**: Automatic modality detection and parameter extraction from scanner files
-- **Continuous Pipeline Architecture**: Streaming workflow execution - preprocessing starts as soon as data is converted
-- **Config-Driven Architecture**: YAML-based configuration for all processing parameters with validation
-- **BIDS-Compatible**: Follows Brain Imaging Data Structure conventions
-- **Transform Registry**: Centralized management of spatial transformations for efficient reuse
-- **Comprehensive QC**: Automated quality control with HTML reports for all modalities
-- **GPU Acceleration**: CUDA support for eddy, BEDPOSTX, probtrackx2 (10-50x speedup)
-- **Advanced Diffusion Models**: DTI, DKI, NODDI with optional AMICO acceleration (100x faster)
-- **Multi-Echo fMRI**: TEDANA 25.1.0 with automatic component classification
-- **Standardized Output**: Consistent directory hierarchy across all workflows
-- **Dual Execution Modes**: Batch processing or continuous streaming pipeline
+## Overview
 
-### Anatomical Preprocessing
-- N4 bias field correction with ANTs
-- Brain extraction with FSL BET
-- Tissue segmentation with ANTs Atropos (faster than FSL FAST)
-- Registration to MNI152 with FSL FNIRT
-- Comprehensive quality control
-
-### Diffusion Preprocessing
-- **Optional TOPUP distortion correction** - Auto-enabled when reverse phase-encoding images available
-- GPU-accelerated eddy current correction (eddy_cuda)
-- DTI fitting with standard metrics (FA, MD, AD, RD)
-- **BEDPOSTX fiber orientation estimation** - Now enabled by default (GPU: 20-60 min)
-  - Essential for future connectomics analysis
-  - Can be disabled in config with `bedpostx.enabled: false`
-- **Advanced Models** (auto-enabled for multi-shell data):
-  - **DKI** (DIPY): Diffusion Kurtosis Imaging with MK, AK, RK, KFA metrics
-  - **NODDI** (DIPY): Neurite orientation with FICVF, ODI, FISO
-  - **AMICO Models**: 100x faster fitting with convex optimization
-    - NODDI: 30 seconds (vs 20-25 min DIPY)
-    - SANDI: Soma and neurite density imaging
-    - ActiveAx: Axon diameter distribution
-- Spatial normalization to FMRIB58_FA template
-- Comprehensive QC (TOPUP field maps, motion/eddy parameters, DTI metric distributions)
-
-> **Note**: Probabilistic tractography will move to the future `neurovrai.connectome` module with proper anatomical constraints and NxN connectivity matrix generation.
-
-### Functional Preprocessing
-- **Multi-echo**: TEDANA 25.1.0 denoising with automatic component classification
-- **Single-echo**: ICA-AROMA motion artifact removal (auto-enabled for single-echo)
-- Auto-detection of single vs multi-echo data with optimal processing route
-- Motion correction with MCFLIRT
-- ACompCor nuisance regression using anatomical tissue masks
-- Bandpass temporal filtering (configurable low/high-pass)
-- Spatial smoothing (configurable FWHM)
-- Registration to anatomical space (BBR or correlation ratio)
-- Optional spatial normalization to MNI152
-- Comprehensive quality control (motion metrics, DVARS, tSNR maps, carpet plots, HTML reports)
-
-### ASL (Arterial Spin Labeling) Preprocessing
-- **Automated DICOM Parameter Extraction**: Auto-extracts acquisition parameters (τ, PLD) from scanner DICOM files
-- **M0 Calibration**: White matter reference calibration to correct for M0 estimation bias
-- **Partial Volume Correction**: Linear regression method for improved tissue-specific CBF accuracy
-- Motion correction with MCFLIRT
-- Label-control separation and quantification
-- CBF quantification with standard kinetic model (Alsop et al., 2015)
-- Tissue-specific CBF statistics
-- Registration to anatomical space
-- Comprehensive quality control with motion, CBF, and tSNR metrics
-
-### Advanced Features
-- **GPU Acceleration**: CUDA support for FSL eddy, BEDPOSTX, and probtrackx2 (10-50x speedup)
-- **AMICO Microstructure Models**: 100x faster NODDI, plus SANDI and ActiveAx models
-- **Flexible Registration**: Support for both FSL (FLIRT/FNIRT) and ANTs registration methods
-- **Spatial Normalization**: MNI152 (anatomical/functional), FMRIB58_FA (DWI) with transform reuse
-- **Quality Control Framework**: Automated QC for all modalities with HTML reports and metric tracking
-- **Multi-Echo Support**: TEDANA 25.1.0 with automatic component classification and ICA-AROMA fallback
-
-## Project Structure
+**neurovrai** (French: "true neuro") is an integrated neuroimaging analysis package with three main modules:
 
 ```
-human-mri-preprocess/
-├── README.md                    # This file
-├── QUICKSTART.md                # Fast-track setup guide
-├── SETUP_GUIDE.md               # Detailed setup instructions
-├── DEPENDENCIES.md              # Package reference
-├── PROJECT_STATUS.md            # Implementation status
-├── CLAUDE.md                    # AI assistant guidelines
-│
-├── create_config.py             # Config generator
-├── verify_environment.py        # Environment validation
-├── run_simple_pipeline.py       # Single-subject runner
-├── run_batch_simple.py          # Batch processor
-│
-├── mri_preprocess/              # Production code
-│   ├── workflows/               # Preprocessing workflows
-│   │   ├── anat_preprocess.py
-│   │   ├── dwi_preprocess.py
-│   │   ├── func_preprocess.py
-│   │   ├── asl_preprocess.py
-│   │   ├── advanced_diffusion.py
-│   │   ├── amico_models.py
-│   │   └── tractography.py
-│   ├── utils/                   # Helper functions
-│   ├── qc/                      # Quality control
-│   └── dicom/                   # DICOM conversion
-│
-├── docs/                        # Documentation
-│   ├── workflows.md             # Workflow details
-│   ├── FUTURE_ENHANCEMENTS.md   # Planned features
-│   ├── implementation/          # Technical docs
-│   ├── status/                  # Progress tracking
-│   └── archive/                 # Old documentation
-│
-├── archive/                     # Legacy code (preserved)
-│   ├── runners/                 # Old pipeline runners
-│   ├── anat/                    # Legacy workflows
-│   ├── dwi/
-│   ├── rest/
-│   └── tests/
-│
-└── examples/                    # Usage examples
+neurovrai/
+├── preprocess/    ✅ Production-Ready - Subject-level preprocessing
+├── analysis/      🔄 Planned (Phase 3) - Group-level statistics
+└── connectome/    🔄 Planned (Phase 4) - Connectivity & networks
 ```
 
-## Prerequisites
+### neurovrai.preprocess - **Production-Ready** ✅
 
-### System Requirements
+Complete preprocessing workflows for all major MRI modalities:
+- **Anatomical** (T1w/T2w): N4 bias correction, skull stripping, tissue segmentation, MNI registration
+- **Diffusion** (DWI): TOPUP, eddy, DTI/DKI/NODDI, BEDPOSTX, spatial normalization
+- **Functional** (rs-fMRI): TEDANA (multi-echo), ICA-AROMA (single-echo), ACompCor, bandpass filtering
+- **ASL** (perfusion): M0 calibration, CBF quantification, partial volume correction
 
-- Python 3.10+ (developed with Python 3.13)
-- FSL 6.0+ (for anatomical and diffusion preprocessing)
-- ANTs 2.3+ (optional, for advanced registration)
-- dcm2niix (for DICOM to NIfTI conversion)
+### neurovrai.analysis - Planned (Phase 3)
 
-### FSL Installation
+Group-level statistical analyses:
+- VBM (Voxel-Based Morphometry)
+- TBSS (Tract-Based Spatial Statistics)
+- MELODIC (Group ICA)
+- ReHo, fALFF (functional connectivity metrics)
+- Group CBF analysis
+
+### neurovrai.connectome - Planned (Phase 4)
+
+Connectivity and network neuroscience:
+- Structural connectivity (probabilistic tractography)
+- Functional connectivity matrices
+- Graph theory metrics
+- Network visualization
+- Multi-modal integration (SC-FC coupling)
+
+## Key Features
+
+### Architecture
+- **🎯 Three-Part Design**: Preprocessing → Analysis → Connectivity
+- **📦 Single Package**: Integrated modules sharing configuration and data formats
+- **⚙️ Config-Driven**: YAML configuration for all parameters
+- **🔄 Transform Reuse**: Centralized spatial transformation management
+- **📊 Comprehensive QC**: Automated quality control for all modalities
+
+### Preprocessing (Production-Ready)
+- **🚀 Multi-Modal**: Anat, DWI, functional, ASL in one pipeline
+- **⚡ GPU Accelerated**: CUDA support for eddy, BEDPOSTX (10-50x speedup)
+- **🧠 Advanced Models**: DKI, NODDI (DIPY + AMICO 100x acceleration)
+- **🎭 Multi-Echo**: TEDANA 25.1.0 with automatic component classification
+- **🔍 Quality Control**: Comprehensive automated QC with HTML reports
+- **📁 BIDS-Compatible**: Follows neuroimaging data standards
+
+### Performance
+- **AMICO Acceleration**: NODDI in 30 seconds (vs 20-25 min DIPY)
+- **GPU Processing**: 10-50x speedup for diffusion workflows
+- **Parallel Execution**: Multi-modal processing for maximum throughput
+- **Transform Reuse**: Zero redundant registration computation
+
+## Quick Start
+
+### Installation
 
 ```bash
+# Clone repository
+git clone https://github.com/alexedmon1/neurovrai.git
+cd neurovrai
 
-# Install FSL from https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/FslInstallation
-# Set FSLDIR environment variable
-export FSLDIR=/usr/local/fsl
-source ${FSLDIR}/etc/fslconf/fsl.sh
-```
-
-### ANTs Installation (Optional)
-
-```bash
-
-# Install ANTs from https://github.com/ANTsX/ANTs
-# Add to PATH
-export ANTSPATH=/usr/local/bin/
-export PATH=${ANTSPATH}:$PATH
-```
-
-## Installation
-
-### Using uv (Recommended)
-
-```bash
-
-# Clone the repository
-git clone https://github.com/yourusername/human-mri-preprocess.git
-cd human-mri-preprocess
-
-# Install dependencies with uv
+# Install with uv (recommended)
 uv sync
 
-# Activate the environment
-source .venv/bin/activate
-```
-
-### Using pip
-
-```bash
-
-# Clone the repository
-git clone https://github.com/yourusername/human-mri-preprocess.git
-cd human-mri-preprocess
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Install package in development mode
+# Or with pip
 pip install -e .
 ```
 
-## Quick Start
+### Prerequisites
 
-See [QUICKSTART.md](QUICKSTART.md) for the fastest way to get started!
+- **Python**: 3.13+ (developed with 3.13)
+- **FSL**: 6.0+ (required for preprocessing)
+- **ANTs**: 2.3+ (optional for advanced registration)
+- **dcm2niix**: For DICOM conversion
+- **CUDA**: Optional, for GPU acceleration
 
-**TL;DR**:
+### Basic Usage
+
 ```bash
-# 1. Create config (creates /mnt/bytopia/IRC805/config.yaml)
-python create_config.py --study-root /mnt/bytopia/IRC805
+# 1. Create configuration
+python create_config.py --study-root /path/to/study
 
-# 2. Install dependencies
-uv sync
-
-# 3. Run single subject
+# 2. Run single subject (all modalities)
 uv run python run_simple_pipeline.py \
-    --subject IRC805-0580101 \
-    --dicom-dir /mnt/bytopia/IRC805/raw/dicom/IRC805-0580101 \
-    --config /mnt/bytopia/IRC805/config.yaml
+    --subject sub-001 \
+    --nifti-dir /path/to/study/bids/sub-001 \
+    --config /path/to/study/config.yaml
 
-# 4. Run batch processing
-uv run python run_batch_simple.py --config /mnt/bytopia/IRC805/config.yaml
-```
-
-## How to Run the Pipeline
-
-### Step 1: Create Configuration
-
-```bash
-# Create study-specific config.yaml
-python create_config.py --study-root /mnt/bytopia/IRC805
-
-# This creates /mnt/bytopia/IRC805/config.yaml
-# Edit it to customize TR, TE, readout_time, and other parameters
-```
-
-### Step 2: Single Subject Processing
-
-```bash
-# Process one subject with all modalities
+# 3. Or run specific modality
 uv run python run_simple_pipeline.py \
-    --subject IRC805-0580101 \
-    --dicom-dir /mnt/bytopia/IRC805/raw/dicom/IRC805-0580101 \
-    --config /mnt/bytopia/IRC805/config.yaml
-```
-
-**What it does:**
-1. Converts DICOM to NIfTI
-2. Runs anatomical preprocessing (required first)
-3. Runs DWI preprocessing (if DWI data exists)
-4. Runs functional preprocessing (if functional data exists)
-5. Runs ASL preprocessing (if ASL data exists)
-
-### Step 3: Batch Processing
-
-```bash
-# Process all subjects in the DICOM directory
-uv run python run_batch_simple.py --config /mnt/bytopia/IRC805/config.yaml
-```
-
-**Features:**
-- Auto-discovers subjects from DICOM directory
-- Processes subjects sequentially
-- Continues on errors
-- Generates summary report
-
-**What happens**:
-1. Anatomical preprocessing runs first
-2. After anatomical completes, DWI/functional/ASL run in parallel
-3. Optimal resource utilization for multi-modal data
-
-#### Option 3: Full Pipeline from DICOM
-
-Convert DICOM and preprocess in one command:
-
-```bash
-# Complete pipeline from raw DICOM
-uv run python run_full_pipeline.py \
     --subject sub-001 \
-    --dicom-dir /path/to/dicom/sub-001 \
-    --config config.yaml
+    --nifti-dir /path/to/study/bids/sub-001 \
+    --config /path/to/study/config.yaml \
+    --skip-dwi --skip-asl  # Only anatomical and functional
+
+# 4. Batch processing
+uv run python run_batch_simple.py --config /path/to/study/config.yaml
 ```
 
-**Process**:
-1. Converts all DICOM files to NIfTI (with metadata extraction)
-2. Detects available modalities automatically
-3. Runs preprocessing workflows in optimal order
-4. Generates QC reports
+### Python API
 
-#### Option 4: Continuous Streaming Pipeline (Advanced)
+```python
+from neurovrai.config import load_config
+from neurovrai.preprocess.workflows import (
+    run_anat_preprocessing,
+    run_dwi_multishell_topup_preprocessing,
+    run_func_preprocessing,
+    run_asl_preprocessing
+)
 
-For large datasets, start preprocessing as DICOM conversion completes:
+# Load configuration
+config = load_config('config.yaml')
 
-```bash
-# Streaming pipeline - preprocesses as data converts
-uv run python run_continuous_pipeline.py \
-    --subject sub-001 \
-    --dicom-dir /path/to/dicom/sub-001 \
-    --config config.yaml
+# Run anatomical preprocessing
+results = run_anat_preprocessing(
+    config=config,
+    subject='sub-001',
+    t1w_file='/path/to/T1w.nii.gz',
+    output_dir='/path/to/study/derivatives'
+)
+
+# Results contain all output file paths
+print(results['brain'])          # Brain-extracted T1w
+print(results['brain_mask'])     # Brain mask
+print(results['mni_warp'])       # Warp to MNI space
 ```
 
-**Benefits**:
-- Maximum efficiency - no waiting for full conversion
-- Optimal for large studies with many subjects
-- Anatomical starts as soon as T1w is converted
-- Other modalities start as their files become available
+## Directory Structure
 
-### Command-Line Options
-
-All runner scripts support these options:
-
-```bash
---subject SUBJECT_ID       # Required: Subject identifier
---modality {anat,dwi,func,asl,all}  # Preprocessing modality
---config CONFIG_FILE       # Optional: config.yaml path (default: ./config.yaml)
---study-root STUDY_ROOT    # Optional: Override project_dir from config
---skip-qc                  # Optional: Skip quality control generation
-```
-
-### Understanding Data Flow
+neurovrai uses a standardized directory hierarchy:
 
 ```
-Raw Data → DICOM Conversion → Preprocessing → Quality Control → Analysis-Ready Data
+study_root/
+├── raw/
+│   ├── dicom/              # Raw DICOM files
+│   └── bids/               # Converted NIfTI (BIDS format)
+│       └── sub-001/
+│           ├── anat/
+│           ├── dwi/
+│           ├── func/
+│           └── asl/
+├── derivatives/            # Preprocessed outputs
+│   └── sub-001/
+│       ├── anat/           # Brain masks, segmentation, MNI registration
+│       ├── dwi/            # Eddy-corrected, DTI/DKI/NODDI metrics
+│       ├── func/           # Denoised BOLD, preprocessed time series
+│       └── asl/            # CBF maps, tissue-specific perfusion
+├── work/                   # Temporary processing files
+│   └── sub-001/
+├── qc/                     # Quality control reports
+│   └── sub-001/
+│       ├── anat/
+│       ├── dwi/
+│       ├── func/
+│       └── asl/
+├── transforms/             # Spatial transformation registry
+│   └── sub-001/
+└── config.yaml             # Study configuration
 ```
 
-**Directory structure during processing**:
+## Preprocessing Workflows
+
+### Anatomical (T1w/T2w)
+
+**Pipeline:**
+1. N4 bias field correction (ANTs)
+2. Brain extraction (FSL BET)
+3. Tissue segmentation (ANTs Atropos - faster than FSL FAST)
+4. Registration to MNI152 (FSL FLIRT + FNIRT)
+5. Quality control (skull stripping, segmentation, registration)
+
+**Outputs:**
+- Brain-extracted images
+- Brain masks
+- Tissue probability maps (CSF, GM, WM)
+- MNI-space registered images
+- Spatial transformations
+
+**Time:** 15-30 minutes
+
+### Diffusion (DWI)
+
+**Pipeline:**
+1. Optional TOPUP distortion correction (auto-enabled with reverse PE data)
+2. GPU-accelerated eddy current/motion correction
+3. DTI fitting (FA, MD, AD, RD)
+4. Optional BEDPOSTX fiber orientation estimation (for future tractography)
+5. Advanced models (auto-enabled for multi-shell):
+   - **DKI** (DIPY): MK, AK, RK, KFA metrics
+   - **NODDI** (DIPY or AMICO): FICVF, ODI, FISO
+   - **AMICO Models**: SANDI, ActiveAx (100x faster)
+6. Spatial normalization to FMRIB58_FA template
+7. Comprehensive QC (TOPUP, motion, DTI metrics)
+
+**Outputs:**
+- Eddy-corrected DWI
+- DTI metric maps
+- DKI/NODDI metric maps (multi-shell only)
+- BEDPOSTX fiber orientations (optional)
+- Normalized metrics in MNI space
+- Forward/inverse warps
+
+**Time:** 45-90 minutes (30 min with AMICO)
+
+### Functional (rs-fMRI)
+
+**Pipeline:**
+1. **Multi-echo path:**
+   - Auto-detection of echo count
+   - TEDANA denoising (optimal for multi-echo)
+   - Motion correction per echo
+   - Optimally combined signal
+2. **Single-echo path:**
+   - Motion correction (MCFLIRT)
+   - ICA-AROMA artifact removal (auto-enabled)
+3. **Common steps:**
+   - ACompCor nuisance regression (CSF/WM components)
+   - Bandpass temporal filtering
+   - Spatial smoothing
+   - Registration to anatomical/MNI space
+4. Comprehensive QC (motion, DVARS, tSNR, carpet plots)
+
+**Outputs:**
+- Preprocessed BOLD time series
+- Motion parameters
+- Nuisance regressors
+- tSNR maps
+- QC reports (HTML)
+
+**Time:** 20-40 min (single-echo), 2-4 hours (multi-echo with TEDANA)
+
+### ASL (Perfusion)
+
+**Pipeline:**
+1. Automated DICOM parameter extraction (labeling duration τ, PLD)
+2. Motion correction
+3. Label-control separation
+4. M0 calibration with white matter reference
+5. CBF quantification (standard kinetic model, Alsop et al. 2015)
+6. Partial volume correction (tissue-specific CBF)
+7. Registration to anatomical space
+8. Comprehensive QC (motion, CBF, tSNR)
+
+**Outputs:**
+- CBF maps
+- M0 maps
+- Tissue-specific CBF statistics
+- QC metrics and plots
+
+**Time:** 15-30 minutes
+
+## Quality Control
+
+neurovrai includes comprehensive automated QC for all modalities:
+
+### Anatomical QC
+- **Skull Stripping**: Brain mask overlays, volume statistics, over/under-stripping detection
+- **Segmentation**: Tissue volume distributions, probability maps, GM/WM/CSF ratio validation
+- **Registration**: MNI overlay visualizations, checkerboard comparisons, spatial correlation metrics
+
+**Outputs:** PNG visualizations, JSON metrics, pass/fail flags
+
+### Diffusion QC
+- **TOPUP**: Field map visualizations, convergence plots, distortion correction metrics
+- **Motion**: Framewise displacement plots, outlier detection, motion parameter time series
+- **DTI**: FA/MD/AD/RD histograms, metric distributions, white matter statistics
+- **Advanced Models**: DKI/NODDI metric distributions, fitting quality metrics
+
+**Outputs:** Comprehensive plots, distribution statistics, outlier identification
+
+### Functional QC
+- **Motion**: Translation/rotation parameters, framewise displacement, outlier volumes
+- **Signal Quality**: DVARS time series, temporal SNR maps, signal variance
+- **Denoising**: TEDANA component classification, variance explained, acceptance rates
+- **Confounds**: ACompCor components, nuisance regressor validation
+- **Visualization**: Carpet plots, motion correlation, tSNR overlays
+
+**Outputs:** HTML reports, interactive plots, comprehensive metrics
+
+### ASL QC
+- **Motion**: CBF sensitivity to motion, temporal stability
+- **Perfusion**: CBF distributions, tissue-specific values, physiological range validation
+- **Signal**: tSNR maps, M0 calibration quality, label-control SNR
+
+**Outputs:** CBF overlays, distribution plots, tissue-specific statistics
+
+### QC Directory Structure
 
 ```
-/path/to/study/                         # Study root
-├── dicoms/sub-001/                     # Raw DICOM files
-├── bids/sub-001/                       # Converted NIfTI + JSON
-│   ├── anat/
-│   ├── dwi/
-│   ├── func/
-│   └── asl/
-├── derivatives/sub-001/                # Preprocessed outputs
-│   ├── anat/                           # Brain masks, segmentations, MNI-registered T1w
-│   ├── dwi/                            # Eddy-corrected DWI, DTI/DKI/NODDI metrics
-│   ├── func/                           # Denoised BOLD, preprocessed time series
-│   └── asl/                            # CBF maps, tissue-specific perfusion
-├── work/sub-001/                       # Temporary Nipype files (can delete after)
-├── qc/sub-001/                         # Quality control reports
-│   ├── anat/
-│   ├── dwi/
-│   ├── func/
-│   └── asl/
-└── logs/                               # Processing logs
+qc/sub-001/
+├── anat/
+│   ├── skull_strip/
+│   │   ├── brain_mask_overlay.png
+│   │   └── metrics.json
+│   ├── segmentation/
+│   │   ├── tissue_volumes.png
+│   │   ├── tissue_overlays.png
+│   │   └── metrics.json
+│   ├── registration/
+│   │   ├── registration_overlay.png
+│   │   ├── registration_checkerboard.png
+│   │   └── metrics.json
+│   └── combined_qc_results.json
+├── dwi/
+│   ├── topup/
+│   │   ├── field_map.png
+│   │   ├── convergence.png
+│   │   └── metrics.json
+│   ├── motion/
+│   │   ├── framewise_displacement.png
+│   │   ├── motion_params.png
+│   │   └── metrics.json
+│   ├── dti/
+│   │   ├── fa_histogram.png
+│   │   ├── md_histogram.png
+│   │   └── metrics.json
+│   └── combined_qc_results.json
+├── func/
+│   ├── motion_qc.html
+│   ├── tsnr_map.png
+│   ├── carpet_plot.png
+│   ├── dvars.png
+│   └── metrics.json
+└── asl/
+    ├── cbf_overlay.png
+    ├── cbf_distribution.png
+    ├── tsnr_map.png
+    └── metrics.json
 ```
 
-### DICOM to NIfTI Conversion
+All QC outputs include:
+- **Visualizations**: PNG/HTML for quick review
+- **Metrics**: JSON files for quantitative analysis
+- **Pass/Fail Flags**: Automated quality assessment
 
-If starting from DICOM files, the pipeline automatically:
+## Configuration
 
-- **Detects modalities** from SeriesDescription DICOM tags
-- **Extracts parameters**: TR, TE, bvals, bvecs, ASL timing
-- **Organizes files**: BIDS-like structure with JSON sidecars
-- **Validates completeness**: Ensures all required files present
-
-**Supported modalities**:
-- **Anatomical**: T1w, T2w (3D structural scans)
-- **Diffusion**: Multi-shell DWI with optional reverse phase-encoding for TOPUP
-- **Functional**: Single-echo or multi-echo resting-state fMRI
-- **ASL**: pCASL with automatic parameter extraction from DICOM headers
-
-### Processing Time Estimates
-
-Typical processing times on a modern workstation (GPU-enabled):
-
-| Modality | Time Range | Notes |
-|----------|------------|-------|
-| Anatomical | 15-30 min | N4 bias correction, Atropos segmentation, FNIRT registration |
-| DWI (basic) | 30-60 min | TOPUP, GPU eddy, DTI fitting |
-| DWI (with advanced models) | 45-90 min | Add 15-30 min for DKI/NODDI (DIPY) or 30 sec (AMICO) |
-| Functional (single-echo) | 20-40 min | Motion correction, ICA-AROMA, smoothing, registration |
-| Functional (multi-echo) | 2-4 hours | Includes TEDANA denoising (1-2 hours), motion correction |
-| ASL | 15-30 min | Motion correction, CBF quantification, M0 calibration |
-
-**Parallelization**: Run DWI, functional, and ASL simultaneously after anatomical completes to maximize throughput.
-
-**AMICO Performance**: Using AMICO for NODDI reduces DWI processing to ~45-60 min total (100x speedup: 30 sec vs 20-25 min).
-
-## Quick Start
-
-### 1. Prepare Your Data
-
-Organize your data in BIDS format:
-
-```
-project/
- rawdata/
-    sub-001/
-        anat/
-           sub-001_T1w.nii.gz
-           sub-001_T1w.json
-        dwi/
-            sub-001_dwi.nii.gz
-            sub-001_dwi.bval
-            sub-001_dwi.bvec
-            sub-001_dwi.json
- derivatives/  (created by pipeline)
- work/         (temporary working directory)
-```
-
-### 2. Create Configuration File
-
-Create a YAML configuration file (e.g., `config.yaml`):
+neurovrai uses a single YAML configuration file for all modules:
 
 ```yaml
-
 # Project paths
-project_dir: /path/to/your/project
-rawdata_dir: ${project_dir}/rawdata
+project_dir: /path/to/study
+rawdata_dir: ${project_dir}/raw/bids
 derivatives_dir: ${project_dir}/derivatives
 work_dir: ${project_dir}/work
+qc_dir: ${project_dir}/qc
 transforms_dir: ${project_dir}/transforms
 
-# Execution settings
+# Execution
 execution:
   plugin: MultiProc
-  n_procs: 4
+  n_procs: 6
 
-# Template files
+# Templates
 templates:
   mni152_t1_2mm: /usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz
-  mni152_t1_1mm: /usr/local/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz
+  fmrib58_fa: /usr/local/fsl/data/standard/FMRIB58_FA_1mm.nii.gz
 
-# Anatomical preprocessing
+# ============================================================
+# PREPROCESSING (neurovrai.preprocess)
+# ============================================================
+
+# Anatomical
 anatomical:
-  bet_frac: 0.5
+  bet:
+    frac: 0.5
+    reduce_bias: true
+    robust: true
+  segmentation:
+    n_iterations: 5
+    mrf_weight: 0.1
   registration_method: fsl  # or 'ants'
+  run_qc: true
 
-# Diffusion preprocessing
+# Diffusion
 diffusion:
   denoise_method: dwidenoise
   topup:
-    enabled: auto  # 'auto', true, or false - auto-detects reverse PE availability
-    readout_time: 0.05
-  eddy_config:
-    flm: linear
-    slm: linear
-    use_cuda: true
+    readout_time: 0.05      # Adjust for your acquisition
+  eddy:
+    use_cuda: true          # GPU acceleration
+  bedpostx:
+    enabled: true           # Fiber orientation for future tractography
+    use_gpu: true
   advanced_models:
-    enabled: auto  # Auto-enables for multi-shell data
-    fit_dki: true
+    fit_dki: true           # Auto-disabled for single-shell
     fit_noddi: true
+    use_amico: true         # 100x faster NODDI
+  normalize_to_mni: true
+  run_qc: true
 
-# FreeSurfer integration (EXPERIMENTAL - not production ready)
+# Functional
+functional:
+  tr: 1.029                 # Repetition time (seconds)
+  te: [10.0, 30.0, 50.0]   # Echo times (ms) - for multi-echo
+  highpass: 0.001           # Hz
+  lowpass: 0.08
+  fwhm: 6                   # Smoothing (mm)
+  tedana:
+    enabled: true           # Auto for multi-echo
+    tedpca: 0.95           # Variance threshold
+    tree: kundu
+  aroma:
+    enabled: auto           # Auto-enabled for single-echo
+  acompcor:
+    enabled: true
+    num_components: 5
+    variance_threshold: 0.5
+  normalize_to_mni: true
+  run_qc: true
+
+# ASL
+asl:
+  labeling_duration: 1.8    # τ (seconds) - auto-extracted from DICOM
+  post_labeling_delay: 2.0  # PLD (seconds)
+  lambda_blood: 0.9
+  t1_blood: 1.65
+  alpha: 0.85
+  wm_cbf_reference: 25.0
+  apply_pvc: true           # Partial volume correction
+  normalize_to_mni: true
+  run_qc: true
+
+# FreeSurfer (EXPERIMENTAL - not production ready)
 freesurfer:
-  enabled: false  # Do not enable until transform pipeline implemented
+  enabled: false            # Do not enable until transform pipeline complete
   subjects_dir: ${project_dir}/freesurfer
+
+# ============================================================
+# ANALYSIS (neurovrai.analysis) - Placeholder for Phase 3
+# ============================================================
+# Configuration sections will be added in Phase 3
+
+# ============================================================
+# CONNECTOME (neurovrai.connectome) - Placeholder for Phase 4
+# ============================================================
+# Configuration sections will be added in Phase 4
 ```
 
-### 3. Run Preprocessing
+## Project Status
 
-```bash
-# Run anatomical preprocessing (required first)
-uv run python run_preprocessing.py --subject sub-001 --modality anat
+### ✅ Production-Ready (neurovrai.preprocess)
 
-# Run additional modalities (see "How to Run the Pipeline" section for details)
-uv run python run_preprocessing.py --subject sub-001 --modality dwi
-uv run python run_preprocessing.py --subject sub-001 --modality func
-```
+All preprocessing modalities are complete and validated:
 
-### 4. Check Outputs
+| Modality | Status | Key Features |
+|----------|--------|--------------|
+| **Anatomical** | ✅ Complete | N4, BET, Atropos, FNIRT, comprehensive QC |
+| **Diffusion** | ✅ Complete | TOPUP, eddy_cuda, DTI/DKI/NODDI, BEDPOSTX, MNI normalization |
+| **Functional** | ✅ Complete | TEDANA (multi-echo), ICA-AROMA (single-echo), ACompCor, MNI normalization |
+| **ASL** | ✅ Complete | M0 calibration, PVC, CBF quantification, auto DICOM params |
+| **QC Framework** | ✅ Complete | Automated QC for all modalities with HTML reports |
 
-```bash
-# View preprocessed outputs
-ls derivatives/sub-001/anat/    # Brain masks, segmentations, registrations
-ls derivatives/sub-001/dwi/     # Eddy-corrected DWI, DTI/DKI/NODDI metrics
-ls derivatives/sub-001/func/    # Denoised BOLD, preprocessed time series
+**Recent Milestones:**
+- 2025-11-17: Fixed functional run selection for scanner retries
+- 2025-11-17: Enabled ACompCor in functional pipeline
+- 2025-11-17: Package restructured to neurovrai with three-module architecture
+- 2025-11-16: Removed tractography from preprocessing (will be reimplemented in neurovrai.connectome)
+- 2025-11-15: All modalities production-ready
+- 2025-11-14: TEDANA 25.1.0, spatial normalization, bug fixes
+- 2025-11-13: ASL preprocessing with M0 calibration and PVC
+- 2025-11-12: DKI/NODDI validation, functional QC enhancements
+- 2025-11-11: AMICO integration (100x speedup)
+- 2025-11-10: Multi-echo TEDANA integration
 
-# View quality control reports
-ls qc/sub-001/anat/            # Anatomical QC plots
-ls qc/sub-001/dwi/             # DWI QC plots
-ls qc/sub-001/func/            # Functional QC plots
-```
+### 🔄 In Development
 
-**For detailed usage instructions, processing options, and workflow details, see the "How to Run the Pipeline" section above.**
+| Module | Status | Timeline |
+|--------|--------|----------|
+| **neurovrai.analysis** | Planned | Phase 3 (4-6 weeks) |
+| **neurovrai.connectome** | Planned | Phase 4 (6-8 weeks) |
 
-## Pipeline Workflows
+### ⚠️ Experimental (Not Production Ready)
 
-### Anatomical Preprocessing
+| Feature | Status | Issue |
+|---------|--------|-------|
+| **FreeSurfer Integration** | Hooks only | Transform pipeline incomplete |
 
-**Current Validated Workflow:**
-1. **Reorientation**: Standardize image orientation (fslreorient2std)
-2. **Skull Stripping**: Brain extraction (FSL BET)
-3. **Registration**: Linear (FLIRT) and nonlinear (FNIRT) to MNI152
-4. **Transform Storage**: Save transforms to TransformRegistry for reuse
+**See `docs/NEUROVRAI_ARCHITECTURE.md` for detailed roadmap and implementation plan.**
 
-**Optional/Future Enhancements:**
-- **Bias Correction**: ANTs Light N4 (validated, 2.5 min on high-res data)
-- **Tissue Segmentation**: CSF/GM/WM segmentation (ANTs Atropos or FSL FAST - to be configured for resting-state fMRI workflows)
+## Processing Time Estimates
 
-**Outputs**:
-- `sub-XXX_T1w_brain.nii.gz`: Skull-stripped T1w
-- `sub-XXX_T1w_brain_mask.nii.gz`: Brain mask
-- `sub-XXX_T1w_to_MNI152.mat`: Affine transform
-- `sub-XXX_T1w_to_MNI152_warp.nii.gz`: Nonlinear warp field
-- Transforms saved to TransformRegistry for cross-workflow reuse
+Typical times on modern workstation with GPU:
 
-### Diffusion Preprocessing
+| Modality | Time | Configuration |
+|----------|------|---------------|
+| Anatomical | 15-30 min | N4, BET, Atropos, FNIRT |
+| DWI (basic) | 30-60 min | TOPUP, eddy_cuda, DTI |
+| DWI (full) | 45-90 min | + DKI/NODDI (DIPY) |
+| DWI (AMICO) | 30-45 min | NODDI in 30 sec (not 25 min) |
+| Functional (single) | 20-40 min | Motion, ICA-AROMA, ACompCor |
+| Functional (multi) | 2-4 hours | + TEDANA (1-2 hours) |
+| ASL | 15-30 min | Motion, CBF, M0 calibration |
 
-1. **DICOM Conversion**: Convert DICOM to NIfTI (if needed)
-2. **Denoising**: Marchenko-Pastur PCA denoising (dwidenoise)
-3. **Gibbs Unringing**: Remove Gibbs ringing artifacts
-4. **Eddy Current Correction**: FSL eddy with motion correction
-5. **Registration**: Register to anatomical space (reuses T1w→MNI transforms)
-6. **Tensor Fitting**: DTI model fitting
-
-**Outputs**:
-- `sub-XXX_dwi_preprocessed.nii.gz`: Preprocessed DWI
-- `sub-XXX_dwi_FA.nii.gz`: Fractional anisotropy map
-- `sub-XXX_dwi_MD.nii.gz`: Mean diffusivity map
-- `sub-XXX_dwi_to_MNI152.nii.gz`: DWI warped to MNI152
-
-## Quality Control (QC)
-
-The pipeline includes comprehensive quality control modules for both DWI and anatomical preprocessing.
-
-### DWI QC
-
-Automated QC for diffusion preprocessing:
-
-```python
-from mri_preprocess.qc.dwi import TOPUPQualityControl, MotionQualityControl, DTIQualityControl
-
-# TOPUP QC: Field map analysis
-topup_qc = TOPUPQualityControl(
-    subject='sub-001',
-    work_dir=Path('derivatives/dwi_topup/sub-001'),
-    qc_dir=Path('qc/dwi/sub-001/topup')
-)
-results = topup_qc.run_qc()
-
-# Motion QC: Framewise displacement
-motion_qc = MotionQualityControl(
-    subject='sub-001',
-    work_dir=Path('derivatives/dwi_topup/sub-001'),
-    qc_dir=Path('qc/dwi/sub-001/motion')
-)
-results = motion_qc.run_qc()
-
-# DTI QC: FA/MD distributions
-dti_qc = DTIQualityControl(
-    subject='sub-001',
-    dti_dir=Path('derivatives/dwi_topup/sub-001/dti'),
-    qc_dir=Path('qc/dwi/sub-001/dti')
-)
-results = dti_qc.run_qc(metrics=['FA', 'MD'])
-```
-
-**QC Outputs** (stored in `{study_root}/qc/dwi/{subject}/`):
-- TOPUP convergence plots and field map statistics
-- Motion parameter plots with outlier detection
-- FA/MD histograms and distribution statistics
-- JSON metrics files for all QC measures
-
-### Anatomical QC
-
-```python
-from mri_preprocess.qc.anat import SkullStripQualityControl
-
-# Skull stripping QC
-skull_qc = SkullStripQualityControl(
-    subject='sub-001',
-    anat_dir=Path('derivatives/anat_preproc/sub-001/anat'),
-    qc_dir=Path('qc/anat/sub-001/skull_strip')
-)
-results = skull_qc.run_qc()
-```
-
-**QC Outputs** (stored in `{study_root}/qc/anat/{subject}/`):
-- Brain mask overlay visualizations
-- Brain volume statistics
-- Quality assessment metrics (contrast ratio, over/under-stripping detection)
-
-For complete QC documentation, see `docs/DWI_QC_SPECIFICATION.md`.
-
-## Configuration Options
-
-### Execution Settings
-
-```yaml
-execution:
-  plugin: MultiProc      # Linear, MultiProc, or PBS
-  n_procs: 4            # Number of parallel processes
-```
-
-### Registration Methods
-
-```yaml
-anatomical:
-  registration_method: fsl    # 'fsl' or 'ants'
-
-  # FSL options
-  flirt_dof: 12              # Degrees of freedom (6, 9, or 12)
-  flirt_cost: corratio       # Cost function
-
-  # ANTs options (if using ANTs)
-  ants_metric: MI            # Mutual Information or Cross-Correlation
-  ants_convergence: [1000, 500, 250, 100]
-```
-
-### Diffusion Processing
-
-```yaml
-diffusion:
-  denoise_method: dwidenoise  # 'dwidenoise' or 'none'
-  gibbs_unring: true
-
-  eddy_config:
-    flm: linear              # First-level model
-    slm: linear              # Second-level model
-    niter: 5
-    fwhm: 0
-```
+**Optimization tips:**
+- Enable GPU acceleration for eddy and BEDPOSTX
+- Use AMICO for NODDI (100x speedup)
+- Run modalities in parallel after anatomical completes
+- Use `--parallel-modalities` flag for maximum throughput
 
 ## Advanced Usage
 
-### Using the Transform Registry
+### Transform Registry
 
-The Transform Registry enables efficient reuse of spatial transformations:
+Efficient spatial transformation reuse across workflows:
 
 ```python
-from mri_preprocess.utils.transforms import create_transform_registry
+from neurovrai.utils.transforms import create_transform_registry
 
 # Create registry
-registry = create_transform_registry(config, 'sub-001')
+registry = create_transform_registry(config, subject='sub-001')
 
-# Save transforms (done automatically by anatomical workflow)
+# Anatomical workflow saves transforms
 registry.save_nonlinear_transform(
-    warp_file=Path('warp.nii.gz'),
-    affine_file=Path('affine.mat'),
+    warp_file='T1w_to_MNI_warp.nii.gz',
+    affine_file='T1w_to_MNI.mat',
     source_space='T1w',
     target_space='MNI152',
     subject='sub-001'
 )
 
-# Retrieve transforms (used by diffusion workflow)
+# DWI workflow retrieves transforms (zero redundant computation)
 warp, affine = registry.get_nonlinear_transform('T1w', 'MNI152')
 ```
 
 ### Batch Processing
 
 ```bash
-
-# Process multiple subjects sequentially
+# Sequential processing
 for subject in sub-001 sub-002 sub-003; do
-  # Anatomical must run first
-  mri-preprocess run anatomical --config config.yaml --subject ${subject}
-  # Then diffusion can reuse the anatomical transforms
-  mri-preprocess run diffusion --config config.yaml --subject ${subject}
+  uv run python run_simple_pipeline.py \
+    --subject ${subject} \
+    --nifti-dir /study/bids/${subject} \
+    --config config.yaml
 done
 
-# Or use GNU Parallel for parallel execution
+# Parallel processing with GNU Parallel
 cat subjects.txt | parallel -j 4 \
-  mri-preprocess run anatomical --config config.yaml --subject {}
-cat subjects.txt | parallel -j 4 \
-  mri-preprocess run diffusion --config config.yaml --subject {}
+  uv run python run_simple_pipeline.py \
+    --subject {} \
+    --nifti-dir /study/bids/{} \
+    --config config.yaml
 ```
 
 ### Custom Workflows
@@ -649,225 +565,129 @@ cat subjects.txt | parallel -j 4 \
 ```python
 from nipype import Workflow, Node
 from nipype.interfaces import fsl
-from mri_preprocess.config import load_config
+from neurovrai.config import load_config
+from neurovrai.utils.workflow import setup_logging, get_execution_config
 
-config = load_config(Path('config.yaml'))
+# Load config
+config = load_config('config.yaml')
 
 # Create custom workflow
-wf = Workflow(name='custom_processing')
+wf = Workflow(name='custom_analysis')
 wf.base_dir = config['work_dir']
 
-# Add nodes
-bet = Node(fsl.BET(frac=0.5, mask=True), name='bet')
-
+# Add processing nodes
+bet = Node(fsl.BET(frac=0.5, mask=True), name='brain_extraction')
 # ... add more nodes
 
-wf.run()
+# Execute
+wf.run(**get_execution_config(config))
 ```
 
-## Performance Benchmarks
-
-Based on testing with 512x512x400 T1w data (Intel 4-core CPU):
-
-| Step | Time | Notes |
-|------|------|-------|
-| Reorientation (fslreorient2std) | ~1s | Standard orientation |
-| Skull Stripping (BET) | ~74s | Robust extraction |
-| Bias Correction (Light N4) | ~150s (2.5min) | Optional, validated on minimal bias fields |
-| Linear Registration (FLIRT) | ~225s (3.7min) | 12 DOF, corratio |
-| Nonlinear Registration (FNIRT) | ~442s (7.4min) | High-quality warping |
-| **Total Core Workflow** | ~11min | Reorient + BET + FLIRT + FNIRT |
-| **With Light N4** | ~14min | Add 2.5 min for bias correction |
-
-**Note:** ANTs registration (~15-20 min) available as alternative for research requiring maximal accuracy. TransformRegistry enables efficient reuse of transforms across diffusion and fMRI workflows.
-
 ## Troubleshooting
+
+### Import Errors
+
+```bash
+# Ensure neurovrai is installed
+uv run python -c "import neurovrai; print(neurovrai.__version__)"
+# Should output: 2.0.0-alpha
+
+# If import fails, reinstall
+uv sync
+```
 
 ### FSL Not Found
 
 ```bash
-
-# Ensure FSLDIR is set
+# Check FSL installation
 echo $FSLDIR
-
 # Should output: /usr/local/fsl
 
 # Source FSL configuration
 source ${FSLDIR}/etc/fslconf/fsl.sh
 ```
 
+### CUDA/GPU Issues
+
+```bash
+# Check CUDA availability
+nvidia-smi
+
+# Verify GPU support in FSL
+eddy_cuda --help
+```
+
 ### Memory Issues
 
-Reduce parallel processes in your config file:
+Reduce parallel processes in `config.yaml`:
 
 ```yaml
 execution:
-  plugin: MultiProc
-  n_procs: 2  # Reduce from 4 to 2
+  n_procs: 2  # Reduce from 6 to 2
 ```
 
-### FAST Hanging on High-Resolution Data
+### TEDANA Convergence Issues
 
-Use ANTs N4BiasFieldCorrection instead in your config file:
+If TEDANA ICA fails to converge, adjust PCA threshold:
 
 ```yaml
-anatomical:
-  bias_correction_method: ants  # Instead of 'fsl'
+functional:
+  tedana:
+    tedpca: 225  # Use fixed component count instead of variance threshold
 ```
 
-## Project Structure
+## Documentation
 
-```
-human-mri-preprocess/
- mri_preprocess/
-    config.py              # Configuration loading and validation
-    cli.py                 # Command-line interface
-    utils/
-       transforms.py      # TransformRegistry
-       workflow.py        # Workflow utilities
-       bids.py           # BIDS helpers
-    workflows/
-        anat_preprocess.py # Anatomical workflow
-        dwi_preprocess.py  # Diffusion workflow
- configs/                   # Example configurations
- TESTING_RESULTS.md        # Validation results
- README.md                 # This file
-```
-
-## Production Status
-
-**Current Status (2025-11-15)**: **🎊 ALL MODALITIES PRODUCTION-READY** - Complete multi-modal MRI preprocessing pipeline validated and operational.
-
-### ✅ Production Ready (ALL Modalities)
-
-- **Anatomical**: T1w preprocessing with N4, BET, tissue segmentation (Atropos), MNI registration (FLIRT/FNIRT)
-- **DWI**: Multi-shell/single-shell preprocessing with optional TOPUP distortion correction, GPU eddy, DTI/DKI/NODDI metrics, spatial normalization, tractography
-  - **Advanced Models**: DKI and NODDI (DIPY) auto-enabled for multi-shell data
-  - **AMICO Models**: NODDI (100x faster), SANDI, ActiveAx with convex optimization
-- **Functional**: Multi-echo and single-echo fMRI preprocessing
-  - **Multi-echo**: TEDANA 25.1.0 denoising (optimal for multi-echo acquisition)
-  - **Single-echo**: ICA-AROMA motion artifact removal (auto-enabled)
-  - Complete QC: motion, DVARS, tSNR, carpet plots
-- **ASL**: pCASL preprocessing with M0 calibration, partial volume correction, automated DICOM parameter extraction
-
-### ⚠️ Experimental (Not Production Ready)
-- **FreeSurfer Integration**: Detection and extraction hooks implemented, but transform pipeline (anatomical→DWI) not yet complete. Do not enable until spatial transformation workflow is validated.
-
-**For detailed status and implementation notes, see `PROJECT_STATUS.md`.**
-
-## Planned Analysis Features
-
-The following analysis features are planned for future development. Core preprocessing workflows are production-ready; these features will add advanced group-level and connectivity analyses.
-
-### Myelin Mapping
-- **T1w/T2w Ratio Images**: Modernize existing legacy implementation to current architecture
-  - Myelin content proxy from T1w/T2w intensity ratio
-  - Integration with config-driven workflow system
-
-### DWI Analysis
-- **MNI-Space Tractography**: Group-level probabilistic tractography for cross-subject comparisons
-  - Standard space connectivity matrices
-  - Population-level fiber tract analyses
-- **TBSS (Tract-Based Spatial Statistics)**: FA group analysis pipeline
-  - Skeleton-based voxelwise statistics
-  - Multi-subject white matter comparisons
-
-### Functional Analysis
-- **MELODIC (Group ICA)**: Identify consistent resting-state networks across subjects
-  - Temporal concatenation approach
-  - Component spatial maps and time courses
-- **ReHo (Regional Homogeneity)**: Local functional connectivity
-  - Kendall's coefficient of concordance
-  - Voxelwise or ROI-based measurements
-- **fALFF (Fractional ALFF)**: Low-frequency fluctuation analysis
-  - Ratio of low-frequency to total power
-  - Frequency-domain connectivity measures
-
-### Anatomical Analysis
-- **VBM (Voxel-Based Morphometry)**: Statistical comparison of brain structure
-  - FSL (fslvbm) or ANTs implementation
-  - Gray matter and white matter concentration analysis
-  - Multi-subject group studies
-
-### ASL Analysis
-- **Group-Level CBF Analysis**: Perfusion comparisons and modeling (TBD)
-  - CBF group statistics and test-retest reliability
-  - Arterial transit time analysis
-  - Perfusion-based connectivity
-
-**Note**: These features are not currently prioritized as core preprocessing is production-ready and meets current research needs. See `PROJECT_STATUS.md` for detailed implementation status.
-
-## Recent Updates
-
-### 2025-11-15: 🎊 Production Release Milestone
-**All modalities now production-ready!**
-
-**Completed:**
-- ✅ Functional preprocessing pipeline (multi-echo TEDANA + single-echo ICA-AROMA)
-- ✅ Complete functional QC module (motion, DVARS, tSNR, carpet plots)
-- ✅ AMICO advanced diffusion models moved to production (NODDI, SANDI, ActiveAx)
-- ✅ Standardized QC directory structure across all modalities
-- ✅ Repository organization and documentation updates
-
-**Key Features:**
-- **Multi-echo fMRI**: TEDANA 25.1.0 with automatic component classification
-- **AMICO Performance**: 100x faster NODDI (30 sec vs 20-25 min DIPY)
-- **Comprehensive QC**: Automated quality control for all modalities with HTML reports
-- **Complete validation**: All workflows tested on real-world multi-modal datasets
-
-### 2025-11-14: Bug Fixes and Enhancements
-- **TEDANA Upgrade**: Fixed NumPy 2.0 compatibility (23.0.2 → 25.1.0)
-- **DWI Fixes**: Corrected work directory hierarchy
-- **DICOM Conversion**: Fixed multi-echo file handling
-- **Spatial Normalization**: Implemented DWI→FMRIB58_FA and functional→MNI152 with transform reuse
-
-## Testing
-
-```bash
-
-# Run tests
-pytest tests/
-
-# Run with coverage
-pytest --cov=mri_preprocess tests/
-```
+- **`README.md`** (this file): Overview and quick start
+- **`docs/NEUROVRAI_ARCHITECTURE.md`**: Three-part architecture and roadmap
+- **`docs/workflows.md`**: Detailed workflow documentation
+- **`docs/DWI_PROCESSING_GUIDE.md`**: DWI-specific guide
+- **`PROJECT_STATUS.md`**: Detailed implementation status
+- **`CLAUDE.md`**: Development guidelines (for AI assistants)
 
 ## Contributing
 
-Contributions are welcome! Please:
+Contributions welcome! Please:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
 ## Citation
 
-If you use this pipeline in your research, please cite:
+If you use neurovrai in your research, please cite:
 
 ```bibtex
-@software{human_mri_preprocess,
-  title={Human MRI Preprocessing Pipeline},
-  author={Your Name},
+@software{neurovrai,
+  title={neurovrai: Comprehensive MRI Preprocessing and Analysis Package},
+  author={Edmond, Alexandre},
   year={2025},
-  url={https://github.com/yourusername/human-mri-preprocess}
+  version={2.0.0-alpha},
+  url={https://github.com/alexedmon1/neurovrai}
 }
 ```
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License - see LICENSE file for details.
 
 ## Acknowledgments
 
-- Built with [Nipype](https://nipype.readthedocs.io/)
-- Uses [FSL](https://fsl.fmrib.ox.ac.uk/fsl/fslwiki) for neuroimaging processing
-- Optional [ANTs](http://stnava.github.io/ANTs/) support for advanced registration
+- Built with [Nipype](https://nipype.readthedocs.io/) workflow engine
+- Uses [FSL](https://fsl.fmrib.ox.ac.uk/) for neuroimaging processing
+- Uses [ANTs](http://stnava.github.io/ANTs/) for advanced registration
+- [DIPY](https://dipy.org/) for advanced diffusion models
+- [AMICO](https://github.com/daducci/AMICO) for accelerated microstructure modeling
+- [TEDANA](https://tedana.readthedocs.io/) for multi-echo fMRI denoising
 - Inspired by [fMRIPrep](https://fmriprep.org/) and [QSIPrep](https://qsiprep.readthedocs.io/)
 
 ## Support
 
-For issues and questions:
-- GitHub Issues: https://github.com/yourusername/human-mri-preprocess/issues
-- Documentation: https://github.com/yourusername/human-mri-preprocess/wiki
+- **GitHub Issues**: https://github.com/alexedmon1/neurovrai/issues
+- **Documentation**: https://github.com/alexedmon1/neurovrai
+
+---
+
+**neurovrai** - *True neuroimaging for the modern age* 🧠
