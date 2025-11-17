@@ -2,23 +2,32 @@
 """
 Simple MRI Preprocessing Pipeline
 
-A straightforward, human-readable pipeline that processes MRI data sequentially.
+A straightforward, human-readable pipeline that processes MRI data.
 
 Usage:
+    # Sequential execution (default)
     python run_simple_pipeline.py --subject IRC805-0580101 --dicom-dir /path/to/dicom --config config.yaml
+
+    # Parallel execution (faster, more resource intensive)
+    python run_simple_pipeline.py --subject IRC805-0580101 --dicom-dir /path/to/dicom --config config.yaml --parallel-modalities
 
 Steps:
     1. Convert DICOM to NIfTI (if needed)
     2. Anatomical preprocessing (required first)
-    3. DWI preprocessing (optional)
-    4. Functional preprocessing (optional)
-    5. ASL preprocessing (optional)
+    3-5. DWI/Functional/ASL preprocessing (run sequentially by default, or in parallel with --parallel-modalities)
+
+Parallel Execution:
+    When --parallel-modalities is enabled, DWI, functional, and ASL workflows run simultaneously
+    after anatomical preprocessing completes. This can significantly reduce total pipeline time
+    when processing subjects with multiple modalities, but requires sufficient system resources
+    (CPU cores, RAM, GPU if using CUDA).
 """
 
 import argparse
 import logging
 import sys
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Import configuration and workflow functions
 from mri_preprocess.config import load_config
@@ -157,6 +166,52 @@ def preprocess_functional(subject, config, nifti_dir, derivatives_dir, work_dir)
         logger.info("⊘ No functional files found - skipping\n")
         return None
 
+    # Group files by run/series (series number is the prefix before first underscore)
+    from collections import defaultdict
+    import re
+    runs = defaultdict(list)
+    for f in func_files:
+        # Extract series number (e.g., "401" from "401_WIP_RESTING...")
+        series_num = f.name.split('_')[0]
+        runs[series_num].append(f)
+
+    logger.info(f"Found {len(func_files)} functional files across {len(runs)} run(s)")
+
+    # Select the latest COMPLETE run
+    # A complete multi-echo run should have 3+ echoes (e1, e2, e3, ...)
+    # Extract timestamp from filename and select the most recent complete run
+    complete_runs = {}
+    for series_num, files in runs.items():
+        # Check if multi-echo (has _e1, _e2, _e3 pattern)
+        echo_nums = [int(re.search(r'_e(\d+)\.nii', f.name).group(1)) for f in files if re.search(r'_e(\d+)\.nii', f.name)]
+
+        if echo_nums:
+            # Multi-echo: check if we have consecutive echoes starting from e1
+            expected_echoes = list(range(1, max(echo_nums) + 1))
+            is_complete = sorted(echo_nums) == expected_echoes
+        else:
+            # Single-echo: 1 file is complete
+            is_complete = len(files) == 1
+
+        # Extract timestamp (format: YYYYMMDDHHMMSS in filename)
+        timestamp_match = re.search(r'_(\d{14})_', files[0].name)
+        timestamp = timestamp_match.group(1) if timestamp_match else "00000000000000"
+
+        logger.info(f"  Run {series_num}: {len(files)} file(s), timestamp={timestamp}, complete={is_complete}")
+
+        if is_complete:
+            complete_runs[series_num] = {'files': files, 'timestamp': timestamp}
+
+    if not complete_runs:
+        logger.error("✗ No complete functional runs found - all runs appear incomplete\n")
+        return None
+
+    # Select the run with the latest timestamp
+    selected_series = max(complete_runs.items(), key=lambda x: x[1]['timestamp'])[0]
+    func_files_selected = sorted(complete_runs[selected_series]['files'])
+
+    logger.info(f"Selected latest complete run: {selected_series} ({len(func_files_selected)} file(s))")
+
     # Check that anatomical preprocessing was done
     anat_dir = derivatives_dir / subject / 'anat'
 
@@ -167,17 +222,16 @@ def preprocess_functional(subject, config, nifti_dir, derivatives_dir, work_dir)
         return None
     t1w_brain = brain_files[0]
 
-    logger.info(f"Found {len(func_files)} functional files")
-    is_multi_echo = len(func_files) > 1 or 'ME' in func_files[0].name
+    # Detect multi-echo based on selected files
+    is_multi_echo = len(func_files_selected) > 1 or 'ME' in func_files_selected[0].name
     logger.info(f"Multi-echo: {is_multi_echo}")
 
     try:
         results = run_func_preprocessing(
             config=config,
             subject=subject,
-            func_files=func_files,
+            func_file=func_files_selected,  # Pass only selected run's files
             output_dir=derivatives_dir,
-            t1w_brain=t1w_brain,
             work_dir=work_dir
         )
         logger.info("✓ Functional preprocessing complete\n")
@@ -246,8 +300,7 @@ def preprocess_asl(subject, config, nifti_dir, derivatives_dir, work_dir, dicom_
             gm_mask=gm_mask,
             wm_mask=wm_mask,
             csf_mask=csf_mask,
-            dicom_dir=dicom_asl_dir,
-            work_dir=work_dir
+            dicom_dir=dicom_asl_dir
         )
         logger.info("✓ ASL preprocessing complete\n")
         return results
@@ -255,6 +308,91 @@ def preprocess_asl(subject, config, nifti_dir, derivatives_dir, work_dir, dicom_
     except Exception as e:
         logger.error(f"✗ ASL preprocessing failed: {e}\n")
         return None
+
+
+def run_modalities_parallel(subject, config, nifti_dir, derivatives_dir, work_dir, dicom_dir, skip_flags):
+    """
+    Run DWI, functional, and ASL preprocessing in parallel.
+
+    Parameters
+    ----------
+    subject : str
+        Subject ID
+    config : dict
+        Configuration dictionary
+    nifti_dir : Path
+        NIfTI directory
+    derivatives_dir : Path
+        Derivatives output directory
+    work_dir : Path
+        Working directory
+    dicom_dir : Path
+        DICOM directory (for ASL parameter extraction)
+    skip_flags : dict
+        Dictionary with 'skip_dwi', 'skip_func', 'skip_asl' flags
+
+    Returns
+    -------
+    dict
+        Results from each modality workflow
+    """
+    logger.info("="*70)
+    logger.info("Running post-anatomical workflows in PARALLEL")
+    logger.info("="*70)
+    logger.info("")
+
+    # Build list of workflows to run
+    workflows = []
+
+    if not skip_flags['skip_dwi']:
+        workflows.append(('DWI', preprocess_dwi, (subject, config, nifti_dir, derivatives_dir, work_dir)))
+
+    if not skip_flags['skip_func']:
+        workflows.append(('Functional', preprocess_functional, (subject, config, nifti_dir, derivatives_dir, work_dir)))
+
+    if not skip_flags['skip_asl']:
+        workflows.append(('ASL', preprocess_asl, (subject, config, nifti_dir, derivatives_dir, work_dir, dicom_dir)))
+
+    if not workflows:
+        logger.info("No post-anatomical workflows to run\n")
+        return {}
+
+    logger.info(f"Submitting {len(workflows)} workflows for parallel execution:")
+    for name, _, _ in workflows:
+        logger.info(f"  - {name}")
+    logger.info("")
+
+    results = {}
+
+    # Use ThreadPoolExecutor (not ProcessPoolExecutor) since workflows use multiprocessing internally
+    with ThreadPoolExecutor(max_workers=len(workflows)) as executor:
+        # Submit all workflows
+        future_to_workflow = {
+            executor.submit(func, *args): name
+            for name, func, args in workflows
+        }
+
+        # Process results as they complete
+        for future in as_completed(future_to_workflow):
+            workflow_name = future_to_workflow[future]
+            try:
+                result = future.result()
+                results[workflow_name] = result
+                if result:
+                    logger.info(f"✓ {workflow_name} workflow completed successfully")
+                else:
+                    logger.warning(f"⚠ {workflow_name} workflow completed with warnings")
+            except Exception as e:
+                logger.error(f"✗ {workflow_name} workflow failed: {e}")
+                results[workflow_name] = None
+
+    logger.info("")
+    logger.info("="*70)
+    logger.info(f"Parallel execution complete: {sum(1 for r in results.values() if r)}/{len(workflows)} succeeded")
+    logger.info("="*70)
+    logger.info("")
+
+    return results
 
 
 def main():
@@ -274,6 +412,8 @@ def main():
     parser.add_argument('--skip-dwi', action='store_true', help='Skip DWI preprocessing')
     parser.add_argument('--skip-func', action='store_true', help='Skip functional preprocessing')
     parser.add_argument('--skip-asl', action='store_true', help='Skip ASL preprocessing')
+    parser.add_argument('--parallel-modalities', action='store_true',
+                        help='Run DWI/functional/ASL in parallel (faster, more resource intensive)')
 
     args = parser.parse_args()
 
@@ -324,17 +464,28 @@ def main():
     else:
         logger.info("Skipping anatomical preprocessing\n")
 
-    # Step 3: DWI Preprocessing
-    if not args.skip_dwi:
-        preprocess_dwi(args.subject, config, nifti_dir, derivatives_dir, work_dir)
+    # Steps 3-5: Post-anatomical workflows (DWI, Functional, ASL)
+    if args.parallel_modalities:
+        # Run DWI/functional/ASL in parallel
+        skip_flags = {
+            'skip_dwi': args.skip_dwi,
+            'skip_func': args.skip_func,
+            'skip_asl': args.skip_asl
+        }
+        run_modalities_parallel(args.subject, config, nifti_dir, derivatives_dir, work_dir, args.dicom_dir, skip_flags)
+    else:
+        # Run sequentially (default)
+        # Step 3: DWI Preprocessing
+        if not args.skip_dwi:
+            preprocess_dwi(args.subject, config, nifti_dir, derivatives_dir, work_dir)
 
-    # Step 4: Functional Preprocessing
-    if not args.skip_func:
-        preprocess_functional(args.subject, config, nifti_dir, derivatives_dir, work_dir)
+        # Step 4: Functional Preprocessing
+        if not args.skip_func:
+            preprocess_functional(args.subject, config, nifti_dir, derivatives_dir, work_dir)
 
-    # Step 5: ASL Preprocessing
-    if not args.skip_asl:
-        preprocess_asl(args.subject, config, nifti_dir, derivatives_dir, work_dir, args.dicom_dir)
+        # Step 5: ASL Preprocessing
+        if not args.skip_asl:
+            preprocess_asl(args.subject, config, nifti_dir, derivatives_dir, work_dir, args.dicom_dir)
 
     # Summary
     logger.info("="*70)
