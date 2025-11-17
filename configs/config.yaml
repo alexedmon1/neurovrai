@@ -71,6 +71,12 @@ diffusion:
     flm: linear
     slm: linear
     use_cuda: true
+  bedpostx:
+    enabled: true  # Fiber orientation estimation (required for connectomics)
+    use_gpu: true  # GPU-accelerated (20-60 min vs 4-8 hours CPU)
+    n_fibres: 2    # Number of fiber populations per voxel
+    burnin: 1000   # MCMC burn-in period
+    n_jumps: 1250  # MCMC jumps after burn-in
   advanced_models:
     enabled: auto
     fit_dki: true

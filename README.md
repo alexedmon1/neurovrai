@@ -2,6 +2,8 @@
 
 A production-ready, config-driven MRI preprocessing pipeline for multiple neuroimaging modalities: anatomical (T1w), diffusion-weighted imaging (DWI), resting-state fMRI, and arterial spin labeling (ASL). Built with Nipype for workflow orchestration, supporting both FSL and ANTs for neuroimaging processing.
 
+> **🚀 Future**: This project will be renamed to **neuroVrai** and expanded with group-level analysis (`neurovrai.analysis`) and connectivity/network modules (`neurovrai.connectome`). See `docs/NEUROVRAI_ARCHITECTURE.md` for roadmap.
+
 ## Features
 
 ### Core Features
@@ -30,6 +32,9 @@ A production-ready, config-driven MRI preprocessing pipeline for multiple neuroi
 - **Optional TOPUP distortion correction** - Auto-enabled when reverse phase-encoding images available
 - GPU-accelerated eddy current correction (eddy_cuda)
 - DTI fitting with standard metrics (FA, MD, AD, RD)
+- **BEDPOSTX fiber orientation estimation** - Now enabled by default (GPU: 20-60 min)
+  - Essential for future connectomics analysis
+  - Can be disabled in config with `bedpostx.enabled: false`
 - **Advanced Models** (auto-enabled for multi-shell data):
   - **DKI** (DIPY): Diffusion Kurtosis Imaging with MK, AK, RK, KFA metrics
   - **NODDI** (DIPY): Neurite orientation with FICVF, ODI, FISO
@@ -38,10 +43,9 @@ A production-ready, config-driven MRI preprocessing pipeline for multiple neuroi
     - SANDI: Soma and neurite density imaging
     - ActiveAx: Axon diameter distribution
 - Spatial normalization to FMRIB58_FA template
-- GPU-accelerated probabilistic tractography (probtrackx2_gpu)
-- Atlas-based ROI extraction (Harvard-Oxford, JHU atlases)
-- **FreeSurfer integration hooks** (experimental - transform pipeline not yet implemented)
 - Comprehensive QC (TOPUP field maps, motion/eddy parameters, DTI metric distributions)
+
+> **Note**: Probabilistic tractography will move to the future `neurovrai.connectome` module with proper anatomical constraints and NxN connectivity matrix generation.
 
 ### Functional Preprocessing
 - **Multi-echo**: TEDANA 25.1.0 denoising with automatic component classification

@@ -97,6 +97,13 @@ def create_config_template(study_root: Path, output_file: Path = None):
                 'slm': 'linear',
                 'use_cuda': True  # Set to False if no GPU
             },
+            'bedpostx': {
+                'enabled': True,  # Fiber orientation estimation (required for connectomics)
+                'use_gpu': True,  # GPU-accelerated (20-60 min vs 4-8 hours CPU)
+                'n_fibres': 2,    # Number of fiber populations per voxel
+                'burnin': 1000,   # MCMC burn-in period
+                'n_jumps': 1250   # MCMC jumps after burn-in
+            },
             'advanced_models': {
                 'enabled': 'auto',  # Auto-detect multi-shell
                 'fit_dki': True,

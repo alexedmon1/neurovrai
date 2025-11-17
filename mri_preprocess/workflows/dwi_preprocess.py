@@ -371,7 +371,7 @@ def run_dwi_multishell_topup_preprocessing(
     output_dir: Path = None,
     work_dir: Optional[Path] = None,
     session: Optional[str] = None,
-    run_bedpostx: bool = False
+    run_bedpostx: bool = True
 ) -> Dict[str, Path]:
     """
     Run complete multi-shell DWI preprocessing with TOPUP correction.
@@ -410,8 +410,9 @@ def run_dwi_multishell_topup_preprocessing(
         Default: {output_dir}/work/{subject}/dwi_topup/
     session : str, optional
         Session identifier
-    run_bedpostx : bool
-        Run BEDPOSTX (computationally expensive)
+    run_bedpostx : bool, default=True
+        Run BEDPOSTX for fiber orientation estimation (required for connectomics).
+        GPU-accelerated: 20-60 min. Can be disabled in config with bedpostx.enabled: false
 
     Returns
     -------
@@ -458,6 +459,15 @@ def run_dwi_multishell_topup_preprocessing(
         use_topup = False
         if has_reverse_pe:
             logger.info("Reverse PE files available but TOPUP disabled in config")
+
+    # Determine if BEDPOSTX should be used
+    # Check config first, then fall back to function parameter
+    bedpostx_config = config.get('diffusion', {}).get('bedpostx', {})
+    bedpostx_enabled = bedpostx_config.get('enabled', run_bedpostx)  # Default to parameter value
+
+    # Override with config if explicitly set
+    if isinstance(bedpostx_enabled, bool):
+        run_bedpostx = bedpostx_enabled
 
     logger.info("="*70)
     logger.info(f"STARTING MULTI-SHELL DWI PREPROCESSING")
@@ -919,7 +929,7 @@ def run_dwi_multishell_topup_preprocessing(
 
             dti_qc = DTIQualityControl(
                 subject=subject,
-                metrics_dir=derivatives_dir / 'dti',
+                dti_dir=derivatives_dir / 'dti',
                 qc_dir=dti_qc_dir
             )
 

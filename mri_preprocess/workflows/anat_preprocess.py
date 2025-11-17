@@ -669,7 +669,7 @@ def run_anat_preprocessing(
                 logging.info("Running Skull Strip QC...")
                 skull_qc = SkullStripQualityControl(
                     subject=subject,
-                    anat_dir=derivatives_dir / 'anat',
+                    anat_dir=derivatives_dir,
                     qc_dir=qc_dir / 'skull_strip'
                 )
                 qc_results['skull_strip'] = skull_qc.run_qc(

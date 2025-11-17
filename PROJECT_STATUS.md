@@ -5,9 +5,50 @@
 
 Production-ready MRI preprocessing pipeline for anatomical, diffusion, functional, and ASL data with comprehensive QC and standardized outputs.
 
+**Planned Rename**: Project will be renamed to **neuroVrai** with three-part architecture:
+- `neurovrai.preprocess` (current - mostly complete)
+- `neurovrai.analysis` (planned - group-level statistics)
+- `neurovrai.connectome` (planned - connectivity & network analysis)
+
+See `docs/NEUROVRAI_ARCHITECTURE.md` for complete roadmap.
+
 ---
 
-## 📝 Latest Updates (2025-11-16)
+## 📝 Latest Updates (2025-11-16 PM)
+
+### Bug Fixes & BEDPOSTX Integration ✅
+**Goal**: Fix file-finding issues and make BEDPOSTX standard preprocessing
+
+**Completed**:
+1. **Critical Bug Fixes**:
+   - ✅ Fixed anatomical QC path bug (removed double `/anat/anat/` hierarchy)
+   - ✅ Fixed DWI QC parameter mismatch (`metrics_dir` → `dti_dir`)
+   - ✅ Fixed simple pipeline file finding (now uses `rglob` for subdirectories)
+
+2. **BEDPOSTX Now Enabled by Default**:
+   - ✅ BEDPOSTX is now standard DWI preprocessing (fiber orientation estimation)
+   - ✅ Config setting: `diffusion.bedpostx.enabled: true` (default)
+   - ✅ GPU-accelerated: 20-60 min vs 4-8 hours CPU
+   - ✅ Required for future connectomics module
+
+3. **Tractography Migration Plan**:
+   - Current `tractography.py` marked for migration to `neurovrai.connectome`
+   - BEDPOSTX stays in preprocessing (orientation estimation)
+   - Tractography moves to connectome (streamline generation with anatomical constraints)
+   - See `docs/NEUROVRAI_ARCHITECTURE.md` for detailed plan
+
+**Files Modified**:
+- `mri_preprocess/workflows/anat_preprocess.py` - Fixed QC path (line 672)
+- `mri_preprocess/workflows/dwi_preprocess.py` - Fixed QC param, added BEDPOSTX config reading
+- `run_simple_pipeline.py` - Fixed file finding with rglob
+- `create_config.py` - Added BEDPOSTX config section
+- `configs/config.yaml` - Added BEDPOSTX defaults
+
+**Impact**: All modalities (anat, DWI, functional, ASL) can now find files correctly and BEDPOSTX runs by default.
+
+---
+
+## 📝 Updates (2025-11-16 AM)
 
 ### Configuration System Enhancement ✅
 **Goal**: Make all critical processing parameters configurable via `config.yaml`

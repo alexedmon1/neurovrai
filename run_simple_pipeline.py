@@ -159,11 +159,13 @@ def preprocess_functional(subject, config, nifti_dir, derivatives_dir, work_dir)
 
     # Check that anatomical preprocessing was done
     anat_dir = derivatives_dir / subject / 'anat'
-    t1w_brain = anat_dir / 'brain.nii.gz'
 
-    if not t1w_brain.exists():
+    # Find brain file (may be in brain/ subdirectory)
+    brain_files = list(anat_dir.rglob('*brain.nii.gz'))
+    if not brain_files:
         logger.error("✗ Anatomical preprocessing required first\n")
         return None
+    t1w_brain = brain_files[0]
 
     logger.info(f"Found {len(func_files)} functional files")
     is_multi_echo = len(func_files) > 1 or 'ME' in func_files[0].name
@@ -209,12 +211,14 @@ def preprocess_asl(subject, config, nifti_dir, derivatives_dir, work_dir, dicom_
 
     # Check that anatomical preprocessing was done
     anat_dir = derivatives_dir / subject / 'anat'
-    t1w_brain = anat_dir / 'brain.nii.gz'
     seg_dir = anat_dir / 'segmentation'
 
-    if not t1w_brain.exists():
+    # Find brain file (may be in brain/ subdirectory)
+    brain_files = list(anat_dir.rglob('*brain.nii.gz'))
+    if not brain_files:
         logger.error("✗ Anatomical preprocessing required first\n")
         return None
+    t1w_brain = brain_files[0]
 
     gm_mask = seg_dir / 'POSTERIOR_02.nii.gz'
     wm_mask = seg_dir / 'POSTERIOR_03.nii.gz'
