@@ -7,10 +7,11 @@ This module provides functions for:
 2. CBF distribution analysis and physiological validation
 3. Tissue-specific CBF metrics (GM/WM/CSF)
 4. Temporal SNR (tSNR) calculation for perfusion signal
-5. Automated HTML QC report generation
+5. Skull stripping quality assessment
+6. Automated HTML QC report generation
 
 Usage:
-    from neurovrai.preprocess.qc.asl_qc import compute_asl_motion_qc, compute_cbf_qc, generate_asl_qc_report
+    from neurovrai.preprocess.qc.asl_qc import compute_asl_motion_qc, compute_cbf_qc, compute_asl_skull_strip_qc, generate_asl_qc_report
 """
 
 import logging
@@ -520,6 +521,189 @@ def compute_perfusion_tsnr(
     logger.info(f"  Median tSNR: {metrics['median_tsnr']:.2f}")
     logger.info(f"  Range: {metrics['min_tsnr']:.2f} - {metrics['max_tsnr']:.2f}")
     logger.info("")
+
+    return metrics
+
+
+def compute_asl_skull_strip_qc(
+    asl_mean_file: Path,
+    mask_file: Path,
+    output_dir: Path,
+    subject: str = "unknown"
+) -> Dict[str, Any]:
+    """
+    Compute skull stripping quality metrics for ASL data.
+
+    Parameters
+    ----------
+    asl_mean_file : Path
+        Mean ASL image (temporal mean of control or M0 images)
+    mask_file : Path
+        Brain mask from BET
+    output_dir : Path
+        Output directory for QC files
+    subject : str
+        Subject identifier (for labeling)
+
+    Returns
+    -------
+    dict
+        Skull stripping QC metrics:
+        - brain_volume_mm3: Brain volume in mm³
+        - brain_volume_cm3: Brain volume in cm³
+        - n_voxels: Number of brain voxels
+        - contrast_ratio: Ratio of brain to non-brain mean intensity
+        - quality_flags: List of quality warnings
+        - quality_pass: Boolean indicating if quality checks passed
+        - mask_overlay: Path to overlay visualization
+        - metrics_json: Path to saved metrics JSON
+    """
+    logger.info("=" * 70)
+    logger.info("ASL Skull Strip QC Assessment")
+    logger.info("=" * 70)
+    logger.info(f"Subject: {subject}")
+    logger.info(f"Mean ASL file: {asl_mean_file}")
+    logger.info(f"Mask file: {mask_file}")
+    logger.info("")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load images
+    asl_img = nib.load(asl_mean_file)
+    asl_data = asl_img.get_fdata()
+    voxel_size = asl_img.header.get_zooms()[:3]
+
+    mask_img = nib.load(mask_file)
+    mask_data = mask_img.get_fdata() > 0
+
+    # Calculate mask statistics
+    n_voxels = int(np.sum(mask_data))
+    voxel_volume_mm3 = np.prod(voxel_size)
+    brain_volume_mm3 = n_voxels * voxel_volume_mm3
+    brain_volume_cm3 = brain_volume_mm3 / 1000.0
+
+    # Calculate bounding box
+    coords = np.where(mask_data)
+    bbox = {
+        'x_min': int(np.min(coords[0])),
+        'x_max': int(np.max(coords[0])),
+        'y_min': int(np.min(coords[1])),
+        'y_max': int(np.max(coords[1])),
+        'z_min': int(np.min(coords[2])),
+        'z_max': int(np.max(coords[2]))
+    }
+
+    bbox_size = {
+        'x': bbox['x_max'] - bbox['x_min'],
+        'y': bbox['y_max'] - bbox['y_min'],
+        'z': bbox['z_max'] - bbox['z_min']
+    }
+
+    # Calculate intensity statistics
+    brain_intensities = asl_data[mask_data > 0]
+    outside_intensities = asl_data[mask_data == 0]
+
+    # Remove zero values (background)
+    brain_intensities = brain_intensities[brain_intensities > 0]
+    outside_intensities = outside_intensities[outside_intensities > 0]
+
+    brain_mean = np.mean(brain_intensities)
+    brain_std = np.std(brain_intensities)
+    outside_mean = np.mean(outside_intensities) if len(outside_intensities) > 0 else 0
+    outside_std = np.std(outside_intensities) if len(outside_intensities) > 0 else 0
+
+    # Contrast between brain and non-brain
+    contrast_ratio = brain_mean / outside_mean if outside_mean > 0 else np.inf
+
+    # Assess quality - ASL has lower contrast than anatomical
+    quality_flags = []
+
+    if contrast_ratio < 1.5:  # Lower threshold for ASL
+        quality_flags.append('LOW_CONTRAST')
+        logger.warning("Low contrast between brain and non-brain regions")
+
+    if brain_std / brain_mean > 0.6:  # ASL can have more variance
+        quality_flags.append('HIGH_VARIANCE')
+        logger.warning("High intensity variance within brain mask")
+
+    # Check brain volume is reasonable (typical range: 800-1800 cm³)
+    if brain_volume_cm3 < 500:
+        quality_flags.append('SMALL_BRAIN_VOLUME')
+        logger.warning(f"Unusually small brain volume: {brain_volume_cm3:.1f} cm³")
+    elif brain_volume_cm3 > 2500:
+        quality_flags.append('LARGE_BRAIN_VOLUME')
+        logger.warning(f"Unusually large brain volume: {brain_volume_cm3:.1f} cm³")
+
+    metrics = {
+        'subject': subject,
+        'modality': 'asl',
+        'n_voxels': n_voxels,
+        'brain_volume_mm3': float(brain_volume_mm3),
+        'brain_volume_cm3': float(brain_volume_cm3),
+        'voxel_size_mm': list(voxel_size),
+        'bbox': bbox,
+        'bbox_size': bbox_size,
+        'brain_mean_intensity': float(brain_mean),
+        'brain_std_intensity': float(brain_std),
+        'outside_mean_intensity': float(outside_mean),
+        'outside_std_intensity': float(outside_std),
+        'contrast_ratio': float(contrast_ratio),
+        'quality_flags': quality_flags,
+        'quality_pass': len(quality_flags) == 0
+    }
+
+    logger.info("ASL Skull Strip QC Summary:")
+    logger.info(f"  Brain volume: {brain_volume_cm3:.2f} cm³")
+    logger.info(f"  N voxels: {n_voxels}")
+    logger.info(f"  Contrast ratio: {contrast_ratio:.2f}")
+    logger.info(f"  Quality flags: {quality_flags if quality_flags else 'PASS'}")
+    logger.info("")
+
+    # Create overlay plot
+    logger.info("Creating mask overlay visualization...")
+    center_x = asl_data.shape[0] // 2
+    center_y = asl_data.shape[1] // 2
+    center_z = asl_data.shape[2] // 2
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+
+    # Sagittal slices
+    for i, offset in enumerate([-5, 0, 5]):
+        ax = axes[0, i]
+        slice_idx = center_x + offset
+        ax.imshow(asl_data[slice_idx, :, :].T, cmap='gray', origin='lower')
+        ax.contour(mask_data[slice_idx, :, :].T, colors='red', linewidths=1)
+        ax.set_title(f'Sagittal (x={slice_idx})', fontsize=10)
+        ax.axis('off')
+
+    # Axial slices
+    for i, offset in enumerate([-5, 0, 5]):
+        ax = axes[1, i]
+        slice_idx = center_z + offset
+        ax.imshow(asl_data[:, :, slice_idx].T, cmap='gray', origin='lower')
+        ax.contour(mask_data[:, :, slice_idx].T, colors='red', linewidths=1)
+        ax.set_title(f'Axial (z={slice_idx})', fontsize=10)
+        ax.axis('off')
+
+    plt.suptitle(f'ASL Brain Mask Overlay - {subject}', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    overlay_plot = output_dir / 'skull_strip_overlay.png'
+    plt.savefig(overlay_plot, dpi=150, bbox_inches='tight')
+    plt.close()
+
+    logger.info(f"  Saved overlay: {overlay_plot}")
+
+    # Save metrics to JSON
+    metrics_json = output_dir / 'skull_strip_metrics.json'
+    import json
+    with open(metrics_json, 'w') as f:
+        json.dump(metrics, f, indent=2)
+
+    logger.info(f"  Saved metrics: {metrics_json}")
+    logger.info("")
+
+    metrics['mask_overlay'] = str(overlay_plot)
+    metrics['metrics_json'] = str(metrics_json)
 
     return metrics
 
