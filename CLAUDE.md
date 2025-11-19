@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - DKI (DIPY-based): MK, AK, RK, KFA metrics
   - NODDI (DIPY or AMICO): FICVF, ODI, FISO - AMICO is 100x faster (30 sec vs 20-25 min)
   - AMICO also supports SANDI and ActiveAx models
-- **Tractography**: GPU-accelerated probtrackx2 with atlas-based ROI extraction (Harvard-Oxford, JHU)
+- **Functional Preprocessing**: Multi-echo (TEDANA) and single-echo (ICA-AROMA) support with ACompCor, bandpass filtering, smoothing, and spatial normalization to MNI152
 - **ASL Preprocessing**: Motion correction, CBF quantification with kinetic modeling, M0 calibration, partial volume correction, automated DICOM parameter extraction
 - **QC Framework**: Comprehensive quality control for all modalities
   - **DWI**: TOPUP, motion (eddy), DTI metrics, skull stripping
@@ -30,45 +30,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Configuration System**: YAML-based config with variable substitution (`neurovrai/preprocess/config.py`)
 - **Directory Standardization**: All workflows use `{outdir}/{subject}/{modality}/` pattern
 
-**🔄 In Progress (95% Complete)**:
-- **Functional Preprocessing**: Multi-echo (TEDANA) and single-echo (ICA-AROMA) support
-  - Recent fixes (2025-11-14): Multi-echo DICOM conversion bug, workflow input node selection
-  - Currently testing complete pipeline on IRC805-0580101
-  - All features implemented: TEDANA, ICA-AROMA auto-detection, ACompCor, bandpass, smoothing, registration to MNI152
-
-**✅ Completed Recent Sessions (2025-11-13 to 2025-11-14)**:
-- **Bug Fixes (2025-11-14)**:
-  - Fixed DWI work directory hierarchy (now correctly uses `work/{subject}/dwi_preprocess/`)
-  - Fixed TEDANA NumPy 2.0 compatibility (upgraded 23.0.2 → 25.1.0)
-  - Fixed multi-echo DICOM conversion and workflow routing
-  - Relaxed dependency version constraints in pyproject.toml
-- **Spatial Normalization Implementation**:
-  - **DWI → FMRIB58_FA**: Complete normalization pipeline implemented and tested
-    - Created `neurovrai/preprocess/utils/dwi_normalization.py`
-    - Integrated into `dwi_preprocess.py` workflow
-    - Generates forward warp (group analyses) + inverse warp (tractography ROIs)
-    - Tested on IRC805-0580101: Successfully normalized 12 metrics (FA + DTI + DKI + NODDI)
-  - **Functional → MNI152**: Transform reuse strategy implemented
-    - Created `neurovrai/preprocess/utils/func_normalization.py`
-    - Integrated into `func_preprocess.py` workflow
-    - Reuses BBR transform from ACompCor (zero redundant computation)
-    - Reuses anatomical→MNI152 transforms from anatomical preprocessing
-    - Concatenates transforms via `convertwarp` for single-step normalization
-  - **BBR Performance Fix**: Switched from BBR to correlation ratio (20x speedup: 54s vs 10+ min)
-  - **Transform Management**: All transforms saved to standardized `transforms/` directories
-- **TEDANA Multi-Echo Denoising** (IRC805-0580101):
-  - Motion correction: MCFLIRT + applyxfm4D (~40 minutes)
-  - TEDANA with 225 PCA components (~1h 18min)
-  - ICA converged after 10 attempts (seed 51)
-  - Component selection: 208 accepted, 17 rejected
-  - 82.55% variance explained
-  - All outputs generated: denoised BOLD, component maps, confounds, HTML report
-
-**✅ Completed Previous Sessions**:
-- **2025-11-12**: DWI preprocessing with TOPUP, DKI/NODDI metrics, functional QC module enhancements
-- **2025-11-11**: ASL preprocessing implementation with M0 calibration and PVC
-- **2025-11-10**: AMICO integration (NODDI/SANDI/ActiveAx models with 100x speedup)
-- **2025-11-09**: Anatomical preprocessing validation, tissue segmentation QC
+> **Note**: Detailed development history is archived in `docs/status/SESSION_HISTORY_2025-11.md`
 
 **⚠️ FreeSurfer Integration Status - NOT Production Ready**:
 - **Current Status**: Detection and extraction hooks only (as of 2025-11-14)
@@ -106,7 +68,7 @@ This repository contains Python-based MRI preprocessing pipelines built with Nip
 - **pydicom** (3.0.1+): DICOM reading/parsing
 - **FSL**: Required system dependency (referenced via `$FSLDIR` environment variable)
 - **FreeSurfer**: Required for cortical reconstruction workflows
-- **tedana** (23.0.2+): Multi-echo fMRI denoising
+- **tedana** (25.1.0+): Multi-echo fMRI denoising
 - **pandas**, **numpy**, **scipy**: Data analysis and numerical operations
 
 ### Installation
@@ -154,9 +116,8 @@ pip install package_name
 - **Common Issue**: Running scripts without uv may use wrong Python version or miss dependencies
 
 #### Dependency Version Conflicts
-**Example**: TEDANA 23.0.2 requires `nilearn<0.11` due to API changes in nilearn 0.12+
 
-When encountering import errors:
+When encountering import errors due to version incompatibilities:
 1. Check versions: `uv pip list | grep package_name`
 2. Install compatible version: `uv pip install 'package_name<version'`
 3. Verify import works: `uv run python -c "import package_name"`
@@ -341,8 +302,7 @@ All preprocessing workflows use a standardized directory hierarchy:
 │   ├── anat_preproc/{subject}/
 │   ├── dwi_topup/{subject}/
 │   ├── func_preproc/{subject}/
-│   ├── advanced_diffusion/{subject}/
-│   └── tractography/{subject}/
+│   └── advanced_diffusion/{subject}/
 ├── work/                              # Temporary Nipype files (can be deleted)
 │   └── {subject}/{workflow}/
 └── dwi_params/                        # Acquisition parameter files
@@ -377,7 +337,6 @@ The codebase is organized by MRI modality, with each module containing class-bas
       - GPU-accelerated eddy correction (eddy_cuda)
       - DTI fitting with standard metrics (FA, MD, AD, RD)
       - Spatial normalization to FMRIB58_FA template
-      - Optional BEDPOSTX for probabilistic tractography modeling
     - `advanced_diffusion.py`: Advanced diffusion models (✅ VALIDATED)
       - **DKI** (Diffusion Kurtosis Imaging): MK, AK, RK, KFA metrics (DIPY)
       - **NODDI** (Neurite Orientation): FICVF, ODI, FISO (DIPY or AMICO)
@@ -388,24 +347,16 @@ The codebase is organized by MRI modality, with each module containing class-bas
       - **SANDI**: Soma and neurite density imaging
       - **ActiveAx**: Axon diameter distribution modeling
       - Uses convex optimization for 100-1000x speedup
-    - `tractography.py`: Probabilistic tractography with atlas-based ROIs (✅ VALIDATED)
-      - GPU-accelerated probtrackx2_gpu (10-50x faster)
-      - Atlas-based ROI extraction (Harvard-Oxford, JHU)
-      - Optional FreeSurfer ROI support (hooks only - NOT production ready)
-      - Seed-to-target connectivity analysis
-      - Automatic connectivity matrix generation
   - **Utilities** (`neurovrai/preprocess/utils/`):
     - `topup_helper.py`: Generate acqparams.txt and index.txt files (✅ VALIDATED)
-    - `atlas_rois.py`: Atlas-based ROI extraction for tractography (✅ VALIDATED)
     - `dwi_normalization.py`: Spatial normalization to FMRIB58_FA (✅ VALIDATED)
     - `gradient_timing.py`: Extract/estimate gradient timing for AMICO SANDI/ActiveAx
   - **Legacy Workflows** (`archive/dwi/`):
     - `dti-preprocess.py`: Original multi-shell preprocessing
     - `dti_singleShell_preprocess.py`: Single-shell variant
     - TBSS utilities for FA analysis
-    - `dti_tract_extraction.py`: Original tractography implementation
 
-- **`func/`** (🔄 95% Complete): Resting-state fMRI preprocessing
+- **`func/`** (✅ Production-Ready): Resting-state fMRI preprocessing
   - **Modern Workflows** (`neurovrai/preprocess/workflows/`):
     - `func_preprocess.py`: Multi-echo and single-echo fMRI preprocessing
       - Auto-detects single vs multi-echo data
@@ -415,7 +366,7 @@ The codebase is organized by MRI modality, with each module containing class-bas
       - ACompCor nuisance regression using anatomical tissue masks
       - Bandpass temporal filtering
       - Spatial smoothing
-      - Registration to anatomical space (BBR or correlation ratio)
+      - Registration to anatomical space (correlation ratio - optimized for speed)
       - Optional spatial normalization to MNI152
   - **Utilities** (`neurovrai/preprocess/utils/`):
     - `func_normalization.py`: Transform reuse for efficient MNI normalization
@@ -474,14 +425,13 @@ results = run_dwi_multishell_topup_preprocessing(
 # Outputs saved to: {study_root}/derivatives/dwi_topup/{subject}/
 ```
 
-**Updated workflows:**
-- ✅ `anat_preprocess.py` - Anatomical T1w/T2w preprocessing (Production-Ready)
-- ✅ `dwi_preprocess.py` - DWI with optional TOPUP distortion correction (Production-Ready)
-- ✅ `func_preprocess.py` - Functional/resting-state fMRI (95% complete, testing)
-- ✅ `asl_preprocess.py` - Arterial Spin Labeling perfusion imaging (Production-Ready)
-- ✅ `advanced_diffusion.py` - DKI and NODDI (called from dwi_preprocess, Production-Ready)
-- ✅ `amico_models.py` - AMICO-accelerated NODDI/SANDI/ActiveAx (Production-Ready)
-- ✅ `tractography.py` - Probabilistic tractography (called from dwi_preprocess, Production-Ready)
+**Production-Ready Workflows:**
+- ✅ `anat_preprocess.py` - Anatomical T1w/T2w preprocessing
+- ✅ `dwi_preprocess.py` - DWI with optional TOPUP distortion correction
+- ✅ `func_preprocess.py` - Functional/resting-state fMRI
+- ✅ `asl_preprocess.py` - Arterial Spin Labeling perfusion imaging
+- ✅ `advanced_diffusion.py` - DKI and NODDI (called from dwi_preprocess)
+- ✅ `amico_models.py` - AMICO-accelerated NODDI/SANDI/ActiveAx
 
 **Legacy workflows** use class-based pattern:
 
@@ -539,12 +489,12 @@ The codebase relies heavily on FSL tools via Nipype. Common FSL operations:
 
 - **Structural**: `fsl.Reorient2Std`, `fsl.FAST`, `fsl.BET`, `fsl.FLIRT`, `fsl.FNIRT`
 - **Diffusion**:
-  - `fsl.TOPUP`: Susceptibility distortion correction (NEW)
-  - `fsl.ApplyTOPUP`: Apply TOPUP correction to images (NEW)
+  - `fsl.TOPUP`: Susceptibility distortion correction
+  - `fsl.ApplyTOPUP`: Apply TOPUP correction to images
   - `fsl.Eddy` (CUDA): Motion and eddy current correction with TOPUP integration
   - `fsl.DTIFit`: Diffusion tensor fitting
   - `fsl.BEDPOSTX5` (GPU): Probabilistic fiber orientation modeling
-  - `probtrackx2_gpu`: GPU-accelerated probabilistic tractography (NEW)
+  - `probtrackx2_gpu`: GPU-accelerated probabilistic tractography
 - **Functional**: `fsl.MCFLIRT`, `fsl.ICA_AROMA`, `fsl.GLM`
 - **Utilities**: `fsl.Merge`, `fsl.ExtractROI`, `fsl.ApplyWarp`, `fsl.ApplyMask`
 
@@ -647,7 +597,6 @@ When modifying workflows:
 - ✅ GPU-accelerated eddy correction
 - ✅ DTI fitting with standard metrics
 - ✅ Spatial normalization to FMRIB58_FA template
-- ✅ Optional BEDPOSTX for probabilistic tractography
 - ✅ Tested and validated on IRC805-0580101 (multi-shell)
 
 **Usage**:
@@ -695,41 +644,6 @@ results = run_advanced_diffusion_models(
 # Access outputs
 print(f"Mean Kurtosis: {results['dki']['mk']}")
 print(f"Neurite Density: {results['noddi']['ficvf']}")
-```
-
-### Probabilistic Tractography (✅ Production-Ready)
-
-**Location**: `neurovrai/preprocess/workflows/tractography.py`
-
-**Main Function**: `run_atlas_based_tractography()`
-
-**Features**:
-- GPU-accelerated probtrackx2_gpu (10-50x faster than CPU)
-- Automatic atlas warping to DWI space
-- Harvard-Oxford and JHU atlases supported
-- Optional FreeSurfer ROI support (hooks only - transform pipeline not production ready)
-- Connectivity matrix generation
-- Tested and validated on IRC805-0580101
-
-**Usage**:
-```python
-from neurovrai.preprocess.workflows.tractography import run_atlas_based_tractography
-
-results = run_atlas_based_tractography(
-    config=config,
-    subject='sub-001',
-    bedpostx_dir=Path('bedpostx.bedpostX'),
-    dwi_reference=Path('FA.nii.gz'),
-    output_dir=Path('/derivatives/tractography'),
-    seed_regions=['hippocampus_l', 'hippocampus_r'],
-    target_regions=['thalamus_l', 'thalamus_r'],
-    atlas='HarvardOxford-subcortical',
-    n_samples=5000,
-    use_gpu=True
-)
-
-# Access connectivity results
-connectivity = results['connectivity']
 ```
 
 ### AMICO-Accelerated Microstructure Models (✅ Production-Ready)
