@@ -27,14 +27,22 @@ Complete preprocessing workflows for all major MRI modalities:
 - **Functional** (rs-fMRI): TEDANA (multi-echo), ICA-AROMA (single-echo), ACompCor, bandpass filtering
 - **ASL** (perfusion): M0 calibration, CBF quantification, partial volume correction
 
-### neurovrai.analysis - Planned (Phase 3)
+### neurovrai.analysis - In Development (Phase 3)
 
 Group-level statistical analyses:
-- VBM (Voxel-Based Morphometry)
-- TBSS (Tract-Based Spatial Statistics)
-- MELODIC (Group ICA)
-- ReHo, fALFF (functional connectivity metrics)
-- Group CBF analysis
+- **TBSS** (Tract-Based Spatial Statistics) - **✅ Data preparation implemented**
+  - Subject discovery & validation
+  - FSL TBSS pipeline integration (steps 1-4)
+  - Skeleton projection & QC
+  - Tested on real data (IRC805: 17 subjects)
+- **Statistical infrastructure** - **✅ Design matrix generation implemented**
+  - GLM design matrix creation with patsy formulas
+  - FSL format output (.mat, .con files)
+  - Contrast specification
+- VBM (Voxel-Based Morphometry) - Planned
+- MELODIC (Group ICA) - Planned
+- ReHo, fALFF (functional connectivity metrics) - Planned
+- Group CBF analysis - Planned
 
 ### neurovrai.connectome - Planned (Phase 4)
 
