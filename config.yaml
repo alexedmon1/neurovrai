@@ -1,0 +1,12 @@
+# TBSS Analysis Configuration
+project_dir: /mnt/bytopia/IRC805
+derivatives_dir: ${project_dir}/derivatives
+analysis_dir: ${project_dir}/analysis
+
+# FSL Configuration
+fsl_dir: /usr/local/fsl
+
+# Execution settings
+execution:
+  plugin: MultiProc
+  n_procs: 6
