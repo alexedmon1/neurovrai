@@ -1,5 +1,5 @@
 # MRI Preprocessing Pipeline - Project Status
-**Last Updated**: 2025-11-16
+**Last Updated**: 2025-11-24
 
 ## 🎯 Project Overview
 
@@ -14,7 +14,69 @@ See `docs/NEUROVRAI_ARCHITECTURE.md` for complete roadmap.
 
 ---
 
-## 📝 Latest Updates (2025-11-16 PM)
+## 📝 Latest Updates (2025-11-24)
+
+### Resting-State fMRI Analysis & TBSS Investigation ✅
+**Goal**: Implement ReHo/fALFF analysis and investigate missing DTI subjects in TBSS
+
+**Completed**:
+1. **Resting-State fMRI Analysis Module**:
+   - ✅ Implemented ReHo (Regional Homogeneity) with Kendall's coefficient of concordance
+   - ✅ Implemented ALFF/fALFF (Amplitude of Low-Frequency Fluctuations)
+   - ✅ Z-score normalization for group-level comparison
+   - ✅ Integrated workflow with error handling and JSON summary output
+   - ✅ Performance: 7 min ReHo + 22 sec fALFF for 136k voxels
+   - ✅ Renamed connectivity_workflow → resting_workflow (reserved connectivity for neurovrai.connectome)
+   - ⏳ MELODIC (group ICA) planned for future enhancement
+
+2. **TBSS Missing Subjects Investigation** (6 subjects missing FA data):
+   - ✅ **Root cause identified**: Scanner-processed derivative maps blocking preprocessing
+     - BIDS directories contained both raw DWI + scanner derivatives (ADC, dWIP, facWIP, isoWIP)
+     - File discovery pattern matched ALL files, tried to process maps without bval/bvec → failures
+   - ✅ **Fix implemented**: Added scanner-processed map filtering in `run_simple_pipeline.py`
+   - ✅ **Subject analysis completed**:
+     - IRC805-2990202: No DTI data exists (exclude)
+     - IRC805-4960101: 3 incompatible acquisitions, size mismatch (exclude)
+     - IRC805-2350101, 3280201, 3580101, 3840101: Have recoverable raw DWI data (4 subjects)
+   - ✅ **Config issues fixed**: Added required `paths.logs` to config.yaml
+
+3. **Preprocessing Workflow Issues Documented**:
+   - 📋 Created comprehensive issue tracking: `docs/issues/PREPROCESSING_ISSUES_2025-11-24.md`
+   - **High Priority Issues Identified**:
+     - Eddy-without-TOPUP: Missing acqparams.txt generation for single-direction acquisitions
+     - Error handling: Silent failures (return code 0 even when preprocessing fails)
+   - **Medium Priority Enhancements**:
+     - Orientation validation for multi-acquisition merging
+     - Dimension validation to detect incompatible matrix sizes
+   - **Testing plan** created for systematic resolution
+
+**Analysis Modules Implemented**:
+- `neurovrai/analysis/func/reho.py` - Regional Homogeneity analysis
+- `neurovrai/analysis/func/falff.py` - ALFF/fALFF analysis
+- `neurovrai/analysis/func/resting_workflow.py` - Integrated workflow
+- Command-line interface with configurable parameters
+
+**Files Modified**:
+- `run_simple_pipeline.py` - Scanner-processed map filtering (lines 118-137)
+- `config.yaml` - Added `paths.logs` requirement
+- `neurovrai/analysis/func/__init__.py` - Updated exports
+- `README.md`, `CLAUDE.md` - Updated documentation
+
+**Impact**:
+- Resting-state fMRI analysis now production-ready
+- 4 of 6 missing TBSS subjects identified as recoverable (pending workflow fixes)
+- TBSS currently: 17/23 subjects → potential 21/23 after fixes
+- Clear roadmap for making preprocessing fully flexible (single/multi-shell, with/without TOPUP)
+
+**Next Steps**:
+1. Implement eddy-without-TOPUP functionality (`create_eddy_files_single_direction()`)
+2. Fix error handling to propagate failures properly
+3. Add orientation and dimension validation
+4. Batch process recoverable subjects
+
+---
+
+## 📝 Updates (2025-11-16 PM)
 
 ### Bug Fixes & BEDPOSTX Integration ✅
 **Goal**: Fix file-finding issues and make BEDPOSTX standard preprocessing
