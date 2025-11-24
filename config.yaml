@@ -1,7 +1,18 @@
-# TBSS Analysis Configuration
+# IRC805 Study Configuration
 project_dir: /mnt/bytopia/IRC805
+rawdata_dir: ${project_dir}/bids
 derivatives_dir: ${project_dir}/derivatives
 analysis_dir: ${project_dir}/analysis
+work_dir: ${project_dir}/work
+logs_dir: ${project_dir}/logs
+
+# Template files
+paths:
+  mni152_t1_2mm: /usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz
+  mni152_t1_1mm: /usr/local/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz
+  fmrib58_fa: /usr/local/fsl/data/standard/FMRIB58_FA_1mm.nii.gz
+  fmrib58_fa_mask: /usr/local/fsl/data/standard/FMRIB58_FA-skeleton_1mm.nii.gz
+  logs: ${project_dir}/logs
 
 # FSL Configuration
 fsl_dir: /usr/local/fsl
@@ -10,3 +21,40 @@ fsl_dir: /usr/local/fsl
 execution:
   plugin: MultiProc
   n_procs: 6
+
+# Diffusion preprocessing
+diffusion:
+  denoise_method: dwidenoise
+  topup:
+    readout_time: 0.05
+  eddy:
+    use_cuda: true
+    flm: linear
+    slm: linear
+  run_bedpostx: false
+  run_qc: true
+
+# Anatomical preprocessing
+anatomical:
+  bet:
+    frac: 0.5
+    reduce_bias: true
+    robust: true
+  registration_method: fsl
+  run_qc: true
+
+# Functional preprocessing
+functional:
+  tr: 1.029
+  te: [10.0, 30.0, 50.0]
+  highpass: 0.001
+  lowpass: 0.08
+  fwhm: 6
+  tedana:
+    enabled: true
+  aroma:
+    enabled: false
+  acompcor:
+    enabled: true
+    num_components: 5
+  run_qc: true

@@ -115,9 +115,25 @@ def preprocess_dwi(subject, config, nifti_dir, derivatives_dir, work_dir):
         logger.info("⊘ No DWI data found - skipping\n")
         return None
 
-    dwi_files = sorted(list(dwi_dir.glob('*DTI*.nii.gz')))
+    # Get all DTI files, then filter out scanner-processed maps
+    all_dwi_files = list(dwi_dir.glob('*DTI*.nii.gz'))
+
+    # Filter out scanner-processed maps (ADC, dWIP, facWIP, isoWIP)
+    # These are identified by patterns in the filename
+    scanner_processed_patterns = ['__ADC', 'dWIP_DTI', 'facWIP_DTI', 'isoWIP_DTI']
+
+    dwi_files = []
+    for f in all_dwi_files:
+        is_scanner_processed = any(pattern in f.name for pattern in scanner_processed_patterns)
+        if not is_scanner_processed:
+            dwi_files.append(f)
+        else:
+            logger.info(f"  Skipping scanner-processed map: {f.name}")
+
+    dwi_files = sorted(dwi_files)
+
     if not dwi_files:
-        logger.info("⊘ No DWI files found - skipping\n")
+        logger.info("⊘ No raw DWI files found (only scanner-processed maps) - skipping\n")
         return None
 
     # Get corresponding bval/bvec files
