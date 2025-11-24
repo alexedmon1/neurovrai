@@ -31,7 +31,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Directory Standardization**: All workflows use `{outdir}/{subject}/{modality}/` pattern
 - **Analysis Modules** (Partial):
   - **TBSS**: Complete data preparation and statistical infrastructure
-  - **Functional Connectivity**: ReHo and fALFF with z-score normalization
+  - **Resting-State fMRI**: ReHo and fALFF with z-score normalization (MELODIC planned)
   - **Enhanced Reporting**: Atlas-based cluster localization with HTML visualization
 
 > **Note**: Detailed development history is archived in `docs/status/SESSION_HISTORY_2025-11.md`
@@ -412,7 +412,7 @@ The codebase is organized by MRI modality, with each module containing class-bas
       - Design matrix and contrast generation
       - TFCE correction with permutation testing
       - Integration with participant demographics
-  - **Functional Connectivity** (`neurovrai/analysis/func/`) (✅ VALIDATED):
+  - **Resting-State fMRI Analysis** (`neurovrai/analysis/func/`) (✅ VALIDATED):
     - `reho.py`: Regional Homogeneity analysis
       - Kendall's coefficient of concordance (KCC)
       - 7/19/27-voxel neighborhoods
@@ -423,11 +423,12 @@ The codebase is organized by MRI modality, with each module containing class-bas
       - 0.01-0.08 Hz frequency range (configurable)
       - Z-score normalization
       - ~22 sec for 136k voxels
-    - `connectivity_workflow.py`: Integrated ReHo + fALFF pipeline
-      - Unified workflow with error handling
+    - `resting_workflow.py`: Integrated resting-state pipeline
+      - Unified ReHo + fALFF workflow with error handling
       - JSON summary output
       - Comprehensive logging
       - Command-line interface
+      - Future: MELODIC (group ICA) integration
   - **Statistical Reporting** (`neurovrai/analysis/stats/`):
     - `enhanced_cluster_report.py`: Atlas-based cluster reporting
       - JHU ICBM-DTI-81 white matter atlas integration

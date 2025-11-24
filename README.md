@@ -39,14 +39,14 @@ Group-level statistical analyses:
   - GLM design matrix creation with patsy formulas
   - FSL format output (.mat, .con files)
   - Contrast specification
-- **Functional Connectivity Metrics** - **✅ Implemented**
+- **Resting-State fMRI Analysis** - **✅ Implemented**
   - ReHo (Regional Homogeneity) with Kendall's coefficient of concordance
   - ALFF/fALFF (Amplitude of Low-Frequency Fluctuations)
   - Z-score normalization for cross-subject comparison
-  - Integrated workflow with automated QC logging
+  - Integrated resting-state workflow with automated QC logging
   - Tested on IRC805 data (450 timepoints, ~7 min ReHo + 22 sec fALFF)
+  - MELODIC (group ICA) - Planned
 - VBM (Voxel-Based Morphometry) - Planned
-- MELODIC (Group ICA) - Planned
 - Group CBF analysis - Planned
 
 ### neurovrai.connectome - Planned (Phase 4)

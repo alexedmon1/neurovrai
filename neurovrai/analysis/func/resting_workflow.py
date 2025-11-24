@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Integrated Functional Connectivity Workflow
+Resting-State fMRI Analysis Workflow
 
 Runs ReHo and fALFF analysis on preprocessed resting-state fMRI data.
 Generates standardized outputs and quality control reports.
+
+Future additions: MELODIC (group ICA)
 """
 
 import logging
@@ -18,7 +20,7 @@ from .reho import compute_reho_map, compute_reho_zscore
 from .falff import compute_falff_map, compute_falff_zscore
 
 
-def run_connectivity_analysis(
+def run_resting_state_analysis(
     func_file: Path,
     mask_file: Optional[Path] = None,
     output_dir: Path = None,
@@ -30,7 +32,7 @@ def run_connectivity_analysis(
     compute_zscore: bool = True
 ) -> Dict:
     """
-    Run complete functional connectivity analysis
+    Run complete resting-state fMRI analysis (ReHo + fALFF)
 
     Args:
         func_file: Preprocessed 4D functional image
@@ -53,7 +55,7 @@ def run_connectivity_analysis(
 
     # Setup logging
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = output_dir / f"connectivity_analysis_{timestamp}.log"
+    log_file = output_dir / f"resting_state_analysis_{timestamp}.log"
 
     logging.basicConfig(
         level=logging.INFO,
@@ -65,7 +67,7 @@ def run_connectivity_analysis(
     )
 
     logging.info("=" * 80)
-    logging.info("FUNCTIONAL CONNECTIVITY ANALYSIS")
+    logging.info("RESTING-STATE fMRI ANALYSIS")
     logging.info("=" * 80)
     if subject_id:
         logging.info(f"Subject: {subject_id}")
@@ -171,7 +173,7 @@ def run_connectivity_analysis(
     # =========================================================================
     # Save Results Summary
     # =========================================================================
-    summary_file = output_dir / 'connectivity_summary.json'
+    summary_file = output_dir / 'resting_state_summary.json'
     with open(summary_file, 'w') as f:
         json.dump(results, f, indent=2)
 
@@ -189,7 +191,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Run functional connectivity analysis (ReHo + fALFF)"
+        description="Run resting-state fMRI analysis (ReHo + fALFF)"
     )
     parser.add_argument(
         '--func',
@@ -246,7 +248,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Run analysis
-    results = run_connectivity_analysis(
+    results = run_resting_state_analysis(
         func_file=args.func,
         mask_file=args.mask,
         output_dir=args.output_dir,
