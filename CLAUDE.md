@@ -29,6 +29,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - **ASL**: Motion, CBF distributions, tSNR, skull stripping
 - **Configuration System**: YAML-based config with variable substitution (`neurovrai/preprocess/config.py`)
 - **Directory Standardization**: All workflows use `{outdir}/{subject}/{modality}/` pattern
+- **Analysis Modules** (Partial):
+  - **TBSS**: Complete data preparation and statistical infrastructure
+  - **Functional Connectivity**: ReHo and fALFF with z-score normalization
+  - **Enhanced Reporting**: Atlas-based cluster localization with HTML visualization
 
 > **Note**: Detailed development history is archived in `docs/status/SESSION_HISTORY_2025-11.md`
 
@@ -397,8 +401,39 @@ The codebase is organized by MRI modality, with each module containing class-bas
 - **`myelin/`**: T1w/T2w ratio myelin mapping
   - `myelin_workflow.py`: Computes T1w/T2w ratio as myelin proxy (coregister to MNI → masked division)
 
-- **`analysis/`**: Post-processing statistical analysis
-  - `cluster_analysis.py`: Aggregates FSL randomise cluster results across analyses
+- **`analysis/`** (✅ Partially Production-Ready): Group-level statistical analysis
+  - **TBSS** (`neurovrai/analysis/tbss/`):
+    - `prepare_tbss.py`: Automated TBSS data preparation (✅ VALIDATED)
+      - Subject discovery and FA validation
+      - FSL TBSS pipeline integration (steps 1-4)
+      - Skeleton projection and registration to FMRIB58_FA
+      - Tested on IRC805: 17 subjects
+    - `run_tbss_stats.py`: Statistical analysis with FSL randomise
+      - Design matrix and contrast generation
+      - TFCE correction with permutation testing
+      - Integration with participant demographics
+  - **Functional Connectivity** (`neurovrai/analysis/func/`) (✅ VALIDATED):
+    - `reho.py`: Regional Homogeneity analysis
+      - Kendall's coefficient of concordance (KCC)
+      - 7/19/27-voxel neighborhoods
+      - Z-score normalization
+      - ~7 min for 136k voxels
+    - `falff.py`: ALFF/fALFF analysis
+      - FFT-based power spectrum computation
+      - 0.01-0.08 Hz frequency range (configurable)
+      - Z-score normalization
+      - ~22 sec for 136k voxels
+    - `connectivity_workflow.py`: Integrated ReHo + fALFF pipeline
+      - Unified workflow with error handling
+      - JSON summary output
+      - Comprehensive logging
+      - Command-line interface
+  - **Statistical Reporting** (`neurovrai/analysis/stats/`):
+    - `enhanced_cluster_report.py`: Atlas-based cluster reporting
+      - JHU ICBM-DTI-81 white matter atlas integration
+      - Anatomical localization with percentage coverage
+      - Tri-planar mosaic visualization
+      - HTML reports with embedded images
 
 ### Workflow Pattern (UPDATED)
 
