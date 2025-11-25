@@ -622,6 +622,10 @@ Group-level analysis tools ready for production use:
 ### Recent Milestones
 
 **2025-11-25:**
+- ✅ Analysis module architecture documented: Two-stage pipeline design (preparation + statistics)
+- ✅ Comprehensive analysis README with CLI examples for all 5 modules (VBM, TBSS, ReHo/fALFF, MELODIC, ASL)
+- ✅ Flexible subject selection (filelist or auto-discover) documented for all analysis workflows
+- ✅ ReHo/fALFF group analysis script with FSL randomise and cluster reporting
 - ✅ neuroaider package released: design matrix and contrast generation tool
 - ✅ MELODIC group ICA implementation with TR validation
 - ✅ VBM workflow with FSL randomise integration

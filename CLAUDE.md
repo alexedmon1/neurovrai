@@ -29,9 +29,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - **ASL**: Motion, CBF distributions, tSNR, skull stripping
 - **Configuration System**: YAML-based config with variable substitution (`neurovrai/preprocess/config.py`)
 - **Directory Standardization**: All workflows use `{outdir}/{subject}/{modality}/` pattern
-- **Analysis Modules** (Partial):
-  - **TBSS**: Complete data preparation and statistical infrastructure
-  - **Resting-State fMRI**: ReHo and fALFF with z-score normalization (MELODIC planned)
+- **Analysis Modules**:
+  - **TBSS**: Complete data preparation and statistical infrastructure (✅ Production-Ready)
+  - **Resting-State fMRI**: ReHo, fALFF, and MELODIC group ICA (✅ Production-Ready)
+  - **VBM**: Voxel-Based Morphometry with tissue normalization and group statistics (✅ Production-Ready)
   - **Enhanced Reporting**: Atlas-based cluster localization with HTML visualization
 
 > **Note**: Detailed development history is archived in `docs/status/SESSION_HISTORY_2025-11.md`
@@ -331,7 +332,12 @@ The codebase is organized by MRI modality, with each module containing class-bas
 - **`anat/`**: T1w/T2w anatomical preprocessing
   - `anat-preproc.py`: T1w workflow (reorient → FAST bias correction → BET → FLIRT/FNIRT to MNI152)
   - `freesurfer.py`: Wrapper for FreeSurfer `recon-all` with T1w+T2w inputs
-  - VBM (Voxel-Based Morphometry) utilities for group analysis
+  - **VBM** (`neurovrai/analysis/anat/vbm_workflow.py`): Voxel-Based Morphometry (✅ Production-Ready)
+    - Tissue probability map normalization to MNI space
+    - Optional modulation by Jacobian determinant
+    - Spatial smoothing
+    - Group-level statistical analysis with FSL randomise
+    - Integration with participant demographics
 
 - **`dwi/`** (✅ Production-Ready): Diffusion-weighted imaging (DTI/DWI/DKI/NODDI)
   - **Modern Workflows** (`neurovrai/preprocess/workflows/`):
@@ -412,7 +418,7 @@ The codebase is organized by MRI modality, with each module containing class-bas
       - Design matrix and contrast generation
       - TFCE correction with permutation testing
       - Integration with participant demographics
-  - **Resting-State fMRI Analysis** (`neurovrai/analysis/func/`) (✅ VALIDATED):
+  - **Resting-State fMRI Analysis** (`neurovrai/analysis/func/`) (✅ Production-Ready):
     - `reho.py`: Regional Homogeneity analysis
       - Kendall's coefficient of concordance (KCC)
       - 7/19/27-voxel neighborhoods
@@ -428,7 +434,13 @@ The codebase is organized by MRI modality, with each module containing class-bas
       - JSON summary output
       - Comprehensive logging
       - Command-line interface
-      - Future: MELODIC (group ICA) integration
+    - `melodic.py`: Group ICA analysis (✅ Production-Ready)
+      - FSL MELODIC interface for group-level ICA
+      - Automatic subject data collection and validation
+      - Temporal concatenation or tensor ICA
+      - Automated dimensionality estimation or fixed components
+      - HTML reports with component visualizations
+      - Supports dual regression for subject-specific networks
   - **Statistical Reporting** (`neurovrai/analysis/stats/`):
     - `enhanced_cluster_report.py`: Atlas-based cluster reporting
       - JHU ICBM-DTI-81 white matter atlas integration
