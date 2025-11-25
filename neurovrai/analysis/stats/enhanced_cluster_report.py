@@ -375,11 +375,25 @@ def extract_clusters_with_atlas(stat_file, corrp_file, mean_fa_file,
     return top_clusters, mean_fa_data
 
 def generate_enhanced_html_report(clusters, mean_fa_data, contrast_name,
-                                  output_dir, stat_file):
-    """Generate enhanced HTML report with visualizations"""
+                                  output_dir, stat_file, atlas_type='jhu'):
+    """Generate enhanced HTML report with visualizations
+
+    Parameters
+    ----------
+    atlas_type : str
+        Atlas used for localization: 'jhu' or 'harvard-oxford'
+    """
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Set report title and atlas name based on atlas type
+    if atlas_type == 'harvard-oxford':
+        report_title = "VBM Cluster Analysis Report"
+        atlas_name = "Harvard-Oxford Cortical & Subcortical Atlas"
+    else:
+        report_title = "TBSS Cluster Analysis Report"
+        atlas_name = "JHU White Matter Atlas"
 
     # Generate mosaic images for top clusters
     img_dir = output_dir / 'images'
@@ -402,7 +416,7 @@ def generate_enhanced_html_report(clusters, mean_fa_data, contrast_name,
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Enhanced TBSS Cluster Report - {contrast_name}</title>
+    <title>{report_title} - {contrast_name}</title>
     <style>
         body {{
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -537,7 +551,7 @@ def generate_enhanced_html_report(clusters, mean_fa_data, contrast_name,
 </head>
 <body>
     <div class="container">
-        <h1>🧠 Enhanced TBSS Cluster Report</h1>
+        <h1>🧠 {report_title}</h1>
         <h2>Contrast: {contrast_name}</h2>
 
         <div class="summary">
@@ -579,7 +593,7 @@ def generate_enhanced_html_report(clusters, mean_fa_data, contrast_name,
                 </div>
             </div>
 
-            <h3>📍 Anatomical Location (JHU White Matter Atlas)</h3>
+            <h3>📍 Anatomical Location ({atlas_name})</h3>
             <div class="locations">
 """
 
@@ -759,7 +773,8 @@ def create_enhanced_cluster_report(stat_map, corrp_map, threshold, output_dir,
             mean_fa_data=bg_data,
             contrast_name=contrast_name,
             output_dir=output_dir,
-            stat_file=stat_map
+            stat_file=stat_map,
+            atlas_type=atlas_type
         )
     else:
         report_html = output_dir / f"{contrast_name}_report.html"
