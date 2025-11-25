@@ -27,27 +27,129 @@ Complete preprocessing workflows for all major MRI modalities:
 - **Functional** (rs-fMRI): TEDANA (multi-echo), ICA-AROMA (single-echo), ACompCor, bandpass filtering
 - **ASL** (perfusion): M0 calibration, CBF quantification, partial volume correction
 
-### neurovrai.analysis - In Development (Phase 3)
+### neurovrai.analysis - **Partially Production-Ready** ✅
 
-Group-level statistical analyses:
-- **TBSS** (Tract-Based Spatial Statistics) - **✅ Data preparation implemented**
-  - Subject discovery & validation
-  - FSL TBSS pipeline integration (steps 1-4)
-  - Skeleton projection & QC
-  - Tested on real data (IRC805: 17 subjects)
-- **Statistical infrastructure** - **✅ Design matrix generation implemented**
-  - GLM design matrix creation with patsy formulas
-  - FSL format output (.mat, .con files)
-  - Contrast specification
-- **Resting-State fMRI Analysis** - **✅ Implemented**
-  - ReHo (Regional Homogeneity) with Kendall's coefficient of concordance
-  - ALFF/fALFF (Amplitude of Low-Frequency Fluctuations)
-  - Z-score normalization for cross-subject comparison
-  - Integrated resting-state workflow with automated QC logging
-  - Tested on IRC805 data (450 timepoints, ~7 min ReHo + 22 sec fALFF)
-  - MELODIC (group ICA) - Planned
-- VBM (Voxel-Based Morphometry) - Planned
-- Group CBF analysis - Planned
+Group-level statistical analyses and design matrix tools:
+
+#### **neuroaider** - Design Matrix & Contrast Generation Tool ✅
+Standalone tool for creating FSL-compatible design matrices from participant data:
+- CSV/TSV file support with automatic delimiter detection
+- Subject validation against imaging data (derivatives directory or file patterns)
+- Multiple coding schemes: effect (sum-to-zero), dummy, one-hot
+- Automatic contrast generation (positive/negative effects, factor levels)
+- Custom contrast vector support for advanced users
+- FSL-compatible output (.mat, .con files)
+- Comprehensive validation and error messages
+
+**Usage:**
+```python
+from neuroaider import DesignHelper
+
+# Load participant data and create design
+helper = DesignHelper('participants.csv')
+helper.add_covariate('age', mean_center=True)
+helper.add_categorical('group', coding='effect')
+helper.add_contrast('age_positive', covariate='age', direction='+')
+helper.validate(file_pattern='/study/vbm/*_GM_smooth.nii.gz')
+helper.save('design.mat', 'design.con')
+```
+
+#### **VBM (Voxel-Based Morphometry)** ✅
+Complete workflow for structural brain analysis:
+- Tissue probability map normalization to MNI space
+- Optional modulation by Jacobian determinant
+- Spatial smoothing (configurable FWHM)
+- Automated group statistics with FSL randomise (TFCE correction)
+- Integration with participant demographics via neuroaider
+- Atlas-based cluster reporting with anatomical localization
+
+**Usage:**
+```python
+from neurovrai.analysis.anat.vbm_workflow import prepare_vbm_data, run_vbm_analysis
+
+# Prepare VBM data (normalize & smooth tissue maps)
+prepare_vbm_data(
+    subjects=subject_list,
+    derivatives_dir='/study/derivatives',
+    output_dir='/study/vbm',
+    tissue_type='GM',  # or 'WM', 'CSF'
+    smoothing_fwhm=4.0
+)
+
+# Run group statistics
+run_vbm_analysis(
+    vbm_dir='/study/vbm/GM',
+    participants_file='/study/participants.csv',
+    formula='age + sex + group',
+    contrasts=['age_positive', 'group_difference'],
+    n_permutations=5000
+)
+```
+
+#### **MELODIC (Group ICA)** ✅
+Group-level independent component analysis for resting-state fMRI:
+- Automatic subject data collection and validation
+- Temporal concatenation approach
+- Configurable dimensionality (auto or fixed number of components)
+- TR validation with configurable tolerance
+- HTML reports with component spatial maps and time courses
+
+**Usage:**
+```python
+from neurovrai.analysis.func.melodic import run_melodic_group_analysis
+
+results = run_melodic_group_analysis(
+    subject_files=['/study/derivatives/sub-001/func/preprocessed.nii.gz', ...],
+    output_dir='/study/melodic',
+    n_components=20,  # or 'auto'
+    tr=1.029
+)
+```
+
+#### **TBSS (Tract-Based Spatial Statistics)** ✅
+White matter skeleton-based analysis:
+- Automated subject discovery and FA validation
+- FSL TBSS pipeline integration (steps 1-4)
+- Skeleton projection and quality control
+- Integration with neuroaider for design matrices
+
+**Usage:**
+```python
+from neurovrai.analysis.tbss.prepare_tbss import prepare_tbss_analysis
+
+results = prepare_tbss_analysis(
+    derivatives_dir='/study/derivatives',
+    output_dir='/study/tbss',
+    threshold=0.2
+)
+```
+
+#### **Resting-State Connectivity Metrics** ✅
+Subject-level functional connectivity measures:
+- **ReHo** (Regional Homogeneity): Kendall's W with 7/19/27-voxel neighborhoods
+- **ALFF/fALFF**: Amplitude of low-frequency fluctuations (0.01-0.08 Hz)
+- Z-score normalization for group comparison
+- Efficient implementation (~7 min ReHo, ~22 sec fALFF for typical data)
+
+**Usage:**
+```python
+from neurovrai.analysis.func.resting_workflow import run_resting_state_analysis
+
+results = run_resting_state_analysis(
+    func_file='/study/derivatives/sub-001/func/preprocessed.nii.gz',
+    mask_file='/study/derivatives/sub-001/func/brain_mask.nii.gz',
+    output_dir='/study/derivatives/sub-001/func',
+    compute_reho=True,
+    compute_falff=True
+)
+```
+
+#### **Planned Features**
+- Dual regression for MELODIC components
+- Seed-based functional connectivity
+- Custom randomise wrapper for ASL group analysis
+- Dynamic functional connectivity (sliding window)
+- Structural connectivity (probabilistic tractography)
 
 ### neurovrai.connectome - Planned (Phase 4)
 
@@ -470,9 +572,10 @@ freesurfer:
 
 ## Project Status
 
-### ✅ Production-Ready (neurovrai.preprocess)
+### ✅ Production-Ready
 
-All preprocessing modalities are complete and validated:
+#### neurovrai.preprocess - Complete
+All preprocessing modalities are validated and production-ready:
 
 | Modality | Status | Key Features |
 |----------|--------|--------------|
@@ -482,24 +585,31 @@ All preprocessing modalities are complete and validated:
 | **ASL** | ✅ Complete | M0 calibration, PVC, CBF quantification, auto DICOM params |
 | **QC Framework** | ✅ Complete | Automated QC for all modalities with HTML reports |
 
-**Recent Milestones:**
-- 2025-11-17: Fixed functional run selection for scanner retries
-- 2025-11-17: Enabled ACompCor in functional pipeline
-- 2025-11-17: Package restructured to neurovrai with three-module architecture
-- 2025-11-16: Removed tractography from preprocessing (will be reimplemented in neurovrai.connectome)
-- 2025-11-15: All modalities production-ready
-- 2025-11-14: TEDANA 25.1.0, spatial normalization, bug fixes
-- 2025-11-13: ASL preprocessing with M0 calibration and PVC
-- 2025-11-12: DKI/NODDI validation, functional QC enhancements
-- 2025-11-11: AMICO integration (100x speedup)
-- 2025-11-10: Multi-echo TEDANA integration
+#### neurovrai.analysis - Partially Complete
+Group-level analysis tools ready for production use:
 
-### 🔄 In Development
+| Analysis Tool | Status | Key Features |
+|---------------|--------|--------------|
+| **neuroaider** | ✅ Complete | Design matrix generation, CSV/TSV support, subject validation |
+| **VBM** | ✅ Complete | Tissue normalization, smoothing, FSL randomise, atlas-based reporting |
+| **MELODIC** | ✅ Complete | Group ICA, temporal concatenation, automatic TR validation |
+| **TBSS** | ✅ Complete | Data preparation, FA skeleton, FSL TBSS integration |
+| **ReHo/fALFF** | ✅ Complete | Regional homogeneity, ALFF/fALFF, z-score normalization |
 
-| Module | Status | Timeline |
-|--------|--------|----------|
-| **neurovrai.analysis** | Planned | Phase 3 (4-6 weeks) |
-| **neurovrai.connectome** | Planned | Phase 4 (6-8 weeks) |
+### 🔄 Next Steps
+
+#### neurovrai.analysis - In Progress
+- **Dual Regression**: MELODIC component back-projection to subject space
+- **Seed-Based FC**: ROI-to-voxel and ROI-to-ROI functional connectivity
+- **ASL Group Analysis**: Custom randomise wrapper for perfusion studies
+- **Dynamic FC**: Sliding window functional connectivity analysis
+
+#### neurovrai.connectome - Planned (Phase 4)
+- **Structural Connectivity**: Probabilistic tractography with BEDPOSTX
+- **Connectivity Matrices**: Network construction from tractography/fMRI
+- **Graph Theory**: Network metrics (modularity, efficiency, centrality)
+- **Multi-Modal Integration**: SC-FC coupling analysis
+- **Network Visualization**: Interactive brain network plots
 
 ### ⚠️ Experimental (Not Production Ready)
 
@@ -508,6 +618,38 @@ All preprocessing modalities are complete and validated:
 | **FreeSurfer Integration** | Hooks only | Transform pipeline incomplete |
 
 **See `docs/NEUROVRAI_ARCHITECTURE.md` for detailed roadmap and implementation plan.**
+
+### Recent Milestones
+
+**2025-11-25:**
+- ✅ neuroaider package released: design matrix and contrast generation tool
+- ✅ MELODIC group ICA implementation with TR validation
+- ✅ VBM workflow with FSL randomise integration
+- ✅ Fixed MELODIC TR tolerance (50ms) to include all subjects
+
+**2025-11-24:**
+- ✅ ReHo and fALFF implementation for resting-state analysis
+- ✅ Enhanced TBSS cluster reporting with atlas localization
+
+**2025-11-17:**
+- Fixed functional run selection for scanner retries
+- Enabled ACompCor in functional pipeline
+- Package restructured to neurovrai with three-module architecture
+
+**2025-11-16:**
+- Removed tractography from preprocessing (will be in neurovrai.connectome)
+
+**2025-11-15:**
+- All preprocessing modalities production-ready
+- TEDANA 25.1.0, spatial normalization, bug fixes
+
+**2025-11-13:**
+- ASL preprocessing with M0 calibration and PVC
+- DKI/NODDI validation, functional QC enhancements
+
+**2025-11-11:**
+- AMICO integration (100x NODDI speedup)
+- Multi-echo TEDANA integration
 
 ## Processing Time Estimates
 
