@@ -445,15 +445,23 @@ class DesignHelper:
         design_mat, col_names = self.design_matrix, self.design_column_names
         contrast_mat, con_names = self.build_contrast_matrix()
 
-        # Save design matrix
+        # Save design matrix in FSL vest format
         design_mat_file = Path(design_mat_file)
         design_mat_file.parent.mkdir(parents=True, exist_ok=True)
-        np.savetxt(design_mat_file, design_mat, fmt='%.6f')
+        with open(design_mat_file, 'w') as f:
+            f.write(f"/NumWaves {design_mat.shape[1]}\n")
+            f.write(f"/NumPoints {design_mat.shape[0]}\n")
+            f.write("/Matrix\n")
+            np.savetxt(f, design_mat, fmt='%.6f')
         logger.info(f"Saved design matrix: {design_mat_file}")
 
-        # Save contrasts
+        # Save contrasts in FSL vest format
         design_con_file = Path(design_con_file)
-        np.savetxt(design_con_file, contrast_mat, fmt='%.6f')
+        with open(design_con_file, 'w') as f:
+            f.write(f"/NumWaves {contrast_mat.shape[1]}\n")
+            f.write(f"/NumContrasts {contrast_mat.shape[0]}\n")
+            f.write("/Matrix\n")
+            np.savetxt(f, contrast_mat, fmt='%.6f')
         logger.info(f"Saved contrasts: {design_con_file}")
 
         # Save contrast names
