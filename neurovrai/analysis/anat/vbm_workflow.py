@@ -548,12 +548,11 @@ def run_vbm_analysis(
     randomise_result = run_randomise(
         input_file=merged_file,
         design_mat=design_mat_file,
-        design_con=design_con_file,
-        mask_file=mask_file,
+        contrast_con=design_con_file,
+        mask=mask_file,
         output_dir=randomise_dir,
         n_permutations=n_permutations,
-        tfce=tfce,
-        output_basename='randomise'
+        tfce=tfce
     )
 
     logger.info(f"✓ Randomise complete: {randomise_dir}")
