@@ -502,9 +502,13 @@ def run_vbm_analysis(
         add_intercept=True
     )
 
-    # Save design matrix
+    # Save design matrix in FSL vest format
     design_mat_file = stats_dir / 'design.mat'
-    np.savetxt(design_mat_file, design_mat, fmt='%.6f')
+    with open(design_mat_file, 'w') as f:
+        f.write(f"/NumWaves {design_mat.shape[1]}\n")
+        f.write(f"/NumPoints {design_mat.shape[0]}\n")
+        f.write("/Matrix\n")
+        np.savetxt(f, design_mat, fmt='%.6f')
     logger.info(f"Design matrix shape: {design_mat.shape}")
     logger.info(f"Columns: {column_names}")
     logger.info(f"✓ Saved: {design_mat_file}")
@@ -526,9 +530,13 @@ def run_vbm_analysis(
 
     contrast_mat = np.array(contrast_mat)
 
-    # Save contrasts
+    # Save contrasts in FSL vest format
     design_con_file = stats_dir / 'design.con'
-    np.savetxt(design_con_file, contrast_mat, fmt='%.6f')
+    with open(design_con_file, 'w') as f:
+        f.write(f"/NumWaves {contrast_mat.shape[1]}\n")
+        f.write(f"/NumContrasts {contrast_mat.shape[0]}\n")
+        f.write("/Matrix\n")
+        np.savetxt(f, contrast_mat, fmt='%.6f')
     logger.info(f"✓ Saved: {design_con_file} ({len(contrast_names)} contrasts)")
 
     # Save contrast names for reference
