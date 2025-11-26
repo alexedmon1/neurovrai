@@ -125,14 +125,26 @@ results = prepare_tbss_analysis(
 ```
 
 #### **Resting-State Connectivity Metrics** ✅
-Subject-level functional connectivity measures:
+Complete subject-level and group-level functional connectivity analysis:
+
+**Subject-Level Analysis:**
 - **ReHo** (Regional Homogeneity): Kendall's W with 7/19/27-voxel neighborhoods
 - **ALFF/fALFF**: Amplitude of low-frequency fluctuations (0.01-0.08 Hz)
-- Z-score normalization for group comparison
+- Brain-masked z-score normalization
+- MNI152 spatial normalization for group comparison
 - Efficient implementation (~7 min ReHo, ~22 sec fALFF for typical data)
+
+**Group-Level Analysis:**
+- Automated gathering of individual maps to 4D volumes in MNI space
+- FSL randomise with TFCE correction (threshold-free cluster enhancement)
+- Design matrix integration with demographic/clinical variables
+- Atlas-based anatomical localization (Harvard-Oxford cortical/subcortical)
+- HTML cluster reports with tri-planar visualizations
+- Study-organized outputs with full provenance tracking
 
 **Usage:**
 ```python
+# Subject-level: Compute ReHo and fALFF
 from neurovrai.analysis.func.resting_workflow import run_resting_state_analysis
 
 results = run_resting_state_analysis(
@@ -141,6 +153,33 @@ results = run_resting_state_analysis(
     output_dir='/study/derivatives/sub-001/func',
     compute_reho=True,
     compute_falff=True
+)
+
+# Normalize to MNI space for group analysis
+from neurovrai.preprocess.utils.func_normalization import normalize_func_metrics
+
+normalize_func_metrics(
+    derivatives_dir='/study/derivatives',
+    metric='reho',  # or 'falff'
+    mni_template='/path/to/MNI152_T1_2mm_brain.nii.gz'
+)
+
+# Group-level: Statistical analysis
+run_func_group_analysis(
+    metric='reho',
+    derivatives_dir='/study/derivatives',
+    analysis_dir='/study/analysis',
+    participants_file='/study/participants.tsv',
+    study_name='my_study',
+    n_permutations=5000
+)
+
+# Generate HTML cluster reports
+generate_func_reports(
+    analysis_dir='/study/analysis/func/reho/my_study',
+    metric='reho',
+    threshold=0.5,  # corrp threshold
+    study_name='my_study'
 )
 ```
 

@@ -180,7 +180,7 @@ def run_randomise(
         logging.info(f"Variance smoothing: {variance_smoothing}mm")
 
     if seed is not None:
-        cmd.extend(['--seed', str(seed)])
+        cmd.append(f'--seed={seed}')
         logging.info(f"Random seed: {seed}")
 
     # Parallel execution
