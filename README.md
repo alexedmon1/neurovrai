@@ -1,8 +1,6 @@
 # neurovrai
 
-**Comprehensive MRI preprocessing, analysis, and connectivity package for neuroimaging research.**
-
-From raw DICOM to group statistics and network neuroscience - a complete, production-ready pipeline for multi-modal MRI data analysis.
+**Complete neuroimaging analysis platform: preprocessing, group statistics, and network neuroscience.**
 
 [![Version](https://img.shields.io/badge/version-2.0.0--alpha-blue.svg)](https://github.com/alexedmon1/neurovrai)
 [![Python](https://img.shields.io/badge/python-3.13%2B-brightgreen.svg)](https://www.python.org/)
@@ -10,236 +8,197 @@ From raw DICOM to group statistics and network neuroscience - a complete, produc
 
 ## Overview
 
-**neurovrai** (French: "true neuro") is an integrated neuroimaging analysis package with three main modules:
+**neurovrai** (French: "true neuro") provides end-to-end neuroimaging analysis from raw DICOM to publication-ready results across three integrated modules:
 
 ```
 neurovrai/
-├── preprocess/    ✅ Production-Ready - Subject-level preprocessing
-├── analysis/      ✅ Partially Production-Ready - Group-level statistics
-└── connectome/    ✅ Production-Ready - Connectivity & networks
+├── preprocess/    ✅ Subject-level preprocessing (anat, dwi, func, asl)
+├── analysis/      ✅ Group-level statistics (VBM, TBSS, ReHo/fALFF, MELODIC)
+└── connectome/    ✅ Connectivity & network neuroscience
 ```
 
-### neurovrai.preprocess - **Production-Ready** ✅
+**Key Features**:
+- 🚀 **Multi-Modal**: Anatomical, diffusion, functional, ASL preprocessing
+- ⚡ **GPU Accelerated**: CUDA support for eddy, BEDPOSTX (10-50x speedup)
+- 🧠 **Advanced Models**: DKI, NODDI with AMICO acceleration (100x faster)
+- 📊 **Group Statistics**: VBM, TBSS, resting-state metrics with FSL randomise
+- 🌐 **Network Analysis**: Connectivity matrices, graph theory, NBS
+- 🎯 **Config-Driven**: YAML configuration for reproducible workflows
+- 🔍 **Quality Control**: Automated QC with HTML reports for all modalities
 
-Complete preprocessing workflows for all major MRI modalities:
-- **Anatomical** (T1w/T2w): N4 bias correction, skull stripping, tissue segmentation, MNI registration
-- **Diffusion** (DWI): TOPUP, eddy, DTI/DKI/NODDI, BEDPOSTX, spatial normalization
-- **Functional** (rs-fMRI): TEDANA (multi-echo), ICA-AROMA (single-echo), ACompCor, bandpass filtering
-- **ASL** (perfusion): M0 calibration, CBF quantification, partial volume correction
+## Table of Contents
 
-### neurovrai.analysis - **Partially Production-Ready** ✅
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Preprocessing](#preprocessing)
+  - [Anatomical](#anatomical-preprocessing)
+  - [Diffusion](#diffusion-preprocessing)
+  - [Functional](#functional-preprocessing)
+  - [ASL](#asl-preprocessing)
+- [Group Analysis](#group-analysis)
+  - [VBM (Voxel-Based Morphometry)](#vbm-voxel-based-morphometry)
+  - [TBSS (Tract-Based Spatial Statistics)](#tbss-tract-based-spatial-statistics)
+  - [Resting-State fMRI](#resting-state-fmri-analysis)
+  - [MELODIC (Group ICA)](#melodic-group-ica)
+- [Connectome Analysis](#connectome-analysis)
+  - [ROI Extraction](#roi-extraction)
+  - [Functional Connectivity](#functional-connectivity)
+  - [Graph Theory Metrics](#graph-theory-metrics)
+  - [Network-Based Statistic](#network-based-statistic)
+- [Configuration](#configuration)
+- [Examples](#examples)
 
-Group-level statistical analyses and design matrix tools:
+---
 
-#### **neuroaider** - Design Matrix & Contrast Generation Tool ✅
-Standalone tool for creating FSL-compatible design matrices from participant data:
-- CSV/TSV file support with automatic delimiter detection
-- Subject validation against imaging data (derivatives directory or file patterns)
-- Multiple coding schemes: effect (sum-to-zero), dummy, one-hot
-- Automatic contrast generation (positive/negative effects, factor levels)
-- Custom contrast vector support for advanced users
-- FSL-compatible output (.mat, .con files)
-- Comprehensive validation and error messages
+## Installation
 
-**Usage:**
-```python
-from neuroaider import DesignHelper
+### Prerequisites
 
-# Load participant data and create design
-helper = DesignHelper('participants.csv')
-helper.add_covariate('age', mean_center=True)
-helper.add_categorical('group', coding='effect')
-helper.add_contrast('age_positive', covariate='age', direction='+')
-helper.validate(file_pattern='/study/vbm/*_GM_smooth.nii.gz')
-helper.save('design.mat', 'design.con')
+**Required system dependencies**:
+- FSL 6.0+ (neuroimaging tools)
+- Python 3.13+
+- CUDA toolkit (optional, for GPU acceleration)
+
+**Install FSL**:
+```bash
+# Follow official FSL installation: https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/FslInstallation
+# Ensure $FSLDIR is set in your environment
 ```
 
-#### **VBM (Voxel-Based Morphometry)** ✅
-Complete workflow for structural brain analysis:
-- Tissue probability map normalization to MNI space
-- Optional modulation by Jacobian determinant
-- Spatial smoothing (configurable FWHM)
-- Automated group statistics with FSL randomise (TFCE correction)
-- Integration with participant demographics via neuroaider
-- Atlas-based cluster reporting with anatomical localization
+### Install neurovrai
 
-**Usage:**
+```bash
+# Clone repository
+git clone https://github.com/alexedmon1/neurovrai.git
+cd neurovrai
+
+# Install with uv (recommended)
+uv sync
+
+# Or with pip
+pip install -e .
+```
+
+### Verify Installation
+
+```bash
+# Check FSL
+echo $FSLDIR
+fslinfo --version
+
+# Check Python environment
+uv run python -c "import neurovrai; print('neurovrai ready!')"
+```
+
+---
+
+## Quick Start
+
+### 1. Create Configuration File
+
+```yaml
+# config.yaml
+project_dir: /mnt/data/my_study
+rawdata_dir: ${project_dir}/rawdata
+derivatives_dir: ${project_dir}/derivatives
+work_dir: ${project_dir}/work
+
+execution:
+  plugin: MultiProc
+  n_procs: 8
+
+templates:
+  mni152_t1_2mm: /usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz
+
+anatomical:
+  bet:
+    frac: 0.5
+    robust: true
+  registration_method: fsl
+  run_qc: true
+
+diffusion:
+  topup:
+    readout_time: 0.05
+  eddy_config:
+    use_cuda: true
+  run_qc: true
+
+functional:
+  tr: 2.0
+  highpass: 0.001
+  lowpass: 0.08
+  fwhm: 6
+  tedana:
+    enabled: false  # Set true for multi-echo
+  acompcor:
+    enabled: true
+  run_qc: true
+```
+
+### 2. Run Preprocessing
+
+**CLI Method**:
+```bash
+# Anatomical preprocessing
+uv run python run_preprocessing.py \
+    --subject sub-001 \
+    --modality anat \
+    --config config.yaml
+
+# Diffusion preprocessing
+uv run python run_preprocessing.py \
+    --subject sub-001 \
+    --modality dwi \
+    --config config.yaml
+```
+
+**Python API**:
 ```python
-from neurovrai.analysis.anat.vbm_workflow import prepare_vbm_data, run_vbm_analysis
+from pathlib import Path
+from neurovrai.preprocess.config import load_config
+from neurovrai.preprocess.workflows.anat_preprocess import run_anatomical_preprocessing
 
-# Prepare VBM data (normalize & smooth tissue maps)
-prepare_vbm_data(
-    subjects=subject_list,
-    derivatives_dir='/study/derivatives',
-    output_dir='/study/vbm',
-    tissue_type='GM',  # or 'WM', 'CSF'
-    smoothing_fwhm=4.0
+config = load_config(Path('config.yaml'))
+
+run_anatomical_preprocessing(
+    config=config,
+    subject='sub-001',
+    t1w_file=Path('/data/sub-001/anat/T1w.nii.gz'),
+    output_dir=Path(config['derivatives_dir'])
 )
+```
 
-# Run group statistics
+### 3. Run Group Analysis
+
+```python
+from neurovrai.analysis.anat.vbm_workflow import run_vbm_analysis
+
 run_vbm_analysis(
-    vbm_dir='/study/vbm/GM',
-    participants_file='/study/participants.csv',
+    vbm_dir='/data/derivatives/vbm/GM',
+    participants_file='/data/participants.csv',
     formula='age + sex + group',
-    contrasts=['age_positive', 'group_difference'],
+    contrasts=['age_positive', 'group_patients_vs_controls'],
     n_permutations=5000
 )
 ```
 
-#### **MELODIC (Group ICA)** ✅
-Group-level independent component analysis for resting-state fMRI:
-- Automatic subject data collection and validation
-- Temporal concatenation approach
-- Configurable dimensionality (auto or fixed number of components)
-- TR validation with configurable tolerance
-- HTML reports with component spatial maps and time courses
+### 4. Connectivity Analysis
 
-**Usage:**
-```python
-from neurovrai.analysis.func.melodic import run_melodic_group_analysis
-
-results = run_melodic_group_analysis(
-    subject_files=['/study/derivatives/sub-001/func/preprocessed.nii.gz', ...],
-    output_dir='/study/melodic',
-    n_components=20,  # or 'auto'
-    tr=1.029
-)
-```
-
-#### **TBSS (Tract-Based Spatial Statistics)** ✅
-White matter skeleton-based analysis:
-- Automated subject discovery and FA validation
-- FSL TBSS pipeline integration (steps 1-4)
-- Skeleton projection and quality control
-- Integration with neuroaider for design matrices
-
-**Usage:**
-```python
-from neurovrai.analysis.tbss.prepare_tbss import prepare_tbss_analysis
-
-results = prepare_tbss_analysis(
-    derivatives_dir='/study/derivatives',
-    output_dir='/study/tbss',
-    threshold=0.2
-)
-```
-
-#### **Resting-State Connectivity Metrics** ✅
-Complete subject-level and group-level functional connectivity analysis:
-
-**Subject-Level Analysis:**
-- **ReHo** (Regional Homogeneity): Kendall's W with 7/19/27-voxel neighborhoods
-- **ALFF/fALFF**: Amplitude of low-frequency fluctuations (0.01-0.08 Hz)
-- Brain-masked z-score normalization
-- MNI152 spatial normalization for group comparison
-- Efficient implementation (~7 min ReHo, ~22 sec fALFF for typical data)
-
-**Group-Level Analysis:**
-- Automated gathering of individual maps to 4D volumes in MNI space
-- FSL randomise with TFCE correction (threshold-free cluster enhancement)
-- Design matrix integration with demographic/clinical variables
-- Atlas-based anatomical localization (Harvard-Oxford cortical/subcortical)
-- HTML cluster reports with tri-planar visualizations
-- Study-organized outputs with full provenance tracking
-
-**Usage:**
-```python
-# Subject-level: Compute ReHo and fALFF
-from neurovrai.analysis.func.resting_workflow import run_resting_state_analysis
-
-results = run_resting_state_analysis(
-    func_file='/study/derivatives/sub-001/func/preprocessed.nii.gz',
-    mask_file='/study/derivatives/sub-001/func/brain_mask.nii.gz',
-    output_dir='/study/derivatives/sub-001/func',
-    compute_reho=True,
-    compute_falff=True
-)
-
-# Normalize to MNI space for group analysis
-from neurovrai.preprocess.utils.func_normalization import normalize_func_metrics
-
-normalize_func_metrics(
-    derivatives_dir='/study/derivatives',
-    metric='reho',  # or 'falff'
-    mni_template='/path/to/MNI152_T1_2mm_brain.nii.gz'
-)
-
-# Group-level: Statistical analysis
-run_func_group_analysis(
-    metric='reho',
-    derivatives_dir='/study/derivatives',
-    analysis_dir='/study/analysis',
-    participants_file='/study/participants.tsv',
-    study_name='my_study',
-    n_permutations=5000
-)
-
-# Generate HTML cluster reports
-generate_func_reports(
-    analysis_dir='/study/analysis/func/reho/my_study',
-    metric='reho',
-    threshold=0.5,  # corrp threshold
-    study_name='my_study'
-)
-```
-
-#### **Planned Features**
-- Dual regression for MELODIC components
-- Custom randomise wrapper for ASL group analysis
-- Dynamic functional connectivity (sliding window)
-
-### neurovrai.connectome - **Production-Ready** ✅
-
-Complete brain connectivity and network neuroscience analysis:
-
-**ROI Extraction**:
-- Modality-agnostic extraction from atlas parcellations
-- Support for discrete (3D) and probabilistic (4D) atlases
-- Timeseries extraction from functional data
-- Statistical extraction from structural maps (FA, MD, GM density)
-
-**Functional Connectivity**:
-- Pearson, Spearman, and partial correlation matrices
-- Fisher z-transformation for group statistics
-- Seed-based connectivity analysis
-- Matrix thresholding and sparsification
-
-**Group-Level Analysis**:
-- Group averaging with consistency filtering
-- Statistical comparison with FDR correction
-- **Network-Based Statistic (NBS)** - permutation-based network inference
-- Subject filtering by demographics
-
-**Graph Theory Metrics**:
-- Node metrics: degree, strength, clustering, betweenness centrality
-- Global metrics: efficiency, path length, transitivity
-- Hub identification
-- Small-world analysis
-
-**Visualization**:
-- Connectivity matrix heatmaps with clustering
-- Circular connectograms
-- Group comparison plots
-- Publication-ready figures
-
-**Usage**:
 ```python
 from neurovrai.connectome import (
     extract_roi_timeseries,
     compute_functional_connectivity,
-    compute_group_difference,
-    compute_network_based_statistic,
-    compute_node_metrics,
-    plot_connectivity_matrix
+    compute_network_based_statistic
 )
 
-# Extract ROI timeseries
+# Extract timeseries
 timeseries, roi_names = extract_roi_timeseries(
     data_file='preprocessed_bold.nii.gz',
     atlas='schaefer_400.nii.gz'
 )
 
-# Compute connectivity matrix
+# Compute connectivity
 fc_results = compute_functional_connectivity(
     timeseries=timeseries,
     roi_names=roi_names,
@@ -254,705 +213,870 @@ nbs_results = compute_network_based_statistic(
     threshold=3.0,
     n_permutations=5000
 )
-
-# Graph theory metrics
-node_metrics = compute_node_metrics(fc_matrix, threshold=0.3, weighted=True)
 ```
 
-See `examples/connectome_complete_workflow.py` for a complete end-to-end demonstration.
+---
 
-#### **Planned Features**
-- Structural connectivity (probabilistic tractography with probtrackx2)
-- Multi-modal integration (SC-FC coupling)
-- Community detection algorithms
+## Preprocessing
 
-## Key Features
+### Anatomical Preprocessing
 
-### Architecture
-- **🎯 Three-Part Design**: Preprocessing → Analysis → Connectivity
-- **📦 Single Package**: Integrated modules sharing configuration and data formats
-- **⚙️ Config-Driven**: YAML configuration for all parameters
-- **🔄 Transform Reuse**: Centralized spatial transformation management
-- **📊 Comprehensive QC**: Automated quality control for all modalities
+Process T1-weighted (and optionally T2-weighted) structural images.
 
-### Preprocessing (Production-Ready)
-- **🚀 Multi-Modal**: Anat, DWI, functional, ASL in one pipeline
-- **⚡ GPU Accelerated**: CUDA support for eddy, BEDPOSTX (10-50x speedup)
-- **🧠 Advanced Models**: DKI, NODDI (DIPY + AMICO 100x acceleration)
-- **🎭 Multi-Echo**: TEDANA 25.1.0 with automatic component classification
-- **🔍 Quality Control**: Comprehensive automated QC with HTML reports
-- **📁 BIDS-Compatible**: Follows neuroimaging data standards
-
-### Performance
-- **AMICO Acceleration**: NODDI in 30 seconds (vs 20-25 min DIPY)
-- **GPU Processing**: 10-50x speedup for diffusion workflows
-- **Parallel Execution**: Multi-modal processing for maximum throughput
-- **Transform Reuse**: Zero redundant registration computation
-
-## Quick Start
-
-### Installation
-
-```bash
-# Clone repository
-git clone https://github.com/alexedmon1/neurovrai.git
-cd neurovrai
-
-# Install with uv (recommended)
-uv sync
-
-# Or with pip
-pip install -e .
-```
-
-### Prerequisites
-
-- **Python**: 3.13+ (developed with 3.13)
-- **FSL**: 6.0+ (required for preprocessing)
-- **ANTs**: 2.3+ (optional for advanced registration)
-- **dcm2niix**: For DICOM conversion
-- **CUDA**: Optional, for GPU acceleration
-
-### Basic Usage
-
-```bash
-# 1. Create configuration
-python create_config.py --study-root /path/to/study
-
-# 2. Run single subject (all modalities)
-uv run python run_simple_pipeline.py \
-    --subject sub-001 \
-    --nifti-dir /path/to/study/bids/sub-001 \
-    --config /path/to/study/config.yaml
-
-# 3. Or run specific modality
-uv run python run_simple_pipeline.py \
-    --subject sub-001 \
-    --nifti-dir /path/to/study/bids/sub-001 \
-    --config /path/to/study/config.yaml \
-    --skip-dwi --skip-asl  # Only anatomical and functional
-
-# 4. Batch processing
-uv run python run_batch_simple.py --config /path/to/study/config.yaml
-```
-
-### Python API
-
-```python
-from neurovrai.config import load_config
-from neurovrai.preprocess.workflows import (
-    run_anat_preprocessing,
-    run_dwi_multishell_topup_preprocessing,
-    run_func_preprocessing,
-    run_asl_preprocessing
-)
-
-# Load configuration
-config = load_config('config.yaml')
-
-# Run anatomical preprocessing
-results = run_anat_preprocessing(
-    config=config,
-    subject='sub-001',
-    t1w_file='/path/to/T1w.nii.gz',
-    output_dir='/path/to/study/derivatives'
-)
-
-# Results contain all output file paths
-print(results['brain'])          # Brain-extracted T1w
-print(results['brain_mask'])     # Brain mask
-print(results['mni_warp'])       # Warp to MNI space
-```
-
-## Directory Structure
-
-neurovrai uses a standardized directory hierarchy:
-
-```
-study_root/
-├── raw/
-│   ├── dicom/              # Raw DICOM files
-│   └── bids/               # Converted NIfTI (BIDS format)
-│       └── sub-001/
-│           ├── anat/
-│           ├── dwi/
-│           ├── func/
-│           └── asl/
-├── derivatives/            # Preprocessed outputs
-│   └── sub-001/
-│       ├── anat/           # Brain masks, segmentation, MNI registration
-│       ├── dwi/            # Eddy-corrected, DTI/DKI/NODDI metrics
-│       ├── func/           # Denoised BOLD, preprocessed time series
-│       └── asl/            # CBF maps, tissue-specific perfusion
-├── work/                   # Temporary processing files
-│   └── sub-001/
-├── qc/                     # Quality control reports
-│   └── sub-001/
-│       ├── anat/
-│       ├── dwi/
-│       ├── func/
-│       └── asl/
-├── transforms/             # Spatial transformation registry
-│   └── sub-001/
-└── config.yaml             # Study configuration
-```
-
-## Preprocessing Workflows
-
-### Anatomical (T1w/T2w)
-
-**Pipeline:**
+**Pipeline**:
 1. N4 bias field correction (ANTs)
 2. Brain extraction (FSL BET)
-3. Tissue segmentation (ANTs Atropos - faster than FSL FAST)
-4. Registration to MNI152 (FSL FLIRT + FNIRT)
-5. Quality control (skull stripping, segmentation, registration)
+3. Tissue segmentation (ANTs Atropos)
+4. Registration to MNI152 (FSL FLIRT/FNIRT)
+5. Quality control reports
 
-**Outputs:**
-- Brain-extracted images
-- Brain masks
-- Tissue probability maps (CSF, GM, WM)
-- MNI-space registered images
-- Spatial transformations
-
-**Time:** 15-30 minutes
-
-### Diffusion (DWI)
-
-**Pipeline:**
-1. Optional TOPUP distortion correction (auto-enabled with reverse PE data)
-2. GPU-accelerated eddy current/motion correction
-3. DTI fitting (FA, MD, AD, RD)
-4. Optional BEDPOSTX fiber orientation estimation (for future tractography)
-5. Advanced models (auto-enabled for multi-shell):
-   - **DKI** (DIPY): MK, AK, RK, KFA metrics
-   - **NODDI** (DIPY or AMICO): FICVF, ODI, FISO
-   - **AMICO Models**: SANDI, ActiveAx (100x faster)
-6. Spatial normalization to FMRIB58_FA template
-7. Comprehensive QC (TOPUP, motion, DTI metrics)
-
-**Outputs:**
-- Eddy-corrected DWI
-- DTI metric maps
-- DKI/NODDI metric maps (multi-shell only)
-- BEDPOSTX fiber orientations (optional)
-- Normalized metrics in MNI space
-- Forward/inverse warps
-
-**Time:** 45-90 minutes (30 min with AMICO)
-
-### Functional (rs-fMRI)
-
-**Pipeline:**
-1. **Multi-echo path:**
-   - Auto-detection of echo count
-   - TEDANA denoising (optimal for multi-echo)
-   - Motion correction per echo
-   - Optimally combined signal
-2. **Single-echo path:**
-   - Motion correction (MCFLIRT)
-   - ICA-AROMA artifact removal (auto-enabled)
-3. **Common steps:**
-   - ACompCor nuisance regression (CSF/WM components)
-   - Bandpass temporal filtering
-   - Spatial smoothing
-   - Registration to anatomical/MNI space
-4. Comprehensive QC (motion, DVARS, tSNR, carpet plots)
-
-**Outputs:**
-- Preprocessed BOLD time series
-- Motion parameters
-- Nuisance regressors
-- tSNR maps
-- QC reports (HTML)
-
-**Time:** 20-40 min (single-echo), 2-4 hours (multi-echo with TEDANA)
-
-### ASL (Perfusion)
-
-**Pipeline:**
-1. Automated DICOM parameter extraction (labeling duration τ, PLD)
-2. Motion correction
-3. Label-control separation
-4. M0 calibration with white matter reference
-5. CBF quantification (standard kinetic model, Alsop et al. 2015)
-6. Partial volume correction (tissue-specific CBF)
-7. Registration to anatomical space
-8. Comprehensive QC (motion, CBF, tSNR)
-
-**Outputs:**
-- CBF maps
-- M0 maps
-- Tissue-specific CBF statistics
-- QC metrics and plots
-
-**Time:** 15-30 minutes
-
-## Quality Control
-
-neurovrai includes comprehensive automated QC for all modalities:
-
-### Anatomical QC
-- **Skull Stripping**: Brain mask overlays, volume statistics, over/under-stripping detection
-- **Segmentation**: Tissue volume distributions, probability maps, GM/WM/CSF ratio validation
-- **Registration**: MNI overlay visualizations, checkerboard comparisons, spatial correlation metrics
-
-**Outputs:** PNG visualizations, JSON metrics, pass/fail flags
-
-### Diffusion QC
-- **TOPUP**: Field map visualizations, convergence plots, distortion correction metrics
-- **Motion**: Framewise displacement plots, outlier detection, motion parameter time series
-- **DTI**: FA/MD/AD/RD histograms, metric distributions, white matter statistics
-- **Advanced Models**: DKI/NODDI metric distributions, fitting quality metrics
-
-**Outputs:** Comprehensive plots, distribution statistics, outlier identification
-
-### Functional QC
-- **Motion**: Translation/rotation parameters, framewise displacement, outlier volumes
-- **Signal Quality**: DVARS time series, temporal SNR maps, signal variance
-- **Denoising**: TEDANA component classification, variance explained, acceptance rates
-- **Confounds**: ACompCor components, nuisance regressor validation
-- **Visualization**: Carpet plots, motion correlation, tSNR overlays
-
-**Outputs:** HTML reports, interactive plots, comprehensive metrics
-
-### ASL QC
-- **Motion**: CBF sensitivity to motion, temporal stability
-- **Perfusion**: CBF distributions, tissue-specific values, physiological range validation
-- **Signal**: tSNR maps, M0 calibration quality, label-control SNR
-
-**Outputs:** CBF overlays, distribution plots, tissue-specific statistics
-
-### QC Directory Structure
-
-```
-qc/sub-001/
-├── anat/
-│   ├── skull_strip/
-│   │   ├── brain_mask_overlay.png
-│   │   └── metrics.json
-│   ├── segmentation/
-│   │   ├── tissue_volumes.png
-│   │   ├── tissue_overlays.png
-│   │   └── metrics.json
-│   ├── registration/
-│   │   ├── registration_overlay.png
-│   │   ├── registration_checkerboard.png
-│   │   └── metrics.json
-│   └── combined_qc_results.json
-├── dwi/
-│   ├── topup/
-│   │   ├── field_map.png
-│   │   ├── convergence.png
-│   │   └── metrics.json
-│   ├── motion/
-│   │   ├── framewise_displacement.png
-│   │   ├── motion_params.png
-│   │   └── metrics.json
-│   ├── dti/
-│   │   ├── fa_histogram.png
-│   │   ├── md_histogram.png
-│   │   └── metrics.json
-│   └── combined_qc_results.json
-├── func/
-│   ├── motion_qc.html
-│   ├── tsnr_map.png
-│   ├── carpet_plot.png
-│   ├── dvars.png
-│   └── metrics.json
-└── asl/
-    ├── cbf_overlay.png
-    ├── cbf_distribution.png
-    ├── tsnr_map.png
-    └── metrics.json
+**CLI Usage**:
+```bash
+uv run python run_preprocessing.py \
+    --subject sub-001 \
+    --modality anat \
+    --config config.yaml
 ```
 
-All QC outputs include:
-- **Visualizations**: PNG/HTML for quick review
-- **Metrics**: JSON files for quantitative analysis
-- **Pass/Fail Flags**: Automated quality assessment
+**Python API**:
+```python
+from neurovrai.preprocess.workflows.anat_preprocess import run_anatomical_preprocessing
+
+results = run_anatomical_preprocessing(
+    config=config,
+    subject='sub-001',
+    t1w_file=Path('/data/sub-001/anat/T1w.nii.gz'),
+    t2w_file=Path('/data/sub-001/anat/T2w.nii.gz'),  # Optional
+    output_dir=Path('/data/derivatives')
+)
+```
+
+**Outputs**:
+```
+derivatives/sub-001/anat/
+├── brain.nii.gz                    # Skull-stripped brain
+├── brain_mask.nii.gz               # Brain mask
+├── bias_corrected.nii.gz           # N4 corrected
+├── segmentation/
+│   ├── pve_0.nii.gz               # CSF probability
+│   ├── pve_1.nii.gz               # GM probability
+│   └── pve_2.nii.gz               # WM probability
+├── transforms/
+│   ├── anat2mni_warp.nii.gz       # Nonlinear warp
+│   └── mni2anat_warp.nii.gz       # Inverse warp
+└── qc/
+    └── skull_strip_qc.html         # QC report
+```
+
+---
+
+### Diffusion Preprocessing
+
+Process diffusion-weighted imaging (DWI) data with optional TOPUP distortion correction.
+
+**Pipeline**:
+1. Denoising (dwidenoise)
+2. TOPUP distortion correction (optional, auto-detected)
+3. GPU-accelerated eddy current correction
+4. DTI fitting (FA, MD, AD, RD)
+5. Advanced models: DKI, NODDI (multi-shell only)
+6. AMICO acceleration (NODDI/SANDI/ActiveAx)
+7. Spatial normalization to FMRIB58_FA
+8. Quality control reports
+
+**CLI Usage**:
+```bash
+uv run python run_preprocessing.py \
+    --subject sub-001 \
+    --modality dwi \
+    --config config.yaml
+```
+
+**Python API**:
+```python
+from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
+
+results = run_dwi_multishell_topup_preprocessing(
+    config=config,
+    subject='sub-001',
+    dwi_files=[Path('b1000.nii.gz'), Path('b2000.nii.gz')],
+    bval_files=[Path('b1000.bval'), Path('b2000.bval')],
+    bvec_files=[Path('b1000.bvec'), Path('b2000.bvec')],
+    rev_phase_files=[Path('SE_EPI_PA.nii.gz')],  # Optional
+    output_dir=Path('/data/derivatives'),
+    run_advanced_models=True  # Enable DKI/NODDI
+)
+```
+
+**Advanced Models**:
+```python
+from neurovrai.preprocess.workflows.amico_models import fit_noddi_amico
+
+# AMICO-accelerated NODDI (100x faster than DIPY)
+noddi_results = fit_noddi_amico(
+    dwi_file=Path('dwi_eddy.nii.gz'),
+    bval_file=Path('dwi.bval'),
+    bvec_file=Path('dwi_rotated.bvec'),
+    mask_file=Path('dwi_mask.nii.gz'),
+    output_dir=Path('noddi_output')
+)
+# Runtime: ~30 seconds (vs 20-25 min with DIPY)
+```
+
+**Outputs**:
+```
+derivatives/sub-001/dwi/
+├── eddy_corrected.nii.gz           # Preprocessed DWI
+├── dwi_mask.nii.gz                 # Brain mask
+├── dti/
+│   ├── FA.nii.gz                   # Fractional anisotropy
+│   ├── MD.nii.gz                   # Mean diffusivity
+│   ├── AD.nii.gz                   # Axial diffusivity
+│   └── RD.nii.gz                   # Radial diffusivity
+├── dki/                            # DKI metrics (multi-shell only)
+│   ├── MK.nii.gz                   # Mean kurtosis
+│   ├── AK.nii.gz                   # Axial kurtosis
+│   └── RK.nii.gz                   # Radial kurtosis
+├── noddi/                          # NODDI metrics (multi-shell only)
+│   ├── ficvf.nii.gz               # Neurite density
+│   ├── odi.nii.gz                 # Orientation dispersion
+│   └── fiso.nii.gz                # Isotropic fraction
+└── qc/
+    ├── motion_qc.html              # Motion QC
+    └── dti_qc.html                 # DTI metrics QC
+```
+
+---
+
+### Functional Preprocessing
+
+Process resting-state or task-based fMRI data with multi-echo (TEDANA) or single-echo (ICA-AROMA) support.
+
+**Pipeline**:
+1. Motion correction (MCFLIRT)
+2. Multi-echo: TEDANA denoising OR Single-echo: ICA-AROMA
+3. ACompCor nuisance regression
+4. Bandpass filtering (0.001-0.08 Hz default)
+5. Spatial smoothing
+6. Registration to anatomical space
+7. Optional MNI normalization
+8. Quality control reports
+
+**CLI Usage**:
+```bash
+uv run python run_preprocessing.py \
+    --subject sub-001 \
+    --modality func \
+    --config config.yaml
+```
+
+**Python API**:
+```python
+from neurovrai.preprocess.workflows.func_preprocess import run_functional_preprocessing
+
+results = run_functional_preprocessing(
+    config=config,
+    subject='sub-001',
+    func_files=[Path('echo1.nii.gz'), Path('echo2.nii.gz')],  # Multi-echo
+    # OR
+    # func_files=[Path('bold.nii.gz')],  # Single-echo
+    output_dir=Path('/data/derivatives'),
+    t1w_brain=Path('derivatives/sub-001/anat/brain.nii.gz'),
+    normalize_to_mni=True
+)
+```
+
+**Outputs**:
+```
+derivatives/sub-001/func/
+├── preprocessed_bold.nii.gz        # Final preprocessed fMRI
+├── brain_mask.nii.gz               # Functional brain mask
+├── mean_bold.nii.gz                # Temporal mean
+├── tsnr.nii.gz                     # Temporal SNR map
+├── tedana/                         # Multi-echo outputs
+│   └── desc-optcom_bold.nii.gz    # Optimal combination
+└── qc/
+    ├── motion_qc.html              # Motion parameters
+    └── tsnr_qc.html                # tSNR QC
+```
+
+---
+
+### ASL Preprocessing
+
+Process arterial spin labeling (ASL) perfusion imaging.
+
+**Pipeline**:
+1. Motion correction (MCFLIRT)
+2. Label-control separation
+3. CBF quantification with kinetic modeling
+4. M0 calibration with WM reference
+5. Partial volume correction (PVC)
+6. Registration to anatomical space
+7. Optional MNI normalization
+8. Quality control reports
+
+**CLI Usage**:
+```bash
+uv run python run_preprocessing.py \
+    --subject sub-001 \
+    --modality asl \
+    --config config.yaml
+```
+
+**Python API**:
+```python
+from neurovrai.preprocess.workflows.asl_preprocess import run_asl_preprocessing
+
+results = run_asl_preprocessing(
+    config=config,
+    subject='sub-001',
+    asl_file=Path('asl.nii.gz'),
+    output_dir=Path('/data/derivatives'),
+    t1w_brain=Path('derivatives/sub-001/anat/brain.nii.gz'),
+    gm_mask=Path('derivatives/sub-001/anat/segmentation/pve_1.nii.gz'),
+    wm_mask=Path('derivatives/sub-001/anat/segmentation/pve_2.nii.gz'),
+    dicom_dir=Path('rawdata/sub-001/asl'),  # For auto parameter extraction
+    normalize_to_mni=True
+)
+```
+
+**Outputs**:
+```
+derivatives/sub-001/asl/
+├── cbf.nii.gz                      # Cerebral blood flow map
+├── cbf_pvc.nii.gz                  # PVC-corrected CBF
+├── m0.nii.gz                       # M0 calibration image
+├── cbf_stats.json                  # Tissue-specific CBF
+└── qc/
+    ├── motion_qc.html              # Motion QC
+    └── cbf_qc.html                 # CBF distributions
+```
+
+---
+
+## Group Analysis
+
+### VBM (Voxel-Based Morphometry)
+
+Analyze structural brain differences at the voxel level.
+
+**Workflow**:
+1. Prepare VBM data (normalize & smooth tissue maps)
+2. Create design matrix with neuroaider
+3. Run FSL randomise with TFCE correction
+4. Generate cluster reports with anatomical localization
+
+**CLI Usage**:
+```bash
+# Step 1: Prepare VBM data
+uv run python -c "
+from neurovrai.analysis.anat.vbm_workflow import prepare_vbm_data
+from pathlib import Path
+
+prepare_vbm_data(
+    subjects=['sub-001', 'sub-002', 'sub-003'],
+    derivatives_dir=Path('/data/derivatives'),
+    output_dir=Path('/data/analysis/vbm'),
+    tissue_type='GM',
+    smoothing_fwhm=4.0
+)
+"
+
+# Step 2: Run group analysis
+uv run python -c "
+from neurovrai.analysis.anat.vbm_workflow import run_vbm_analysis
+from pathlib import Path
+
+run_vbm_analysis(
+    vbm_dir=Path('/data/analysis/vbm/GM'),
+    participants_file=Path('/data/participants.csv'),
+    formula='age + sex + group',
+    contrasts=['age_positive', 'group_patients_vs_controls'],
+    n_permutations=5000
+)
+"
+```
+
+**Python API**:
+```python
+from neurovrai.analysis.anat.vbm_workflow import prepare_vbm_data, run_vbm_analysis
+from pathlib import Path
+
+# Prepare data
+prepare_vbm_data(
+    subjects=['sub-001', 'sub-002', 'sub-003'],
+    derivatives_dir=Path('/data/derivatives'),
+    output_dir=Path('/data/analysis/vbm'),
+    tissue_type='GM',
+    smoothing_fwhm=4.0
+)
+
+# Run analysis
+run_vbm_analysis(
+    vbm_dir=Path('/data/analysis/vbm/GM'),
+    participants_file=Path('/data/participants.csv'),
+    formula='age + sex + group',
+    contrasts=['age_positive', 'group_patients_vs_controls'],
+    n_permutations=5000
+)
+```
+
+**Outputs**:
+```
+analysis/vbm/GM/
+├── smoothed/
+│   └── sub-*_GM_smooth.nii.gz      # Smoothed tissue maps
+├── randomise_output/
+│   ├── randomise_tfce_corrp_tstat1.nii.gz  # Corrected p-values
+│   └── randomise_tstat1.nii.gz    # T-statistics
+└── cluster_reports/
+    └── age_positive_report.html    # Cluster report with atlas
+```
+
+---
+
+### TBSS (Tract-Based Spatial Statistics)
+
+White matter analysis using diffusion tensor metrics.
+
+**Workflow**:
+1. Prepare TBSS data (FA images)
+2. Run FSL TBSS pipeline (registration, skeletonization)
+3. Create design matrix
+4. Run randomise with TFCE correction
+
+**Python API**:
+```python
+from neurovrai.analysis.tbss.prepare_tbss import prepare_tbss_data
+from neurovrai.analysis.tbss.run_tbss_stats import run_tbss_statistics
+from pathlib import Path
+
+# Step 1: Prepare TBSS data
+prepare_tbss_data(
+    derivatives_dir=Path('/data/derivatives'),
+    output_dir=Path('/data/analysis/tbss'),
+    subjects=['sub-001', 'sub-002', 'sub-003']
+)
+
+# Step 2: Run statistics
+run_tbss_statistics(
+    tbss_dir=Path('/data/analysis/tbss'),
+    participants_file=Path('/data/participants.csv'),
+    formula='age + sex + group',
+    contrasts=['age_positive', 'group_patients_vs_controls'],
+    n_permutations=5000
+)
+```
+
+**Outputs**:
+```
+analysis/tbss/
+├── FA/                             # FA images
+├── stats/
+│   ├── all_FA_skeletonised.nii.gz  # Projected FA values
+│   └── mean_FA_skeleton.nii.gz     # Mean skeleton
+└── randomise_output/
+    └── randomise_tfce_corrp_tstat1.nii.gz
+```
+
+---
+
+### Resting-State fMRI Analysis
+
+Compute regional homogeneity (ReHo) and fractional amplitude of low-frequency fluctuations (fALFF).
+
+**Pipeline**:
+1. Compute ReHo (Kendall's coefficient)
+2. Compute fALFF (0.01-0.08 Hz power)
+3. Normalize to MNI space
+4. Run group statistics with randomise
+5. Generate cluster reports
+
+**Python API**:
+```python
+from neurovrai.analysis.func.resting_workflow import run_resting_state_analysis
+from neurovrai.preprocess.utils.func_normalization import normalize_func_metrics
+from neurovrai.analysis.func.run_func_group_analysis import run_func_group_analysis
+from pathlib import Path
+
+# Step 1: Compute metrics
+results = run_resting_state_analysis(
+    func_file=Path('/data/derivatives/sub-001/func/preprocessed.nii.gz'),
+    mask_file=Path('/data/derivatives/sub-001/func/brain_mask.nii.gz'),
+    output_dir=Path('/data/derivatives/sub-001/func'),
+    compute_reho=True,
+    compute_falff=True
+)
+
+# Step 2: Normalize to MNI
+normalize_func_metrics(
+    derivatives_dir=Path('/data/derivatives'),
+    metric='reho',
+    mni_template=Path('/usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz')
+)
+
+# Step 3: Group analysis
+run_func_group_analysis(
+    metric='reho',
+    derivatives_dir=Path('/data/derivatives'),
+    analysis_dir=Path('/data/analysis'),
+    participants_file=Path('/data/participants.tsv'),
+    study_name='my_study',
+    n_permutations=5000
+)
+```
+
+**Outputs**:
+```
+derivatives/sub-001/func/
+├── reho.nii.gz                     # ReHo map
+├── reho_z.nii.gz                   # Z-scored ReHo
+├── falff.nii.gz                    # fALFF map
+└── falff_z.nii.gz                  # Z-scored fALFF
+
+analysis/func/reho/my_study/
+├── randomise_output/
+│   └── randomise_tfce_corrp_tstat1.nii.gz
+└── cluster_reports/
+    └── age_positive_report.html
+```
+
+---
+
+### MELODIC (Group ICA)
+
+Group-level independent component analysis.
+
+**Python API**:
+```python
+from neurovrai.analysis.func.melodic import run_melodic_group_analysis
+from pathlib import Path
+
+run_melodic_group_analysis(
+    derivatives_dir=Path('/data/derivatives'),
+    output_dir=Path('/data/analysis/melodic'),
+    subjects=['sub-001', 'sub-002', 'sub-003'],
+    expected_tr=2.0,
+    n_components=20,  # Or None for automatic estimation
+    tr_tolerance=0.01
+)
+```
+
+**Outputs**:
+```
+analysis/melodic/
+├── melodic_IC.nii.gz               # Independent components
+├── melodic_mix                     # Time courses
+└── report.html                     # HTML report
+```
+
+---
+
+## Connectome Analysis
+
+### ROI Extraction
+
+Extract regional data from atlas parcellations (modality-agnostic).
+
+**Python API**:
+```python
+from neurovrai.connectome import extract_roi_timeseries, extract_roi_values
+from pathlib import Path
+
+# Extract functional timeseries
+timeseries, roi_names = extract_roi_timeseries(
+    data_file=Path('preprocessed_bold.nii.gz'),
+    atlas=Path('schaefer_400.nii.gz'),
+    mask_file=Path('brain_mask.nii.gz'),
+    min_voxels=10
+)
+
+# Extract structural values (FA, MD, etc.)
+roi_values, voxel_counts = extract_roi_values(
+    data_file=Path('FA.nii.gz'),
+    atlas=Path('JHU-ICBM-labels-2mm.nii.gz'),
+    statistic='mean'
+)
+```
+
+**CLI Usage**:
+```bash
+uv run python -m neurovrai.connectome.run_functional_connectivity \
+    --func-file preprocessed_bold.nii.gz \
+    --atlas schaefer_400.nii.gz \
+    --output-dir fc_output/
+```
+
+---
+
+### Functional Connectivity
+
+Compute correlation matrices from fMRI timeseries.
+
+**Python API**:
+```python
+from neurovrai.connectome import compute_functional_connectivity
+from pathlib import Path
+
+fc_results = compute_functional_connectivity(
+    timeseries=timeseries,
+    roi_names=roi_names,
+    method='pearson',  # or 'spearman', 'partial'
+    fisher_z=True,
+    threshold=0.3,
+    output_dir=Path('fc_output')
+)
+
+# Access results
+fc_matrix = fc_results['fc_matrix']  # Fisher z-transformed if fisher_z=True
+correlation = fc_results['correlation_matrix']  # Raw correlation
+```
+
+**Outputs**:
+```
+fc_output/
+├── fc_matrix.npy                   # Connectivity matrix (numpy)
+├── fc_matrix.csv                   # Connectivity matrix (CSV)
+└── fc_summary.json                 # Analysis parameters
+```
+
+---
+
+### Graph Theory Metrics
+
+Compute network topology metrics.
+
+**Python API**:
+```python
+from neurovrai.connectome import (
+    compute_node_metrics,
+    compute_global_metrics,
+    identify_hubs
+)
+
+# Node-level metrics
+node_metrics = compute_node_metrics(
+    matrix=fc_matrix,
+    threshold=0.3,
+    weighted=True,
+    roi_names=roi_names
+)
+
+print(f"Mean degree: {node_metrics['degree'].mean():.2f}")
+print(f"Mean clustering: {node_metrics['clustering_coefficient'].mean():.3f}")
+
+# Identify hub nodes
+hubs = identify_hubs(
+    node_metrics,
+    method='betweenness',  # or 'degree'
+    percentile=90
+)
+
+# Global network metrics
+global_metrics = compute_global_metrics(
+    matrix=fc_matrix,
+    threshold=0.3
+)
+
+print(f"Global efficiency: {global_metrics['global_efficiency']:.4f}")
+print(f"Path length: {global_metrics['characteristic_path_length']:.4f}")
+print(f"Transitivity: {global_metrics['transitivity']:.4f}")
+```
+
+---
+
+### Network-Based Statistic
+
+Permutation-based network-level inference for group comparisons.
+
+**Python API**:
+```python
+from neurovrai.connectome import compute_network_based_statistic
+from pathlib import Path
+
+nbs_results = compute_network_based_statistic(
+    group1_matrices,  # Shape: (n_subjects, n_rois, n_rois)
+    group2_matrices,
+    threshold=3.0,  # t-statistic threshold
+    n_permutations=5000,
+    alpha=0.05,
+    output_dir=Path('nbs_output')
+)
+
+print(f"Significant components: {nbs_results['n_significant']}")
+for i, (size, pval) in enumerate(zip(
+    nbs_results['component_sizes'],
+    nbs_results['component_pvals']
+)):
+    sig = "***" if pval < 0.001 else "**" if pval < 0.01 else "*" if pval < 0.05 else "ns"
+    print(f"Component {i+1}: {size} edges, p={pval:.4f} {sig}")
+```
+
+**Outputs**:
+```
+nbs_output/
+├── nbs_t_matrix.npy                # T-statistics
+├── nbs_null_distribution.npy       # Null distribution
+└── nbs_components.json             # Component info
+```
+
+---
 
 ## Configuration
 
-neurovrai uses a single YAML configuration file for all modules:
+### Config File Format
+
+Create a `config.yaml` file with study-specific parameters:
 
 ```yaml
-# Project paths
-project_dir: /path/to/study
-rawdata_dir: ${project_dir}/raw/bids
+# Study paths
+project_dir: /mnt/data/my_study
+rawdata_dir: ${project_dir}/rawdata
 derivatives_dir: ${project_dir}/derivatives
 work_dir: ${project_dir}/work
-qc_dir: ${project_dir}/qc
-transforms_dir: ${project_dir}/transforms
 
 # Execution
 execution:
   plugin: MultiProc
-  n_procs: 6
+  n_procs: 8
 
-# Templates
+# MNI templates
 templates:
   mni152_t1_2mm: /usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz
-  fmrib58_fa: /usr/local/fsl/data/standard/FMRIB58_FA_1mm.nii.gz
+  mni152_t1_1mm: /usr/local/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz
 
-# ============================================================
-# PREPROCESSING (neurovrai.preprocess)
-# ============================================================
-
-# Anatomical
+# Anatomical preprocessing
 anatomical:
   bet:
     frac: 0.5
     reduce_bias: true
     robust: true
-  segmentation:
-    n_iterations: 5
-    mrf_weight: 0.1
+  fast:
+    bias_iters: 1
+    bias_lowpass: 10
   registration_method: fsl  # or 'ants'
   run_qc: true
 
-# Diffusion
+# Diffusion preprocessing
 diffusion:
   denoise_method: dwidenoise
   topup:
-    readout_time: 0.05      # Adjust for your acquisition
-  eddy:
-    use_cuda: true          # GPU acceleration
-  bedpostx:
-    enabled: true           # Fiber orientation for future tractography
-    use_gpu: true
-  advanced_models:
-    fit_dki: true           # Auto-disabled for single-shell
-    fit_noddi: true
-    use_amico: true         # 100x faster NODDI
-  normalize_to_mni: true
+    readout_time: 0.05  # Check your protocol
+  eddy_config:
+    flm: linear
+    slm: linear
+    use_cuda: true  # Requires CUDA
   run_qc: true
 
-# Functional
+# Functional preprocessing
 functional:
-  tr: 1.029                 # Repetition time (seconds)
-  te: [10.0, 30.0, 50.0]   # Echo times (ms) - for multi-echo
-  highpass: 0.001           # Hz
-  lowpass: 0.08
-  fwhm: 6                   # Smoothing (mm)
+  tr: 2.0
+  te: [10.0, 30.0, 50.0]  # Multi-echo TEs
+  highpass: 0.001  # Hz
+  lowpass: 0.08    # Hz
+  fwhm: 6          # mm smoothing
   tedana:
-    enabled: true           # Auto for multi-echo
-    tedpca: 0.95           # Variance threshold
+    enabled: false  # Set true for multi-echo
+    tedpca: kundu
     tree: kundu
   aroma:
-    enabled: auto           # Auto-enabled for single-echo
+    enabled: false  # Auto-enabled for single-echo
   acompcor:
     enabled: true
     num_components: 5
-    variance_threshold: 0.5
-  normalize_to_mni: true
   run_qc: true
 
-# ASL
+# ASL preprocessing
 asl:
-  labeling_duration: 1.8    # τ (seconds) - auto-extracted from DICOM
-  post_labeling_delay: 2.0  # PLD (seconds)
-  lambda_blood: 0.9
-  t1_blood: 1.65
-  alpha: 0.85
-  wm_cbf_reference: 25.0
-  apply_pvc: true           # Partial volume correction
-  normalize_to_mni: true
+  labeling_duration: 1.8  # seconds (auto-detected from DICOM if available)
+  post_labeling_delay: 2.0  # seconds
   run_qc: true
-
-# FreeSurfer (EXPERIMENTAL - not production ready)
-freesurfer:
-  enabled: false            # Do not enable until transform pipeline complete
-  subjects_dir: ${project_dir}/freesurfer
-
-# ============================================================
-# ANALYSIS (neurovrai.analysis) - Placeholder for Phase 3
-# ============================================================
-# Configuration sections will be added in Phase 3
-
-# ============================================================
-# CONNECTOME (neurovrai.connectome) - Placeholder for Phase 4
-# ============================================================
-# Configuration sections will be added in Phase 4
 ```
 
-## Project Status
-
-### ✅ Production-Ready
-
-#### neurovrai.preprocess - Complete
-All preprocessing modalities are validated and production-ready:
-
-| Modality | Status | Key Features |
-|----------|--------|--------------|
-| **Anatomical** | ✅ Complete | N4, BET, Atropos, FNIRT, comprehensive QC |
-| **Diffusion** | ✅ Complete | TOPUP, eddy_cuda, DTI/DKI/NODDI, BEDPOSTX, MNI normalization |
-| **Functional** | ✅ Complete | TEDANA (multi-echo), ICA-AROMA (single-echo), ACompCor, MNI normalization |
-| **ASL** | ✅ Complete | M0 calibration, PVC, CBF quantification, auto DICOM params |
-| **QC Framework** | ✅ Complete | Automated QC for all modalities with HTML reports |
-
-#### neurovrai.analysis - Partially Complete
-Group-level analysis tools ready for production use:
-
-| Analysis Tool | Status | Key Features |
-|---------------|--------|--------------|
-| **neuroaider** | ✅ Complete | Design matrix generation, CSV/TSV support, subject validation |
-| **VBM** | ✅ Complete | Tissue normalization, smoothing, FSL randomise, atlas-based reporting |
-| **MELODIC** | ✅ Complete | Group ICA, temporal concatenation, automatic TR validation |
-| **TBSS** | ✅ Complete | Data preparation, FA skeleton, FSL TBSS integration |
-| **ReHo/fALFF** | ✅ Complete | Regional homogeneity, ALFF/fALFF, z-score normalization |
-
-### 🔄 Next Steps
-
-#### neurovrai.analysis - In Progress
-- **Dual Regression**: MELODIC component back-projection to subject space
-- **Seed-Based FC**: ROI-to-voxel and ROI-to-ROI functional connectivity
-- **ASL Group Analysis**: Custom randomise wrapper for perfusion studies
-- **Dynamic FC**: Sliding window functional connectivity analysis
-
-#### neurovrai.connectome - Planned (Phase 4)
-- **Structural Connectivity**: Probabilistic tractography with BEDPOSTX
-- **Connectivity Matrices**: Network construction from tractography/fMRI
-- **Graph Theory**: Network metrics (modularity, efficiency, centrality)
-- **Multi-Modal Integration**: SC-FC coupling analysis
-- **Network Visualization**: Interactive brain network plots
-
-### ⚠️ Experimental (Not Production Ready)
-
-| Feature | Status | Issue |
-|---------|--------|-------|
-| **FreeSurfer Integration** | Hooks only | Transform pipeline incomplete |
-
-**See `docs/NEUROVRAI_ARCHITECTURE.md` for detailed roadmap and implementation plan.**
-
-### Recent Milestones
-
-**2025-11-25:**
-- ✅ Analysis module architecture documented: Two-stage pipeline design (preparation + statistics)
-- ✅ Comprehensive analysis README with CLI examples for all 5 modules (VBM, TBSS, ReHo/fALFF, MELODIC, ASL)
-- ✅ Flexible subject selection (filelist or auto-discover) documented for all analysis workflows
-- ✅ ReHo/fALFF group analysis script with FSL randomise and cluster reporting
-- ✅ neuroaider package released: design matrix and contrast generation tool
-- ✅ MELODIC group ICA implementation with TR validation
-- ✅ VBM workflow with FSL randomise integration
-- ✅ Fixed MELODIC TR tolerance (50ms) to include all subjects
-
-**2025-11-24:**
-- ✅ ReHo and fALFF implementation for resting-state analysis
-- ✅ Enhanced TBSS cluster reporting with atlas localization
-
-**2025-11-17:**
-- Fixed functional run selection for scanner retries
-- Enabled ACompCor in functional pipeline
-- Package restructured to neurovrai with three-module architecture
-
-**2025-11-16:**
-- Removed tractography from preprocessing (will be in neurovrai.connectome)
-
-**2025-11-15:**
-- All preprocessing modalities production-ready
-- TEDANA 25.1.0, spatial normalization, bug fixes
-
-**2025-11-13:**
-- ASL preprocessing with M0 calibration and PVC
-- DKI/NODDI validation, functional QC enhancements
-
-**2025-11-11:**
-- AMICO integration (100x NODDI speedup)
-- Multi-echo TEDANA integration
-
-## Processing Time Estimates
-
-Typical times on modern workstation with GPU:
-
-| Modality | Time | Configuration |
-|----------|------|---------------|
-| Anatomical | 15-30 min | N4, BET, Atropos, FNIRT |
-| DWI (basic) | 30-60 min | TOPUP, eddy_cuda, DTI |
-| DWI (full) | 45-90 min | + DKI/NODDI (DIPY) |
-| DWI (AMICO) | 30-45 min | NODDI in 30 sec (not 25 min) |
-| Functional (single) | 20-40 min | Motion, ICA-AROMA, ACompCor |
-| Functional (multi) | 2-4 hours | + TEDANA (1-2 hours) |
-| ASL | 15-30 min | Motion, CBF, M0 calibration |
-
-**Optimization tips:**
-- Enable GPU acceleration for eddy and BEDPOSTX
-- Use AMICO for NODDI (100x speedup)
-- Run modalities in parallel after anatomical completes
-- Use `--parallel-modalities` flag for maximum throughput
-
-## Advanced Usage
-
-### Transform Registry
-
-Efficient spatial transformation reuse across workflows:
+### Load Configuration
 
 ```python
-from neurovrai.utils.transforms import create_transform_registry
+from neurovrai.preprocess.config import load_config
+from pathlib import Path
 
-# Create registry
-registry = create_transform_registry(config, subject='sub-001')
+config = load_config(Path('config.yaml'))
 
-# Anatomical workflow saves transforms
-registry.save_nonlinear_transform(
-    warp_file='T1w_to_MNI_warp.nii.gz',
-    affine_file='T1w_to_MNI.mat',
-    source_space='T1w',
-    target_space='MNI152',
-    subject='sub-001'
+# Access values
+project_dir = Path(config['project_dir'])
+n_procs = config['execution']['n_procs']
+```
+
+---
+
+## Examples
+
+### Complete Workflows
+
+**1. Full preprocessing workflow**:
+```python
+from pathlib import Path
+from neurovrai.preprocess.config import load_config
+from neurovrai.preprocess.workflows import (
+    run_anatomical_preprocessing,
+    run_dwi_multishell_topup_preprocessing,
+    run_functional_preprocessing,
+    run_asl_preprocessing
 )
 
-# DWI workflow retrieves transforms (zero redundant computation)
-warp, affine = registry.get_nonlinear_transform('T1w', 'MNI152')
+config = load_config(Path('config.yaml'))
+subject = 'sub-001'
+derivatives = Path(config['derivatives_dir'])
+
+# Anatomical
+anat_results = run_anatomical_preprocessing(
+    config=config,
+    subject=subject,
+    t1w_file=Path(f'rawdata/{subject}/anat/T1w.nii.gz'),
+    output_dir=derivatives
+)
+
+# Diffusion
+dwi_results = run_dwi_multishell_topup_preprocessing(
+    config=config,
+    subject=subject,
+    dwi_files=[Path(f'rawdata/{subject}/dwi/dwi.nii.gz')],
+    bval_files=[Path(f'rawdata/{subject}/dwi/dwi.bval')],
+    bvec_files=[Path(f'rawdata/{subject}/dwi/dwi.bvec')],
+    rev_phase_files=[Path(f'rawdata/{subject}/dwi/dwi_PA.nii.gz')],
+    output_dir=derivatives
+)
+
+# Functional
+func_results = run_functional_preprocessing(
+    config=config,
+    subject=subject,
+    func_files=[Path(f'rawdata/{subject}/func/bold.nii.gz')],
+    output_dir=derivatives,
+    t1w_brain=derivatives / subject / 'anat' / 'brain.nii.gz'
+)
 ```
 
-### Batch Processing
+**2. Complete connectome analysis**:
+
+See `examples/connectome_complete_workflow.py` for a full demonstration including:
+- ROI extraction
+- Functional connectivity
+- Group analysis
+- Graph theory metrics
+- Network-Based Statistic
+- Visualizations
 
 ```bash
-# Sequential processing
-for subject in sub-001 sub-002 sub-003; do
-  uv run python run_simple_pipeline.py \
-    --subject ${subject} \
-    --nifti-dir /study/bids/${subject} \
-    --config config.yaml
-done
-
-# Parallel processing with GNU Parallel
-cat subjects.txt | parallel -j 4 \
-  uv run python run_simple_pipeline.py \
-    --subject {} \
-    --nifti-dir /study/bids/{} \
-    --config config.yaml
+uv run python examples/connectome_complete_workflow.py
 ```
 
-### Custom Workflows
+---
 
-```python
-from nipype import Workflow, Node
-from nipype.interfaces import fsl
-from neurovrai.config import load_config
-from neurovrai.utils.workflow import setup_logging, get_execution_config
+## Performance
 
-# Load config
-config = load_config('config.yaml')
+### GPU Acceleration
 
-# Create custom workflow
-wf = Workflow(name='custom_analysis')
-wf.base_dir = config['work_dir']
+**Eddy correction** (CUDA required):
+- CPU: ~45 minutes per subject
+- GPU: ~4 minutes per subject (10x speedup)
 
-# Add processing nodes
-bet = Node(fsl.BET(frac=0.5, mask=True), name='brain_extraction')
-# ... add more nodes
+**AMICO models**:
+- NODDI: 30 seconds (vs 20-25 min DIPY, 100x speedup)
+- SANDI: 3-6 minutes
+- ActiveAx: 3-6 minutes
 
-# Execute
-wf.run(**get_execution_config(config))
-```
+### Recommended Hardware
 
-## Troubleshooting
+- **CPU**: 8+ cores for parallel processing
+- **RAM**: 32+ GB for large datasets
+- **GPU**: NVIDIA CUDA-compatible for eddy/BEDPOSTX
+- **Storage**: Fast SSD for work directory
 
-### Import Errors
+---
 
-```bash
-# Ensure neurovrai is installed
-uv run python -c "import neurovrai; print(neurovrai.__version__)"
-# Should output: 2.0.0-alpha
+## Quality Control
 
-# If import fails, reinstall
-uv sync
-```
+All preprocessing workflows generate automated QC reports:
 
-### FSL Not Found
+**Anatomical QC**:
+- Skull stripping quality
+- Tissue segmentation
+- Registration to MNI
 
-```bash
-# Check FSL installation
-echo $FSLDIR
-# Should output: /usr/local/fsl
+**Diffusion QC**:
+- Motion parameters (eddy)
+- TOPUP correction quality
+- DTI metrics distributions
+- Skull stripping quality
 
-# Source FSL configuration
-source ${FSLDIR}/etc/fslconf/fsl.sh
-```
+**Functional QC**:
+- Motion parameters (MCFLIRT)
+- Temporal SNR (tSNR)
+- DVARS
+- Skull stripping quality
 
-### CUDA/GPU Issues
+**ASL QC**:
+- Motion parameters
+- CBF distributions
+- Temporal SNR
+- Skull stripping quality
 
-```bash
-# Check CUDA availability
-nvidia-smi
+QC reports are saved as HTML files in `derivatives/{subject}/{modality}/qc/`.
 
-# Verify GPU support in FSL
-eddy_cuda --help
-```
-
-### Memory Issues
-
-Reduce parallel processes in `config.yaml`:
-
-```yaml
-execution:
-  n_procs: 2  # Reduce from 6 to 2
-```
-
-### TEDANA Convergence Issues
-
-If TEDANA ICA fails to converge, adjust PCA threshold:
-
-```yaml
-functional:
-  tedana:
-    tedpca: 225  # Use fixed component count instead of variance threshold
-```
-
-## Documentation
-
-- **`README.md`** (this file): Overview and quick start
-- **`docs/NEUROVRAI_ARCHITECTURE.md`**: Three-part architecture and roadmap
-- **`docs/workflows.md`**: Detailed workflow documentation
-- **`docs/DWI_PROCESSING_GUIDE.md`**: DWI-specific guide
-- **`PROJECT_STATUS.md`**: Detailed implementation status
-- **`CLAUDE.md`**: Development guidelines (for AI assistants)
-
-## Contributing
-
-Contributions welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+---
 
 ## Citation
 
 If you use neurovrai in your research, please cite:
 
-```bibtex
-@software{neurovrai,
-  title={neurovrai: Comprehensive MRI Preprocessing and Analysis Package},
-  author={Edmond, Alexandre},
-  year={2025},
-  version={2.0.0-alpha},
-  url={https://github.com/alexedmon1/neurovrai}
-}
-```
+**Network-Based Statistic**:
+- Zalesky A, Fornito A, Bullmore ET (2010). Network-based statistic: identifying differences in brain networks. NeuroImage, 53(4):1197-1207.
 
-## License
+**Graph Theory**:
+- Rubinov M, Sporns O (2010). Complex network measures of brain connectivity: uses and interpretations. NeuroImage, 52(3):1059-1069.
 
-MIT License - see LICENSE file for details.
+**TEDANA**:
+- DuPre E, et al. (2021). TE-dependent analysis of multi-echo fMRI with tedana. JOSS, 6(66):3669.
 
-## Acknowledgments
-
-- Built with [Nipype](https://nipype.readthedocs.io/) workflow engine
-- Uses [FSL](https://fsl.fmrib.ox.ac.uk/) for neuroimaging processing
-- Uses [ANTs](http://stnava.github.io/ANTs/) for advanced registration
-- [DIPY](https://dipy.org/) for advanced diffusion models
-- [AMICO](https://github.com/daducci/AMICO) for accelerated microstructure modeling
-- [TEDANA](https://tedana.readthedocs.io/) for multi-echo fMRI denoising
-- Inspired by [fMRIPrep](https://fmriprep.org/) and [QSIPrep](https://qsiprep.readthedocs.io/)
-
-## Support
-
-- **GitHub Issues**: https://github.com/alexedmon1/neurovrai/issues
-- **Documentation**: https://github.com/alexedmon1/neurovrai
+**FSL**:
+- Jenkinson M, et al. (2012). FSL. NeuroImage, 62(2):782-790.
 
 ---
 
-**neurovrai** - *True neuroimaging for the modern age* 🧠
+## Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Submit a pull request
+
+---
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+---
+
+## Support
+
+- **Issues**: https://github.com/alexedmon1/neurovrai/issues
+- **Documentation**: See module-specific READMEs:
+  - `neurovrai/connectome/README.md`
+  - `neurovrai/analysis/README.md` (coming soon)
+
+---
+
+## Acknowledgments
+
+Built with:
+- **FSL** - FMRIB Software Library
+- **ANTs** - Advanced Normalization Tools
+- **Nipype** - Neuroimaging workflow engine
+- **TEDANA** - Multi-echo fMRI analysis
+- **DIPY** - Diffusion imaging in Python
+- **AMICO** - Accelerated microstructure imaging
+- **NetworkX** - Graph theory analysis
