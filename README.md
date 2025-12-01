@@ -15,8 +15,8 @@ From raw DICOM to group statistics and network neuroscience - a complete, produc
 ```
 neurovrai/
 ├── preprocess/    ✅ Production-Ready - Subject-level preprocessing
-├── analysis/      🔄 Planned (Phase 3) - Group-level statistics
-└── connectome/    🔄 Planned (Phase 4) - Connectivity & networks
+├── analysis/      ✅ Partially Production-Ready - Group-level statistics
+└── connectome/    ✅ Production-Ready - Connectivity & networks
 ```
 
 ### neurovrai.preprocess - **Production-Ready** ✅
@@ -185,19 +185,86 @@ generate_func_reports(
 
 #### **Planned Features**
 - Dual regression for MELODIC components
-- Seed-based functional connectivity
 - Custom randomise wrapper for ASL group analysis
 - Dynamic functional connectivity (sliding window)
-- Structural connectivity (probabilistic tractography)
 
-### neurovrai.connectome - Planned (Phase 4)
+### neurovrai.connectome - **Production-Ready** ✅
 
-Connectivity and network neuroscience:
-- Structural connectivity (probabilistic tractography)
-- Functional connectivity matrices
-- Graph theory metrics
-- Network visualization
+Complete brain connectivity and network neuroscience analysis:
+
+**ROI Extraction**:
+- Modality-agnostic extraction from atlas parcellations
+- Support for discrete (3D) and probabilistic (4D) atlases
+- Timeseries extraction from functional data
+- Statistical extraction from structural maps (FA, MD, GM density)
+
+**Functional Connectivity**:
+- Pearson, Spearman, and partial correlation matrices
+- Fisher z-transformation for group statistics
+- Seed-based connectivity analysis
+- Matrix thresholding and sparsification
+
+**Group-Level Analysis**:
+- Group averaging with consistency filtering
+- Statistical comparison with FDR correction
+- **Network-Based Statistic (NBS)** - permutation-based network inference
+- Subject filtering by demographics
+
+**Graph Theory Metrics**:
+- Node metrics: degree, strength, clustering, betweenness centrality
+- Global metrics: efficiency, path length, transitivity
+- Hub identification
+- Small-world analysis
+
+**Visualization**:
+- Connectivity matrix heatmaps with clustering
+- Circular connectograms
+- Group comparison plots
+- Publication-ready figures
+
+**Usage**:
+```python
+from neurovrai.connectome import (
+    extract_roi_timeseries,
+    compute_functional_connectivity,
+    compute_group_difference,
+    compute_network_based_statistic,
+    compute_node_metrics,
+    plot_connectivity_matrix
+)
+
+# Extract ROI timeseries
+timeseries, roi_names = extract_roi_timeseries(
+    data_file='preprocessed_bold.nii.gz',
+    atlas='schaefer_400.nii.gz'
+)
+
+# Compute connectivity matrix
+fc_results = compute_functional_connectivity(
+    timeseries=timeseries,
+    roi_names=roi_names,
+    method='pearson',
+    fisher_z=True
+)
+
+# Group comparison with NBS
+nbs_results = compute_network_based_statistic(
+    group1_matrices,
+    group2_matrices,
+    threshold=3.0,
+    n_permutations=5000
+)
+
+# Graph theory metrics
+node_metrics = compute_node_metrics(fc_matrix, threshold=0.3, weighted=True)
+```
+
+See `examples/connectome_complete_workflow.py` for a complete end-to-end demonstration.
+
+#### **Planned Features**
+- Structural connectivity (probabilistic tractography with probtrackx2)
 - Multi-modal integration (SC-FC coupling)
+- Community detection algorithms
 
 ## Key Features
 
