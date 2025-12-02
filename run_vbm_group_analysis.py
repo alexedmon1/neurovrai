@@ -125,7 +125,11 @@ Examples:
     study_root = args.study_root.resolve()
     derivatives_dir = study_root / 'derivatives'
     analysis_dir = study_root / 'analysis'
-    participants_file = analysis_dir / 'participants_synthetic.tsv'
+
+    # Try to use design-matched participants file first, fall back to synthetic
+    participants_file = study_root / 'data' / 'designs' / 'vbm' / 'participants_matched.tsv'
+    if not participants_file.exists():
+        participants_file = analysis_dir / 'participants_synthetic.tsv'
 
     # Setup logging
     log_file = Path('logs') / f'vbm_group_analysis_{args.tissue.lower()}.log'
@@ -157,9 +161,15 @@ Examples:
     subjects = []
     for subject_dir in sorted(derivatives_dir.glob('IRC805-*/anat')):
         subject_id = subject_dir.parent.name
-        # Check for required files (brain-warped GM map)
-        gm_mni = subject_dir / 'segmentation' / 'pve_1_mni.nii.gz'
-        if gm_mni.exists():
+        seg_dir = subject_dir / 'segmentation'
+        if not seg_dir.exists():
+            continue
+
+        # Check for GM probability map (FAST or Atropos)
+        gm_fast = seg_dir / 'pve_1.nii.gz'
+        gm_atropos = seg_dir / 'POSTERIOR_02.nii.gz'
+
+        if gm_fast.exists() or gm_atropos.exists():
             subjects.append(subject_id)
 
     if not subjects:
@@ -169,6 +179,24 @@ Examples:
         sys.exit(1)
 
     logger.info(f"\nFound {len(subjects)} subjects with anatomical data")
+
+    # Filter subjects to only those in the participants file
+    participants_df = pd.read_csv(participants_file, sep='\t')
+    available_participant_ids = set(participants_df['participant_id'].values)
+
+    subjects_in_design = [s for s in subjects if s in available_participant_ids]
+    excluded_subjects = [s for s in subjects if s not in available_participant_ids]
+
+    if excluded_subjects:
+        logger.info(f"\nExcluding {len(excluded_subjects)} subjects not in design:")
+        for s in excluded_subjects:
+            logger.info(f"  - {s}")
+
+    if not subjects_in_design:
+        logger.error("No subjects match the participants file!")
+        sys.exit(1)
+
+    logger.info(f"\nUsing {len(subjects_in_design)} subjects that match design matrix")
 
     try:
         # Step 1: Prepare VBM data
@@ -180,7 +208,7 @@ Examples:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         prep_results = prepare_vbm_data(
-            subjects=subjects,
+            subjects=subjects_in_design,
             derivatives_dir=derivatives_dir,
             output_dir=output_dir,
             tissue_type=args.tissue,
@@ -199,19 +227,16 @@ Examples:
         logger.info("=" * 80)
 
         # Define contrasts
-        # For a design with: [intercept, age, sex, group]
-        # You may need to adjust these based on your actual design matrix
+        # For a design with: [intercept, mriglu, sex, age]
         contrasts = {
-            'age_positive': [0, 1, 0, 0],
-            'age_negative': [0, -1, 0, 0],
-            'group_positive': [0, 0, 0, 1],
-            'group_negative': [0, 0, 0, -1]
+            'group2_gt_group1': [0, 1, 0, 0],
+            'group1_gt_group2': [0, -1, 0, 0]
         }
 
         analysis_results = run_vbm_analysis(
-            vbm_dir=Path(prep_results['output_dir']),
+            vbm_dir=output_dir,
             participants_file=participants_file,
-            formula='age + sex + group',
+            formula='mriglu + sex + age',
             contrasts=contrasts,
             method=args.method,
             n_permutations=args.n_permutations,

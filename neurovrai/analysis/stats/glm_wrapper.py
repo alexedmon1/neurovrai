@@ -196,95 +196,119 @@ def run_fsl_glm(
     for contrast in contrasts:
         logging.info(f"  {contrast['index']}: {contrast['name']}")
 
-    # Build fsl_glm command
-    # fsl_glm outputs: cope (parameter estimates), varcope (variance), zstat, tstat
-    output_basename = output_dir / "glm"
-
-    cmd = [
-        'fsl_glm',
-        '-i', str(input_file),
-        '-d', str(design_mat),
-        '-c', str(contrast_con),
-        '-o', str(output_basename) + '_pe.nii.gz',  # Parameter estimates
-        '--out_z', str(output_basename) + '_zstat.nii.gz',  # Z-statistics
-        '--out_t', str(output_basename) + '_tstat.nii.gz',  # T-statistics
-        '--out_cope', str(output_basename) + '_cope.nii.gz',  # Contrast of parameter estimates
-        '--out_varcb', str(output_basename) + '_varcope.nii.gz',  # Variance
-    ]
-
-    # Add mask if provided
-    if mask is not None:
-        cmd.extend(['-m', str(mask)])
-
-    # Optional parameters
-    if demean:
-        cmd.append('--demean')
-        logging.info("Demeaning data temporally")
-
-    if variance_normalization:
-        cmd.append('--des_norm')
-        logging.info("Performing variance normalization")
-
-    # Log command
+    # Process each contrast individually
+    # fsl_glm doesn't handle multiple contrasts well, so we run it once per contrast
+    logging.info("\n" + "=" * 80)
+    logging.info("Processing contrasts individually with FSL GLM")
     logging.info("=" * 80)
-    logging.info("Executing FSL GLM")
-    logging.info("=" * 80)
-    logging.info(f"Command: {' '.join(cmd)}")
-    logging.info(f"Input: {input_file}")
-    logging.info(f"Design: {design_mat}")
-    logging.info(f"Contrasts: {contrast_con}")
-    logging.info(f"Output: {output_dir}")
 
-    # Execute
     start_time = time.time()
-    log_file = output_dir / "glm.log"
+    output_files_list = []
 
-    try:
-        with open(log_file, 'w') as f:
-            result = subprocess.run(
-                cmd,
-                stdout=f,
-                stderr=subprocess.STDOUT,
-                text=True,
-                check=True
-            )
+    for contrast in contrasts:
+        contrast_idx = contrast['index']
+        contrast_name = contrast['name']
+        contrast_vector = contrast['vector']
 
-        elapsed = time.time() - start_time
-        logging.info(f"✓ FSL GLM completed in {elapsed:.1f} seconds")
+        logging.info(f"\nContrast {contrast_idx}: {contrast_name}")
+        logging.info(f"  Vector: {contrast_vector}")
 
-    except subprocess.CalledProcessError as e:
-        logging.error(f"fsl_glm failed with exit code {e.returncode}")
-        logging.error(f"Check log file: {log_file}")
-        raise GLMError(f"fsl_glm execution failed: {e}")
+        # Create temporary single-contrast file
+        temp_con_file = output_dir / f"contrast_{contrast_idx}.con"
+        with open(temp_con_file, 'w') as f:
+            f.write(f"/NumWaves {len(contrast_vector)}\n")
+            f.write("/NumContrasts 1\n")
+            f.write("/Matrix\n")
+            f.write(" ".join([f"{v:.6f}" for v in contrast_vector]) + "\n")
 
-    # Collect output files
-    output_files = {
-        'log': log_file,
-        'contrasts': contrasts,
-        'pe': output_dir / 'glm_pe.nii.gz',
-        'zstat': output_dir / 'glm_zstat.nii.gz',
-        'tstat': output_dir / 'glm_tstat.nii.gz',
-        'cope': output_dir / 'glm_cope.nii.gz',
-        'varcope': output_dir / 'glm_varcope.nii.gz',
-    }
+        # Build fsl_glm command for this contrast
+        output_basename = output_dir / f"glm_contrast{contrast_idx}"
 
-    # Check which files were actually created
-    for key in ['pe', 'zstat', 'tstat', 'cope', 'varcope']:
-        if not output_files[key].exists():
-            logging.warning(f"Expected output not found: {output_files[key]}")
+        cmd = [
+            'fsl_glm',
+            '-i', str(input_file),
+            '-d', str(design_mat),
+            '-c', str(temp_con_file),
+            '-o', str(output_basename) + '_pe.nii.gz',
+            '--out_z', str(output_basename) + '_zstat.nii.gz',
+            '--out_t', str(output_basename) + '_tstat.nii.gz',
+            '--out_cope', str(output_basename) + '_cope.nii.gz',
+            '--out_varcb', str(output_basename) + '_varcope.nii.gz',
+        ]
 
-    logging.info("\nOutput files:")
-    for key, file_path in output_files.items():
-        if key != 'contrasts' and isinstance(file_path, Path):
-            exists = "✓" if file_path.exists() else "✗"
-            logging.info(f"  {exists} {key}: {file_path.name}")
+        # Add mask if provided
+        if mask is not None:
+            cmd.extend(['-m', str(mask)])
 
+        # Optional parameters
+        if demean:
+            cmd.append('--demean')
+
+        if variance_normalization:
+            cmd.append('--des_norm')
+
+        # Execute
+        contrast_log = output_dir / f"glm_contrast{contrast_idx}.log"
+
+        try:
+            with open(contrast_log, 'w') as f:
+                result = subprocess.run(
+                    cmd,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    check=True
+                )
+
+            logging.info(f"  ✓ Contrast {contrast_idx} complete")
+
+            # Collect output files for this contrast
+            # fsl_glm creates files with the exact names we specified
+            output_files_list.append({
+                'contrast_index': contrast_idx,
+                'contrast_name': contrast_name,
+                'pe': Path(str(output_basename) + '_pe.nii.gz'),
+                'zstat': Path(str(output_basename) + '_zstat.nii.gz'),
+                'tstat': Path(str(output_basename) + '_tstat.nii.gz'),
+                'cope': Path(str(output_basename) + '_cope.nii.gz'),
+                'varcope': Path(str(output_basename) + '_varcope.nii.gz'),
+                'log': contrast_log
+            })
+
+        except subprocess.CalledProcessError as e:
+            logging.error(f"  ✗ Contrast {contrast_idx} failed with exit code {e.returncode}")
+            logging.error(f"  Check log: {contrast_log}")
+            raise GLMError(f"fsl_glm failed for contrast {contrast_idx} ({contrast_name}): {e}")
+
+    elapsed = time.time() - start_time
+    logging.info(f"\n✓ All {len(contrasts)} contrasts completed in {elapsed:.1f} seconds")
+
+    # Create summary log
+    summary_log = output_dir / "glm_summary.log"
+    with open(summary_log, 'w') as f:
+        f.write("FSL GLM Summary\n")
+        f.write("=" * 80 + "\n")
+        f.write(f"Input: {input_file}\n")
+        f.write(f"Design: {design_mat}\n")
+        f.write(f"Contrasts: {len(contrasts)}\n")
+        f.write(f"Elapsed: {elapsed:.1f} seconds\n\n")
+        for files in output_files_list:
+            f.write(f"Contrast {files['contrast_index']}: {files['contrast_name']}\n")
+            for key in ['zstat', 'tstat', 'cope']:
+                exists = "✓" if files[key].exists() else "✗"
+                f.write(f"  {exists} {key}: {files[key].name}\n")
+
+    # Return results with first contrast's zstat as the primary output
+    # (for compatibility with code expecting single zstat file)
     return {
         'success': True,
         'elapsed_time': elapsed,
         'output_dir': str(output_dir),
-        'output_files': {k: str(v) if isinstance(v, Path) else v
-                         for k, v in output_files.items()}
+        'output_files': {
+            'contrasts': contrasts,
+            'zstat': str(output_files_list[0]['zstat']) if output_files_list else None,
+            'all_contrasts': output_files_list
+        }
     }
 
 

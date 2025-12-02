@@ -17,10 +17,13 @@ The computed transformations are saved and reused by other workflows
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Any
+import shutil
 
 from nipype import Workflow, Node, MapNode
 from nipype.interfaces import fsl, ants, utility as niu
 from nipype.interfaces.io import DataSink
+import nibabel as nib
+import numpy as np
 
 from neurovrai.utils.workflow import (
     setup_logging,
@@ -31,6 +34,121 @@ from neurovrai.utils.workflow import (
     validate_inputs
 )
 from neurovrai.utils.transforms import TransformRegistry
+
+
+def standardize_atropos_tissues(
+    derivatives_dir: Path,
+    use_symlinks: bool = True
+) -> bool:
+    """
+    Standardize Atropos tissue posterior names after segmentation.
+
+    Atropos with K-means initialization produces POSTERIOR files in arbitrary order.
+    This function identifies tissues based on mean T1w intensity and creates
+    standardized symlinks: csf.nii.gz, gm.nii.gz, wm.nii.gz
+
+    Parameters
+    ----------
+    derivatives_dir : Path
+        Subject derivatives directory (contains anat/segmentation/)
+    use_symlinks : bool
+        If True, create symlinks; if False, copy files
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        seg_dir = derivatives_dir / 'segmentation'
+        if not seg_dir.exists():
+            logger.warning(f"Segmentation directory not found: {seg_dir}")
+            return False
+
+        # Check if already standardized
+        existing = [seg_dir / f'{tissue}.nii.gz' for tissue in ['csf', 'gm', 'wm']]
+        if all(f.exists() for f in existing):
+            logger.info("Tissues already standardized")
+            return True
+
+        # Find T1w brain for intensity-based identification
+        t1w_brain_candidates = [
+            derivatives_dir / 'brain.nii.gz',
+            derivatives_dir / 'T1w_brain.nii.gz',
+        ]
+
+        # Also check in brain/ subdirectory (Nipype DataSink structure)
+        brain_dir = derivatives_dir / 'brain'
+        if brain_dir.exists():
+            brain_files = list(brain_dir.glob('*brain.nii.gz'))
+            t1w_brain_candidates.extend(brain_files)
+
+        # Use the first one that exists
+        t1w_brain = None
+        for candidate in t1w_brain_candidates:
+            if candidate and candidate.exists():
+                t1w_brain = candidate
+                break
+
+        if t1w_brain is None:
+            logger.warning("T1w brain not found for tissue identification")
+            return False
+
+        # Load T1w image
+        logger.info(f"Identifying Atropos tissues using {t1w_brain.name}...")
+        t1w_img = nib.load(str(t1w_brain))
+        t1w_data = t1w_img.get_fdata()
+
+        # Load all posteriors and calculate mean T1w intensity
+        posteriors = {}
+        for post_file in sorted(seg_dir.glob('POSTERIOR_*.nii.gz')):
+            post_img = nib.load(str(post_file))
+            post_data = post_img.get_fdata()
+
+            # Calculate weighted mean intensity
+            masked_intensity = t1w_data * post_data
+            mean_intensity = np.sum(masked_intensity) / (np.sum(post_data) + 1e-10)
+            posteriors[post_file] = mean_intensity
+
+        if len(posteriors) < 3:
+            logger.warning(f"Found only {len(posteriors)} posteriors, need 3")
+            return False
+
+        # Sort by intensity (CSF=lowest, GM=middle, WM=highest)
+        sorted_posteriors = sorted(posteriors.items(), key=lambda x: x[1])
+
+        tissue_map = {
+            'csf': sorted_posteriors[0][0],  # Lowest intensity
+            'gm': sorted_posteriors[1][0],   # Middle intensity
+            'wm': sorted_posteriors[2][0]    # Highest intensity
+        }
+
+        # Log identification
+        for tissue, post_file in tissue_map.items():
+            intensity = posteriors[post_file]
+            logger.info(f"  {tissue.upper():3s} -> {post_file.name} (intensity: {intensity:.2f})")
+
+        # Create standardized files
+        for tissue, source_file in tissue_map.items():
+            target_file = seg_dir / f'{tissue}.nii.gz'
+
+            if use_symlinks:
+                # Create relative symlink
+                rel_source = source_file.relative_to(seg_dir)
+                target_file.symlink_to(rel_source)
+                logger.info(f"  Created symlink: {target_file.name} -> {source_file.name}")
+            else:
+                # Copy file
+                shutil.copy2(str(source_file), str(target_file))
+                logger.info(f"  Copied: {source_file.name} -> {target_file.name}")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to standardize Atropos tissues: {e}")
+        return False
 
 
 def create_reorient_node(name: str = 'reorient') -> Node:
@@ -715,6 +833,14 @@ def run_anat_preprocessing(
     # Run workflow
     wf.run(**exec_config)
 
+    # Standardize Atropos tissue names (if using Atropos)
+    # This creates csf.nii.gz, gm.nii.gz, wm.nii.gz symlinks based on intensity
+    seg_dir = derivatives_dir / 'segmentation'
+    if seg_dir.exists() and list(seg_dir.glob('POSTERIOR_*.nii.gz')):
+        logger = logging.getLogger(__name__)
+        logger.info("Standardizing Atropos tissue names...")
+        standardize_atropos_tissues(derivatives_dir, use_symlinks=True)
+
     # Collect outputs
     # Find output files in derivatives directory
     # Handle both old (anat/anat/) and new (anat/) hierarchy
@@ -732,10 +858,15 @@ def run_anat_preprocessing(
         'brain': list(derivatives_dir.glob('**/brain/*.nii.gz'))[0] if list(derivatives_dir.glob('**/brain/*.nii.gz')) else None,
         'brain_mask': list(derivatives_dir.glob('**/mask/*.nii.gz'))[0] if list(derivatives_dir.glob('**/mask/*.nii.gz')) else None,
         'bias_corrected': list(derivatives_dir.glob('**/bias_corrected/*.nii.gz'))[0] if list(derivatives_dir.glob('**/bias_corrected/*.nii.gz')) else None,
-        # Atropos outputs: POSTERIOR_01.nii.gz (CSF), POSTERIOR_02.nii.gz (GM), POSTERIOR_03.nii.gz (WM)
-        'csf_prob': list(derivatives_dir.glob('**/segmentation/POSTERIOR_01.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_01.nii.gz')) else None,
-        'gm_prob': list(derivatives_dir.glob('**/segmentation/POSTERIOR_02.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_02.nii.gz')) else None,
-        'wm_prob': list(derivatives_dir.glob('**/segmentation/POSTERIOR_03.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_03.nii.gz')) else None,
+        # Tissue segmentation: Prefer standardized names (csf.nii.gz, gm.nii.gz, wm.nii.gz)
+        # Fall back to POSTERIOR_*.nii.gz if standardized names don't exist
+        # NOTE: Atropos with K-means produces POSTERIOR files in RANDOM order - don't assume ordering!
+        'csf_prob': (list(derivatives_dir.glob('**/segmentation/csf.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/csf.nii.gz')) else
+                     list(derivatives_dir.glob('**/segmentation/POSTERIOR_01.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_01.nii.gz')) else None),
+        'gm_prob': (list(derivatives_dir.glob('**/segmentation/gm.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/gm.nii.gz')) else
+                    list(derivatives_dir.glob('**/segmentation/POSTERIOR_02.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_02.nii.gz')) else None),
+        'wm_prob': (list(derivatives_dir.glob('**/segmentation/wm.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/wm.nii.gz')) else
+                    list(derivatives_dir.glob('**/segmentation/POSTERIOR_03.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_03.nii.gz')) else None),
         'tissue_class_map': list(derivatives_dir.glob('**/segmentation/*labeled.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/*labeled.nii.gz')) else None,
         # For FSL: look for .mat and warp.nii.gz
         # For ANTs: look for .h5 composite transform

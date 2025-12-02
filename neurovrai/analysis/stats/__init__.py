@@ -3,6 +3,7 @@ Statistical Analysis Module
 
 Provides tools for group-level statistical analysis including:
 - Design matrix generation from participant data
+- Design matrix matching with available MRI data
 - FSL randomise wrapper (nonparametric permutation testing)
 - FSL GLM wrapper (parametric analysis)
 - Cluster extraction and reporting
@@ -13,6 +14,13 @@ from neurovrai.analysis.stats.design_matrix import (
     create_design_matrix,
     create_contrast_matrix,
     load_participants
+)
+
+from neurovrai.analysis.stats.design_matrix_matching import (
+    filter_design_matrix_by_subjects,
+    discover_subjects_for_analysis,
+    validate_design_data_match,
+    create_matched_design_for_analysis
 )
 
 from neurovrai.analysis.stats.randomise_wrapper import (
@@ -33,6 +41,11 @@ __all__ = [
     'create_design_matrix',
     'create_contrast_matrix',
     'load_participants',
+    # Design matrix matching functions
+    'filter_design_matrix_by_subjects',
+    'discover_subjects_for_analysis',
+    'validate_design_data_match',
+    'create_matched_design_for_analysis',
     # Randomise functions
     'run_randomise',
     'summarize_results',

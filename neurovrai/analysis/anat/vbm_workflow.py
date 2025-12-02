@@ -76,6 +76,70 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def identify_atropos_tissue(
+    seg_dir: Path,
+    t1w_file: Path,
+    tissue_type: str
+) -> Optional[Path]:
+    """
+    Identify which Atropos POSTERIOR file corresponds to the requested tissue type.
+
+    Atropos with K-means initialization produces posteriors in arbitrary order.
+    This function identifies tissues based on mean intensity in the original T1w image:
+    - CSF: lowest intensity
+    - GM: intermediate intensity
+    - WM: highest intensity
+
+    Args:
+        seg_dir: Segmentation directory with POSTERIOR_*.nii.gz files
+        t1w_file: Original T1w brain image
+        tissue_type: Requested tissue ('GM', 'WM', or 'CSF')
+
+    Returns:
+        Path to the correct POSTERIOR file, or None if identification fails
+    """
+    try:
+        # Load T1w image
+        t1w_img = nib.load(t1w_file)
+        t1w_data = t1w_img.get_fdata()
+
+        # Load all posteriors and calculate mean T1w intensity
+        posteriors = {}
+        for post_file in sorted(seg_dir.glob('POSTERIOR_*.nii.gz')):
+            post_img = nib.load(post_file)
+            post_data = post_img.get_fdata()
+
+            # Calculate weighted mean intensity (posterior probability * T1w intensity)
+            masked_intensity = t1w_data * post_data
+            mean_intensity = np.sum(masked_intensity) / (np.sum(post_data) + 1e-10)
+
+            posteriors[post_file] = mean_intensity
+
+        # Sort by mean intensity
+        sorted_posteriors = sorted(posteriors.items(), key=lambda x: x[1])
+
+        # Assign tissue types (CSF=lowest, GM=middle, WM=highest)
+        if len(sorted_posteriors) >= 3:
+            tissue_map = {
+                'CSF': sorted_posteriors[0][0],  # Lowest intensity
+                'GM': sorted_posteriors[1][0],   # Middle intensity
+                'WM': sorted_posteriors[2][0]    # Highest intensity
+            }
+
+            logger.debug(f"Identified tissues in {seg_dir.name}:")
+            for tissue, post_file in tissue_map.items():
+                intensity = posteriors[post_file]
+                logger.debug(f"  {tissue}: {post_file.name} (intensity: {intensity:.2f})")
+
+            return tissue_map.get(tissue_type)
+
+    except Exception as e:
+        logger.warning(f"Failed to identify Atropos tissues: {e}")
+        return None
+
+    return None
+
+
 def normalize_tissue_map(
     tissue_file: Path,
     reference: Path,
@@ -231,17 +295,20 @@ def prepare_vbm_data(
     logger.info("")
 
     # Map tissue type to segmentation file
-    # Support both FSL FAST (pve_*.nii.gz) and ANTs Atropos (POSTERIOR_*.nii.gz) naming
+    # Support:
+    # 1. Standardized names (from standardize_atropos_tissues.py)
+    # 2. FSL FAST (pve_*.nii.gz) - fixed ordering
+    # 3. ANTs Atropos (POSTERIOR_*.nii.gz) - requires auto-identification
+    tissue_map_standard = {
+        'GM': 'gm.nii.gz',
+        'WM': 'wm.nii.gz',
+        'CSF': 'csf.nii.gz'
+    }
+
     tissue_map_fast = {
         'GM': 'pve_1.nii.gz',  # Grey matter
         'WM': 'pve_2.nii.gz',  # White matter
         'CSF': 'pve_0.nii.gz'  # CSF
-    }
-
-    tissue_map_atropos = {
-        'GM': 'POSTERIOR_02.nii.gz',  # Grey matter (tissue class 2)
-        'WM': 'POSTERIOR_03.nii.gz',  # White matter (tissue class 3)
-        'CSF': 'POSTERIOR_01.nii.gz'  # CSF (tissue class 1)
     }
 
     if tissue_type not in tissue_map_fast:
@@ -264,20 +331,48 @@ def prepare_vbm_data(
 
         try:
             # Locate tissue probability map from anatomical preprocessing
-            # Try both FSL FAST and ANTs Atropos naming conventions
-            tissue_file_fast = derivatives_dir / subject / 'anat' / 'segmentation' / tissue_map_fast[tissue_type]
-            tissue_file_atropos = derivatives_dir / subject / 'anat' / 'segmentation' / tissue_map_atropos[tissue_type]
+            # Try in order of preference: standardized names, FAST, Atropos
+            seg_dir = derivatives_dir / subject / 'anat' / 'segmentation'
+            tissue_file = None
 
-            if tissue_file_fast.exists():
-                tissue_file = tissue_file_fast
+            # 1. Try standardized naming (gm.nii.gz, wm.nii.gz, csf.nii.gz)
+            tissue_file_standard = seg_dir / tissue_map_standard[tissue_type]
+            if tissue_file_standard.exists():
+                tissue_file = tissue_file_standard
+                logger.info(f"  Found tissue file (standardized): {tissue_file.name}")
+
+            # 2. Try FSL FAST (has fixed ordering: pve_0=CSF, pve_1=GM, pve_2=WM)
+            elif (seg_dir / tissue_map_fast[tissue_type]).exists():
+                tissue_file = seg_dir / tissue_map_fast[tissue_type]
                 logger.info(f"  Found tissue file (FAST): {tissue_file.name}")
-            elif tissue_file_atropos.exists():
-                tissue_file = tissue_file_atropos
-                logger.info(f"  Found tissue file (Atropos): {tissue_file.name}")
-            else:
-                logger.warning(f"  ✗ Tissue file not found (tried both FAST and Atropos naming)")
+
+            # 3. Try Atropos with automatic tissue identification
+            elif seg_dir.exists() and any(seg_dir.glob('POSTERIOR_*.nii.gz')):
+                # Find the original T1w brain file for intensity-based identification
+                t1w_brain = derivatives_dir / subject / 'anat' / 'brain.nii.gz'
+                if not t1w_brain.exists():
+                    # Try alternative naming
+                    t1w_brain = derivatives_dir / subject / 'anat' / 'T1w_brain.nii.gz'
+
+                if t1w_brain.exists():
+                    logger.info(f"  Identifying Atropos tissue posteriors...")
+                    tissue_file = identify_atropos_tissue(seg_dir, t1w_brain, tissue_type)
+
+                    if tissue_file and tissue_file.exists():
+                        logger.info(f"  Found tissue file (Atropos): {tissue_file.name}")
+                    else:
+                        logger.warning(f"  ✗ Could not identify {tissue_type} posterior in Atropos output")
+                        missing_subjects.append(subject)
+                        continue
+                else:
+                    logger.warning(f"  ✗ T1w brain file not found for tissue identification: {t1w_brain}")
+                    missing_subjects.append(subject)
+                    continue
+
+            if tissue_file is None or not tissue_file.exists():
+                logger.warning(f"  ✗ Tissue file not found (tried both FAST and Atropos)")
                 logger.warning(f"    FAST: {tissue_file_fast}")
-                logger.warning(f"    Atropos: {tissue_file_atropos}")
+                logger.warning(f"    Atropos: {seg_dir / 'POSTERIOR_*.nii.gz'}")
                 missing_subjects.append(subject)
                 continue
 
@@ -598,22 +693,67 @@ def run_vbm_analysis(
 
         logger.info(f"✓ GLM complete: {glm_dir}")
 
-        # Threshold GLM results
+        # Threshold GLM results for each contrast
         threshold_dir = glm_dir / 'thresholded'
-        threshold_result = threshold_zstat(
-            zstat_file=Path(glm_result['output_files']['zstat']),
-            output_dir=threshold_dir,
-            z_threshold=z_threshold,
-            cluster_threshold=10,
-            mask=mask_file
-        )
+        threshold_dir.mkdir(exist_ok=True)
+
+        all_contrasts = glm_result['output_files'].get('all_contrasts', [])
+
+        logger.info(f"\nThresholding {len(all_contrasts)} contrasts at z > {z_threshold}")
+
+        for contrast_files in all_contrasts:
+            contrast_idx = contrast_files['contrast_index']
+            contrast_name = contrast_files['contrast_name']
+            zstat_file = Path(contrast_files['zstat'])
+
+            if not zstat_file.exists():
+                logger.warning(f"  ✗ Z-stat file not found for contrast {contrast_idx}: {zstat_file}")
+                continue
+
+            logger.info(f"  Contrast {contrast_idx} ({contrast_name})")
+
+            contrast_threshold_dir = threshold_dir / f"contrast{contrast_idx}"
+            contrast_threshold_dir.mkdir(exist_ok=True)
+
+            try:
+                threshold_result = threshold_zstat(
+                    zstat_file=zstat_file,
+                    output_dir=contrast_threshold_dir,
+                    z_threshold=z_threshold,
+                    cluster_threshold=10,
+                    mask=mask_file
+                )
+                logger.info(f"    ✓ Thresholded and saved to {contrast_threshold_dir.name}")
+            except Exception as e:
+                logger.warning(f"    ✗ Thresholding failed: {e}")
 
         # Summarize GLM results
-        glm_summary = summarize_glm_results(
-            output_dir=glm_dir,
-            contrast_names=contrast_names,
-            z_threshold=z_threshold
-        )
+        logger.info("\nSummarizing GLM results...")
+        glm_summary = {
+            'n_contrasts': len(all_contrasts),
+            'z_threshold': z_threshold,
+            'contrasts': []
+        }
+
+        for contrast_files in all_contrasts:
+            contrast_idx = contrast_files['contrast_index']
+            contrast_name = contrast_files['contrast_name']
+            zstat_file = Path(contrast_files['zstat'])
+
+            if zstat_file.exists():
+                glm_summary['contrasts'].append({
+                    'index': contrast_idx,
+                    'name': contrast_name,
+                    'zstat': str(zstat_file)
+                })
+
+        # Save summary
+        summary_file = glm_dir / 'glm_analysis_summary.json'
+        import json
+        with open(summary_file, 'w') as f:
+            json.dump(glm_summary, f, indent=2)
+
+        logger.info(f"✓ GLM summary saved: {summary_file}")
 
     # Generate cluster reports for randomise results (if available)
     cluster_results = {}
