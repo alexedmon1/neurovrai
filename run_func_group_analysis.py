@@ -17,7 +17,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 
 from neurovrai.analysis.stats.randomise_wrapper import run_randomise, summarize_results
-from neurovrai.analysis.stats.glm_wrapper import run_fsl_glm, threshold_zstat, summarize_glm_results
+from neurovrai.analysis.stats.nilearn_glm import run_second_level_glm, summarize_glm_results
 
 
 def setup_logging(log_file: Path):
@@ -320,41 +320,69 @@ def run_group_analysis(
 
     if method in ['glm', 'both']:
         logging.info("\n" + "=" * 80)
-        logging.info("Running FSL GLM (Parametric)")
+        logging.info("Running Nilearn GLM (Parametric)")
         logging.info("=" * 80)
 
         glm_dir = output_dir / 'glm_output'
+        glm_dir.mkdir(parents=True, exist_ok=True)
 
-        glm_result = run_fsl_glm(
-            input_file=image_4d,
-            design_mat=design_mat,
-            contrast_con=contrast_con,
-            output_dir=glm_dir,
-            mask=mask_file
-        )
+        # Read FSL design matrix and convert to pandas DataFrame
+        import nibabel as nib
+        with open(design_mat, 'r') as f:
+            lines = f.readlines()
+            # Skip header lines and read matrix
+            mat_start = [i for i, l in enumerate(lines) if '/Matrix' in l][0] + 1
+            design_data = np.loadtxt(lines[mat_start:])
 
-        # Threshold and summarize
-        threshold_dir = glm_dir / 'thresholded'
-        threshold_result = threshold_zstat(
-            zstat_file=Path(glm_result['output_files']['zstat']),
-            output_dir=threshold_dir,
-            z_threshold=z_threshold,
-            cluster_threshold=10,
-            mask=mask_file
-        )
+        design_df = pd.DataFrame(design_data, columns=['intercept', 'age', 'group'])
 
-        # Extract contrast names from design
+        # Read FSL contrasts and convert to dictionary
+        with open(contrast_con, 'r') as f:
+            lines = f.readlines()
+            mat_start = [i for i, l in enumerate(lines) if '/Matrix' in l][0] + 1
+            contrast_data = np.loadtxt(lines[mat_start:])
+
+        if contrast_data.ndim == 1:
+            contrast_data = contrast_data.reshape(1, -1)
+
         contrast_names = ['age_positive', 'age_negative', 'group1_gt_group0', 'group0_gt_group1']
-        glm_summary = summarize_glm_results(
+        contrasts_dict = {name: contrast_data[i] for i, name in enumerate(contrast_names[:len(contrast_data)])}
+
+        # Split 4D image into individual subject files
+        merged_img = nib.load(str(image_4d))
+        merged_data = merged_img.get_fdata()
+        n_subjects = merged_data.shape[-1]
+
+        subject_files = []
+        for i in range(n_subjects):
+            subject_data = merged_data[..., i]
+            subject_img = nib.Nifti1Image(subject_data, merged_img.affine, merged_img.header)
+            subject_file = glm_dir / f'subject_{i:03d}.nii.gz'
+            nib.save(subject_img, str(subject_file))
+            subject_files.append(subject_file)
+
+        # Run nilearn GLM
+        glm_result = run_second_level_glm(
+            input_files=subject_files,
+            design_matrix=design_df,
+            contrasts=contrasts_dict,
             output_dir=glm_dir,
-            contrast_names=contrast_names,
-            z_threshold=z_threshold
+            mask=mask_file,
+            smoothing_fwhm=None,
+            n_jobs=-1
+        )
+
+        # Summarize with multiple comparison corrections
+        glm_summary = summarize_glm_results(
+            glm_results=glm_result,
+            output_dir=glm_dir,
+            alpha=0.05,
+            corrections=['fdr', 'bonferroni']
         )
 
         results['glm'] = {
             'result': glm_result,
             'summary': glm_summary,
-            'threshold_result': threshold_result,
             'output_dir': glm_dir
         }
 

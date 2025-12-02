@@ -34,26 +34,29 @@ def setup_logging(log_file: Path):
 def main():
     """Main execution"""
     parser = argparse.ArgumentParser(
-        description='Run VBM group analysis with randomise (GLM currently not supported)',
+        description='Run VBM group analysis with randomise and/or nilearn GLM',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Run analysis with randomise (recommended - TFCE correction)
   python run_vbm_group_analysis.py --study-root /mnt/bytopia/IRC805
 
-  # Custom permutations
-  python run_vbm_group_analysis.py \\
-    --study-root /mnt/bytopia/IRC805 \\
-    --n-permutations 10000
+  # Run with nilearn GLM (faster, parametric statistics with FDR/Bonferroni correction)
+  python run_vbm_group_analysis.py --study-root /mnt/bytopia/IRC805 --method glm
+
+  # Run both methods for comparison
+  python run_vbm_group_analysis.py --study-root /mnt/bytopia/IRC805 --method both
 
   # Custom parameters
   python run_vbm_group_analysis.py \\
     --study-root /mnt/bytopia/IRC805 \\
+    --method both \\
     --tissue GM \\
     --smooth-fwhm 6.0 \\
     --n-permutations 10000
 
-NOTE: GLM method currently has compatibility issues with fsl_glm. Use randomise for now.
+NOTE: GLM uses nilearn's SecondLevelModel with FDR and Bonferroni correction.
+      Randomise uses FSL's permutation testing with TFCE correction (more robust).
         """
     )
 

@@ -70,7 +70,7 @@ from nipype.interfaces.utility import IdentityInterface, Function
 
 from neurovrai.analysis.stats.design_matrix import create_design_matrix
 from neurovrai.analysis.stats.randomise_wrapper import run_randomise
-from neurovrai.analysis.stats.glm_wrapper import run_fsl_glm, threshold_zstat, summarize_glm_results
+from neurovrai.analysis.stats.nilearn_glm import run_second_level_glm, summarize_glm_results
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -677,82 +677,50 @@ def run_vbm_analysis(
 
     if method in ['glm', 'both']:
         logger.info("\n" + "=" * 80)
-        logger.info("RUNNING GLM (Parametric)")
+        logger.info("RUNNING GLM (Nilearn SecondLevelModel)")
         logger.info("=" * 80)
 
         glm_dir = stats_dir / 'glm_output'
         glm_dir.mkdir(exist_ok=True)
 
-        glm_result = run_fsl_glm(
-            input_file=merged_file,
-            design_mat=design_mat_file,
-            contrast_con=design_con_file,
+        # Split 4D merged file into individual 3D subject files
+        merged_img = nib.load(str(merged_file))
+        merged_data = merged_img.get_fdata()
+        n_subjects = merged_data.shape[-1]
+
+        subject_files = []
+        for i in range(n_subjects):
+            subject_data = merged_data[..., i]
+            subject_img = nib.Nifti1Image(subject_data, merged_img.affine, merged_img.header)
+            subject_file = glm_dir / f'subject_{i:03d}.nii.gz'
+            nib.save(subject_img, str(subject_file))
+            subject_files.append(subject_file)
+
+        logger.info(f"Split merged file into {len(subject_files)} subject maps")
+
+        # Create design matrix DataFrame for nilearn
+        design_df = pd.DataFrame(design_mat, columns=column_names)
+
+        # Run nilearn GLM
+        glm_result = run_second_level_glm(
+            input_files=subject_files,
+            design_matrix=design_df,
+            contrasts=contrasts,
+            output_dir=glm_dir,
             mask=mask_file,
-            output_dir=glm_dir
+            smoothing_fwhm=None,  # Already smoothed
+            n_jobs=-1
+        )
+
+        # Summarize with multiple comparison corrections
+        glm_summary = summarize_glm_results(
+            glm_results=glm_result,
+            output_dir=glm_dir,
+            alpha=0.05,
+            corrections=['fdr', 'bonferroni']
         )
 
         logger.info(f"✓ GLM complete: {glm_dir}")
-
-        # Threshold GLM results for each contrast
-        threshold_dir = glm_dir / 'thresholded'
-        threshold_dir.mkdir(exist_ok=True)
-
-        all_contrasts = glm_result['output_files'].get('all_contrasts', [])
-
-        logger.info(f"\nThresholding {len(all_contrasts)} contrasts at z > {z_threshold}")
-
-        for contrast_files in all_contrasts:
-            contrast_idx = contrast_files['contrast_index']
-            contrast_name = contrast_files['contrast_name']
-            zstat_file = Path(contrast_files['zstat'])
-
-            if not zstat_file.exists():
-                logger.warning(f"  ✗ Z-stat file not found for contrast {contrast_idx}: {zstat_file}")
-                continue
-
-            logger.info(f"  Contrast {contrast_idx} ({contrast_name})")
-
-            contrast_threshold_dir = threshold_dir / f"contrast{contrast_idx}"
-            contrast_threshold_dir.mkdir(exist_ok=True)
-
-            try:
-                threshold_result = threshold_zstat(
-                    zstat_file=zstat_file,
-                    output_dir=contrast_threshold_dir,
-                    z_threshold=z_threshold,
-                    cluster_threshold=10,
-                    mask=mask_file
-                )
-                logger.info(f"    ✓ Thresholded and saved to {contrast_threshold_dir.name}")
-            except Exception as e:
-                logger.warning(f"    ✗ Thresholding failed: {e}")
-
-        # Summarize GLM results
-        logger.info("\nSummarizing GLM results...")
-        glm_summary = {
-            'n_contrasts': len(all_contrasts),
-            'z_threshold': z_threshold,
-            'contrasts': []
-        }
-
-        for contrast_files in all_contrasts:
-            contrast_idx = contrast_files['contrast_index']
-            contrast_name = contrast_files['contrast_name']
-            zstat_file = Path(contrast_files['zstat'])
-
-            if zstat_file.exists():
-                glm_summary['contrasts'].append({
-                    'index': contrast_idx,
-                    'name': contrast_name,
-                    'zstat': str(zstat_file)
-                })
-
-        # Save summary
-        summary_file = glm_dir / 'glm_analysis_summary.json'
-        with open(summary_file, 'w') as f:
-            json.dump(glm_summary, f, indent=2)
-
-        logger.info(f"✓ GLM summary saved: {summary_file}")
 
     # Generate cluster reports for randomise results (if available)
     cluster_results = {}
