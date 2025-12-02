@@ -5,7 +5,7 @@ Provides tools for group-level statistical analysis including:
 - Design matrix generation from participant data
 - Design matrix matching with available MRI data
 - FSL randomise wrapper (nonparametric permutation testing)
-- FSL GLM wrapper (parametric analysis)
+- Nilearn GLM wrapper (parametric analysis with Python)
 - Cluster extraction and reporting
 """
 
@@ -29,9 +29,9 @@ from neurovrai.analysis.stats.randomise_wrapper import (
     get_significant_voxels
 )
 
-from neurovrai.analysis.stats.glm_wrapper import (
-    run_fsl_glm,
-    threshold_zstat,
+from neurovrai.analysis.stats.nilearn_glm import (
+    run_second_level_glm,
+    apply_multiple_comparison_correction,
     summarize_glm_results
 )
 
@@ -50,8 +50,8 @@ __all__ = [
     'run_randomise',
     'summarize_results',
     'get_significant_voxels',
-    # GLM functions
-    'run_fsl_glm',
-    'threshold_zstat',
+    # Nilearn GLM functions
+    'run_second_level_glm',
+    'apply_multiple_comparison_correction',
     'summarize_glm_results',
 ]

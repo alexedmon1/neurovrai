@@ -21,7 +21,7 @@ neurovrai/
 - 🚀 **Multi-Modal**: Anatomical, diffusion, functional, ASL preprocessing
 - ⚡ **GPU Accelerated**: CUDA support for eddy, BEDPOSTX (10-50x speedup)
 - 🧠 **Advanced Models**: DKI, NODDI with AMICO acceleration (100x faster)
-- 📊 **Group Statistics**: VBM, TBSS, resting-state metrics with FSL randomise
+- 📊 **Group Statistics**: VBM, TBSS, resting-state metrics with FSL randomise or nilearn GLM
 - 🌐 **Network Analysis**: Connectivity matrices, graph theory, NBS
 - 🎯 **Config-Driven**: YAML configuration for reproducible workflows
 - 🔍 **Quality Control**: Automated QC with HTML reports for all modalities
@@ -464,7 +464,9 @@ Analyze structural brain differences at the voxel level.
 **Workflow**:
 1. Prepare VBM data (normalize & smooth tissue maps)
 2. Create design matrix with neuroaider
-3. Run FSL randomise with TFCE correction
+3. Run statistical analysis:
+   - **FSL randomise**: Nonparametric permutation testing with TFCE correction (recommended for robustness)
+   - **nilearn GLM**: Parametric second-level GLM with FDR/Bonferroni correction (faster, pure Python)
 4. Generate cluster reports with anatomical localization
 
 **CLI Usage**:
@@ -484,18 +486,25 @@ prepare_vbm_data(
 "
 
 # Step 2: Run group analysis
-uv run python -c "
-from neurovrai.analysis.anat.vbm_workflow import run_vbm_analysis
-from pathlib import Path
+# Option A: FSL randomise (nonparametric, TFCE correction)
+uv run python run_vbm_group_analysis.py \
+    --study-root /data \
+    --method randomise \
+    --tissue GM \
+    --n-permutations 5000
 
-run_vbm_analysis(
-    vbm_dir=Path('/data/analysis/vbm/GM'),
-    participants_file=Path('/data/participants.csv'),
-    formula='age + sex + group',
-    contrasts=['age_positive', 'group_patients_vs_controls'],
-    n_permutations=5000
-)
-"
+# Option B: nilearn GLM (parametric, FDR/Bonferroni correction)
+uv run python run_vbm_group_analysis.py \
+    --study-root /data \
+    --method glm \
+    --tissue GM \
+    --z-threshold 2.3
+
+# Option C: Both methods for comparison
+uv run python run_vbm_group_analysis.py \
+    --study-root /data \
+    --method both \
+    --tissue GM
 ```
 
 **Python API**:
@@ -512,13 +521,24 @@ prepare_vbm_data(
     smoothing_fwhm=4.0
 )
 
-# Run analysis
+# Run analysis with FSL randomise
 run_vbm_analysis(
     vbm_dir=Path('/data/analysis/vbm/GM'),
     participants_file=Path('/data/participants.csv'),
     formula='age + sex + group',
-    contrasts=['age_positive', 'group_patients_vs_controls'],
+    contrasts={'age_positive': [0, 1, 0, 0]},
+    method='randomise',
     n_permutations=5000
+)
+
+# Or with nilearn GLM (faster, parametric)
+run_vbm_analysis(
+    vbm_dir=Path('/data/analysis/vbm/GM'),
+    participants_file=Path('/data/participants.csv'),
+    formula='age + sex + group',
+    contrasts={'age_positive': [0, 1, 0, 0]},
+    method='glm',
+    z_threshold=2.3
 )
 ```
 
@@ -527,9 +547,15 @@ run_vbm_analysis(
 analysis/vbm/GM/
 ├── smoothed/
 │   └── sub-*_GM_smooth.nii.gz      # Smoothed tissue maps
-├── randomise_output/
-│   ├── randomise_tfce_corrp_tstat1.nii.gz  # Corrected p-values
+├── randomise_output/               # FSL randomise results (if method='randomise')
+│   ├── randomise_tfce_corrp_tstat1.nii.gz  # Corrected p-values (TFCE)
 │   └── randomise_tstat1.nii.gz    # T-statistics
+├── glm_output/                     # nilearn GLM results (if method='glm')
+│   ├── contrast_name_z_map.nii.gz # Z-statistic maps
+│   ├── contrast_name_t_map.nii.gz # T-statistic maps
+│   ├── contrast_name_effect.nii.gz # Effect size maps
+│   ├── fdr_corrected/              # FDR correction results
+│   └── bonferroni_corrected/       # Bonferroni correction results
 └── cluster_reports/
     └── age_positive_report.html    # Cluster report with atlas
 ```
@@ -590,7 +616,7 @@ Compute regional homogeneity (ReHo) and fractional amplitude of low-frequency fl
 1. Compute ReHo (Kendall's coefficient)
 2. Compute fALFF (0.01-0.08 Hz power)
 3. Normalize to MNI space
-4. Run group statistics with randomise
+4. Run group statistics (FSL randomise or nilearn GLM)
 5. Generate cluster reports
 
 **Python API**:
