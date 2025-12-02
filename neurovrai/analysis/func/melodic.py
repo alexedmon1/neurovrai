@@ -9,8 +9,10 @@ Features:
 - Automatic subject data collection and validation
 - Temporal concatenation or tensor ICA
 - Automated dimensionality estimation or fixed dimensions
-- Optional dual regression for subject-specific networks
 - QC reports with component visualizations
+
+For subject-specific networks, use dual regression after MELODIC:
+    from neurovrai.analysis.func.dual_regression import run_dual_regression
 
 Usage:
     python melodic.py --subjects-file subjects.txt --output-dir /study/analysis/melodic
@@ -24,6 +26,13 @@ Or from Python:
         mask_file=Path('/usr/local/fsl/data/standard/MNI152_T1_2mm_brain_mask.nii.gz'),
         tr=1.029,
         n_components=20  # or 'auto' for automatic estimation
+    )
+
+    # Then run dual regression for subject-specific maps
+    dr_results = run_dual_regression(
+        group_ic_maps=results['melodic_ic'],
+        subject_files=subject_files,
+        output_dir=Path('/study/analysis/dual_regression')
     )
 """
 

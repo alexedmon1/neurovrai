@@ -70,6 +70,7 @@ from nipype.interfaces.utility import IdentityInterface, Function
 
 from neurovrai.analysis.stats.design_matrix import create_design_matrix
 from neurovrai.analysis.stats.randomise_wrapper import run_randomise
+from neurovrai.analysis.stats.glm_wrapper import run_fsl_glm, threshold_zstat, summarize_glm_results
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -416,9 +417,11 @@ def run_vbm_analysis(
     participants_file: Path,
     formula: str,
     contrasts: Dict[str, List[float]],
+    method: str = 'randomise',
     n_permutations: int = 5000,
     tfce: bool = True,
-    cluster_threshold: float = 0.95
+    cluster_threshold: float = 0.95,
+    z_threshold: float = 2.3
 ) -> Dict:
     """
     Run group-level VBM statistical analysis
@@ -430,9 +433,11 @@ def run_vbm_analysis(
         formula: Design formula (e.g., 'age + sex')
         contrasts: Dictionary of contrast names to contrast vectors
                   e.g., {'age_positive': [1, 0, 0], 'age_negative': [-1, 0, 0]}
+        method: Statistical method ('randomise', 'glm', or 'both')
         n_permutations: Number of permutations for randomise
-        tfce: Use Threshold-Free Cluster Enhancement
-        cluster_threshold: Cluster significance threshold (default: 0.95 = p<0.05)
+        tfce: Use Threshold-Free Cluster Enhancement (randomise only)
+        cluster_threshold: Cluster significance threshold (default: 0.95 = p<0.05 for randomise)
+        z_threshold: Z-score threshold for GLM (default: 2.3 ≈ p<0.01)
 
     Returns:
         Dictionary with analysis results
@@ -440,9 +445,14 @@ def run_vbm_analysis(
     Outputs:
         {vbm_dir}/stats/
             design.mat, design.con - Design matrix and contrasts
-            randomise_output/ - Statistical maps from randomise
+            randomise_output/ - Statistical maps from randomise (if method='randomise' or 'both')
+            glm_output/ - Statistical maps from GLM (if method='glm' or 'both')
             cluster_reports/ - Cluster tables and visualizations
     """
+    # Validate method
+    valid_methods = ['randomise', 'glm', 'both']
+    if method not in valid_methods:
+        raise ValueError(f"Invalid method '{method}'. Must be one of: {valid_methods}")
     vbm_dir = Path(vbm_dir)
     stats_dir = vbm_dir / 'stats'
     stats_dir.mkdir(exist_ok=True)
@@ -545,67 +555,108 @@ def run_vbm_analysis(
         f.write('\n'.join(contrast_names))
     logger.info(f"✓ Saved: {contrast_names_file}")
 
-    # Run randomise
-    logger.info("\n" + "=" * 80)
-    logger.info("RUNNING RANDOMISE")
-    logger.info("=" * 80)
+    # Initialize results
+    randomise_result = None
+    glm_result = None
 
-    randomise_dir = stats_dir / 'randomise_output'
-    randomise_dir.mkdir(exist_ok=True)
+    # Run statistical analysis (randomise and/or GLM)
+    if method in ['randomise', 'both']:
+        logger.info("\n" + "=" * 80)
+        logger.info("RUNNING RANDOMISE (Nonparametric)")
+        logger.info("=" * 80)
 
-    randomise_result = run_randomise(
-        input_file=merged_file,
-        design_mat=design_mat_file,
-        contrast_con=design_con_file,
-        mask=mask_file,
-        output_dir=randomise_dir,
-        n_permutations=n_permutations,
-        tfce=tfce
-    )
+        randomise_dir = stats_dir / 'randomise_output'
+        randomise_dir.mkdir(exist_ok=True)
 
-    logger.info(f"✓ Randomise complete: {randomise_dir}")
+        randomise_result = run_randomise(
+            input_file=merged_file,
+            design_mat=design_mat_file,
+            contrast_con=design_con_file,
+            mask=mask_file,
+            output_dir=randomise_dir,
+            n_permutations=n_permutations,
+            tfce=tfce
+        )
 
-    # Generate cluster reports for each contrast
-    logger.info("\n" + "=" * 80)
-    logger.info("GENERATING CLUSTER REPORTS")
-    logger.info("=" * 80)
+        logger.info(f"✓ Randomise complete: {randomise_dir}")
 
-    cluster_reports_dir = stats_dir / 'cluster_reports'
-    cluster_reports_dir.mkdir(exist_ok=True)
+    if method in ['glm', 'both']:
+        logger.info("\n" + "=" * 80)
+        logger.info("RUNNING GLM (Parametric)")
+        logger.info("=" * 80)
 
-    # Import enhanced cluster reporting (with atlas localization)
-    from neurovrai.analysis.stats.enhanced_cluster_report import create_enhanced_cluster_report
+        glm_dir = stats_dir / 'glm_output'
+        glm_dir.mkdir(exist_ok=True)
 
+        glm_result = run_fsl_glm(
+            input_file=merged_file,
+            design_mat=design_mat_file,
+            contrast_con=design_con_file,
+            mask=mask_file,
+            output_dir=glm_dir
+        )
+
+        logger.info(f"✓ GLM complete: {glm_dir}")
+
+        # Threshold GLM results
+        threshold_dir = glm_dir / 'thresholded'
+        threshold_result = threshold_zstat(
+            zstat_file=Path(glm_result['output_files']['zstat']),
+            output_dir=threshold_dir,
+            z_threshold=z_threshold,
+            cluster_threshold=10,
+            mask=mask_file
+        )
+
+        # Summarize GLM results
+        glm_summary = summarize_glm_results(
+            output_dir=glm_dir,
+            contrast_names=contrast_names,
+            z_threshold=z_threshold
+        )
+
+    # Generate cluster reports for randomise results (if available)
     cluster_results = {}
 
-    for idx, contrast_name in enumerate(contrasts.keys(), start=1):
-        logger.info(f"\nProcessing contrast: {contrast_name}")
+    if randomise_result:
+        logger.info("\n" + "=" * 80)
+        logger.info("GENERATING CLUSTER REPORTS (Randomise)")
+        logger.info("=" * 80)
 
-        # Find corresponding statistical maps
-        stat_map = randomise_dir / f"randomise_tstat{idx}.nii.gz"
-        corrp_map = randomise_dir / f"randomise_tfce_corrp_tstat{idx}.nii.gz"
+        cluster_reports_dir = stats_dir / 'cluster_reports_randomise'
+        cluster_reports_dir.mkdir(exist_ok=True)
 
-        if not stat_map.exists() or not corrp_map.exists():
-            logger.warning(f"  Statistical maps not found for {contrast_name}")
-            continue
+        # Import enhanced cluster reporting (with atlas localization)
+        from neurovrai.analysis.stats.enhanced_cluster_report import create_enhanced_cluster_report
 
-        # Create enhanced cluster report with visualization
-        try:
-            report = create_enhanced_cluster_report(
-                stat_map=stat_map,
-                corrp_map=corrp_map,
-                threshold=1.0 - cluster_threshold,  # Convert to p-value (e.g., 0.95 -> 0.05)
-                output_dir=cluster_reports_dir,
-                contrast_name=contrast_name,
-                max_clusters=10,  # Top 10 clusters
-                liberal_threshold=0.7,  # p<0.3 for exploratory view
-                background_image=None  # Will use MNI152 T1 template
-            )
-            cluster_results[contrast_name] = report
-            logger.info(f"  ✓ Report: {report.get('report_html', 'N/A')}")
+        for idx, contrast_name in enumerate(contrasts.keys(), start=1):
+            logger.info(f"\nProcessing contrast: {contrast_name}")
 
-        except Exception as e:
-            logger.error(f"  ✗ Failed to create report: {e}", exc_info=True)
+            # Find corresponding statistical maps
+            stat_map = randomise_dir / f"randomise_tstat{idx}.nii.gz"
+            corrp_map = randomise_dir / f"randomise_tfce_corrp_tstat{idx}.nii.gz"
+
+            if not stat_map.exists() or not corrp_map.exists():
+                logger.warning(f"  Statistical maps not found for {contrast_name}")
+                continue
+
+            # Create enhanced cluster report with visualization
+            try:
+                report = create_enhanced_cluster_report(
+                    stat_map=stat_map,
+                    corrp_map=corrp_map,
+                    threshold=1.0 - cluster_threshold,  # Convert to p-value (e.g., 0.95 -> 0.05)
+                    output_dir=cluster_reports_dir,
+                    contrast_name=contrast_name,
+                    max_clusters=10,  # Top 10 clusters
+                    liberal_threshold=0.7,  # p<0.3 for exploratory view
+                    background_image=None  # Will use MNI152 T1 template
+                )
+                cluster_results[contrast_name] = report
+                logger.info(f"  ✓ Report: {report.get('report_html', 'N/A')}")
+
+            except Exception as e:
+                logger.error(f"  ✗ Failed to create report: {e}", exc_info=True)
 
     # Save results summary
     results = {
@@ -615,23 +666,45 @@ def run_vbm_analysis(
         'tissue_type': vbm_info['tissue_type'],
         'formula': formula,
         'contrasts': list(contrasts.keys()),
-        'n_permutations': n_permutations,
-        'tfce': tfce,
-        'design_matrix': design_result['design_mat'],
-        'randomise_dir': str(randomise_dir),
-        'cluster_reports': {k: v['report_file'] for k, v in cluster_results.items()}
+        'method': method,
+        'design_matrix': str(design_mat_file),
+        'design_contrasts': str(design_con_file)
     }
+
+    # Add method-specific results
+    if randomise_result:
+        results.update({
+            'n_permutations': n_permutations,
+            'tfce': tfce,
+            'randomise_dir': str(randomise_dir),
+            'cluster_reports': {k: v['report_html'] for k, v in cluster_results.items()} if cluster_results else {}
+        })
+
+    if glm_result:
+        results.update({
+            'z_threshold': z_threshold,
+            'glm_dir': str(glm_dir),
+            'glm_summary': glm_summary
+        })
 
     results_file = stats_dir / 'vbm_results.json'
     with open(results_file, 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(results, f, indent=2, default=str)
 
     logger.info("\n" + "=" * 80)
     logger.info("VBM ANALYSIS COMPLETE")
     logger.info("=" * 80)
     logger.info(f"Results: {results_file}")
-    logger.info(f"Statistical maps: {randomise_dir}")
-    logger.info(f"Cluster reports: {cluster_reports_dir}")
+
+    if randomise_result:
+        logger.info(f"Randomise output: {randomise_dir}")
+        if cluster_results:
+            logger.info(f"Cluster reports (randomise): {cluster_reports_dir}")
+
+    if glm_result:
+        logger.info(f"GLM output: {glm_dir}")
+        logger.info(f"  ✓ {len([c for c in glm_summary['contrasts'] if c['significant']])} / {len(glm_summary['contrasts'])} significant contrasts (z > {z_threshold})")
+
     logger.info(f"Log: {log_file}")
     logger.info("=" * 80 + "\n")
 
@@ -712,15 +785,28 @@ if __name__ == '__main__':
         help='Comma-separated contrast names (e.g., "age_positive,age_negative")'
     )
     analyze_parser.add_argument(
+        '--method',
+        type=str,
+        choices=['randomise', 'glm', 'both'],
+        default='randomise',
+        help='Statistical method (default: randomise)'
+    )
+    analyze_parser.add_argument(
         '--n-permutations',
         type=int,
         default=5000,
-        help='Number of permutations (default: 5000)'
+        help='Number of permutations for randomise (default: 5000)'
     )
     analyze_parser.add_argument(
         '--no-tfce',
         action='store_true',
-        help='Disable TFCE correction'
+        help='Disable TFCE correction (randomise only)'
+    )
+    analyze_parser.add_argument(
+        '--z-threshold',
+        type=float,
+        default=2.3,
+        help='Z-score threshold for GLM (default: 2.3, approx p<0.01)'
     )
 
     args = parser.parse_args()
@@ -763,8 +849,10 @@ if __name__ == '__main__':
             participants_file=args.participants,
             formula=args.design,
             contrasts=contrasts,
+            method=args.method,
             n_permutations=args.n_permutations,
-            tfce=not args.no_tfce
+            tfce=not args.no_tfce,
+            z_threshold=args.z_threshold
         )
 
         print("\n" + "=" * 80)

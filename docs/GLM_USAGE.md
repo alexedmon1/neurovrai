@@ -277,19 +277,98 @@ python -m neurovrai.analysis.tbss.run_tbss_stats \
     --min-cluster-size <int>       # Min voxels per cluster (default: 10)
 ```
 
-### Functional Group Analysis
-
-Modify `run_func_group_analysis.py`:
-
-```python
-# Line 395: Choose method
-method = 'glm'  # or 'randomise' or 'both'
-```
-
-Then run:
+### Functional Group Analysis (ReHo/fALFF)
 
 ```bash
-python run_func_group_analysis.py
+# Run with GLM only (fast, exploratory)
+python run_func_group_analysis.py  # Edit line 395: method = 'glm'
+
+# Or modify the script to support command-line arguments:
+# The run_group_analysis() function supports method parameter:
+# method='glm', method='randomise', or method='both'
+```
+
+**Python API**:
+
+```python
+from pathlib import Path
+from neurovrai.analysis.func.run_group_analysis import run_group_analysis
+
+results = run_group_analysis(
+    metric='reho',  # or 'falff'
+    derivatives_dir=Path('/study/derivatives'),
+    analysis_dir=Path('/study/analysis'),
+    participants_file=Path('/study/participants.tsv'),
+    study_name='my_analysis',
+    method='both',  # 'randomise', 'glm', or 'both'
+    n_permutations=5000,
+    z_threshold=2.3
+)
+```
+
+### VBM Group Analysis
+
+```bash
+# Run VBM analysis with GLM only (fast)
+python run_vbm_group_analysis.py \
+    --study-root /study \
+    --method glm \
+    --tissue GM
+
+# Run with both methods for comparison
+python run_vbm_group_analysis.py \
+    --study-root /study \
+    --method both \
+    --tissue GM \
+    --smooth-fwhm 4.0 \
+    --n-permutations 5000 \
+    --z-threshold 2.3
+
+# Full options
+python run_vbm_group_analysis.py \
+    --study-root /study \
+    --tissue GM \
+    --smooth-fwhm 4.0 \
+    --modulate \
+    --method both \
+    --n-permutations 5000 \
+    --z-threshold 2.3 \
+    --cluster-threshold 0.95 \
+    --study-name my_vbm_analysis
+```
+
+**Python API**:
+
+```python
+from pathlib import Path
+from neurovrai.analysis.anat.vbm_workflow import prepare_vbm_data, run_vbm_analysis
+
+# Step 1: Prepare VBM data
+prep_results = prepare_vbm_data(
+    subjects=['sub-001', 'sub-002'],
+    derivatives_dir=Path('/study/derivatives'),
+    output_dir=Path('/study/analysis/vbm'),
+    tissue_type='GM',
+    smooth_fwhm=4.0,
+    modulate=True
+)
+
+# Step 2: Run statistical analysis
+contrasts = {
+    'age_positive': [0, 1, 0, 0],
+    'group_positive': [0, 0, 0, 1]
+}
+
+analysis_results = run_vbm_analysis(
+    vbm_dir=Path(prep_results['output_dir']),
+    participants_file=Path('/study/participants.tsv'),
+    formula='age + sex + group',
+    contrasts=contrasts,
+    method='both',  # 'randomise', 'glm', or 'both'
+    n_permutations=5000,
+    tfce=True,
+    z_threshold=2.3
+)
 ```
 
 ## Python API Reference
