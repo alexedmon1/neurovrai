@@ -34,27 +34,26 @@ def setup_logging(log_file: Path):
 def main():
     """Main execution"""
     parser = argparse.ArgumentParser(
-        description='Run VBM group analysis with randomise and/or GLM',
+        description='Run VBM group analysis with randomise (GLM currently not supported)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run full analysis with randomise (default)
+  # Run analysis with randomise (recommended - TFCE correction)
   python run_vbm_group_analysis.py --study-root /mnt/bytopia/IRC805
 
-  # Run with GLM only (faster, for exploratory analysis)
-  python run_vbm_group_analysis.py --study-root /mnt/bytopia/IRC805 --method glm
-
-  # Run both methods for comparison
-  python run_vbm_group_analysis.py --study-root /mnt/bytopia/IRC805 --method both
+  # Custom permutations
+  python run_vbm_group_analysis.py \\
+    --study-root /mnt/bytopia/IRC805 \\
+    --n-permutations 10000
 
   # Custom parameters
   python run_vbm_group_analysis.py \\
     --study-root /mnt/bytopia/IRC805 \\
-    --method both \\
     --tissue GM \\
     --smooth-fwhm 6.0 \\
-    --n-permutations 10000 \\
-    --z-threshold 2.58
+    --n-permutations 10000
+
+NOTE: GLM method currently has compatibility issues with fsl_glm. Use randomise for now.
         """
     )
 

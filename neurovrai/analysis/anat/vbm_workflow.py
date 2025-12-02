@@ -749,7 +749,6 @@ def run_vbm_analysis(
 
         # Save summary
         summary_file = glm_dir / 'glm_analysis_summary.json'
-        import json
         with open(summary_file, 'w') as f:
             json.dump(glm_summary, f, indent=2)
 

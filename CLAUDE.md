@@ -281,8 +281,9 @@ The codebase is organized by MRI modality, with each module containing class-bas
     - Tissue probability map normalization to MNI space
     - Optional modulation by Jacobian determinant
     - Spatial smoothing
-    - Group-level statistical analysis with FSL randomise
+    - Group-level statistical analysis with FSL randomise (TFCE correction)
     - Integration with participant demographics
+    - **Note**: GLM method currently has compatibility issues with fsl_glm; use randomise
 
 - **`dwi/`** (✅ Production-Ready): Diffusion-weighted imaging (DTI/DWI/DKI/NODDI)
   - **Modern Workflows** (`neurovrai/preprocess/workflows/`):
