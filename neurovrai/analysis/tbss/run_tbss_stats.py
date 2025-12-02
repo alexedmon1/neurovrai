@@ -36,6 +36,7 @@ import yaml
 
 from neurovrai.analysis.stats.design_matrix import generate_design_files
 from neurovrai.analysis.stats.randomise_wrapper import run_randomise, summarize_results
+from neurovrai.analysis.stats.glm_wrapper import run_fsl_glm, threshold_zstat, summarize_glm_results
 from neurovrai.analysis.stats.cluster_report import generate_reports_for_all_contrasts
 
 
@@ -185,10 +186,12 @@ def run_tbss_statistical_analysis(
     formula: str,
     contrasts: List[Dict],
     output_dir: Path,
+    method: str = 'randomise',
     n_permutations: int = 5000,
     tfce: bool = True,
     cluster_threshold: float = 0.95,
     min_cluster_size: int = 10,
+    z_threshold: float = 2.3,
     seed: Optional[int] = None
 ) -> Dict:
     """
@@ -200,15 +203,22 @@ def run_tbss_statistical_analysis(
         formula: Model formula (e.g., "age + sex + exposure")
         contrasts: List of contrast specifications
         output_dir: Output directory for analysis results
+        method: Statistical method ('randomise', 'glm', or 'both')
         n_permutations: Number of permutations for randomise
-        tfce: Use Threshold-Free Cluster Enhancement
-        cluster_threshold: Threshold for cluster extraction (0.95 = p<0.05)
+        tfce: Use Threshold-Free Cluster Enhancement (randomise only)
+        cluster_threshold: Threshold for cluster extraction (0.95 = p<0.05 for randomise)
         min_cluster_size: Minimum cluster size in voxels
+        z_threshold: Z-score threshold for GLM (default: 2.3 ≈ p<0.01)
         seed: Random seed for reproducibility
 
     Returns:
         Dictionary with analysis results and output paths
     """
+    # Validate method
+    valid_methods = ['randomise', 'glm', 'both']
+    if method not in valid_methods:
+        raise ValueError(f"Invalid method '{method}'. Must be one of: {valid_methods}")
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -221,6 +231,7 @@ def run_tbss_statistical_analysis(
     logger.info(f"Output directory: {output_dir}")
     logger.info(f"Model formula: {formula}")
     logger.info(f"Number of contrasts: {len(contrasts)}")
+    logger.info(f"Statistical method: {method}")
 
     # Step 1: Validate prepared data
     logger.info("\n" + "=" * 80)
@@ -257,48 +268,93 @@ def run_tbss_statistical_analysis(
             f"prepared={prepared_files['n_subjects']}"
         )
 
-    # Step 3: Run FSL randomise
-    logger.info("\n" + "=" * 80)
-    logger.info("[Step 3] Running FSL randomise")
-    logger.info("=" * 80)
-
-    randomise_dir = output_dir / "randomise_output"
-
-    randomise_result = run_randomise(
-        input_file=prepared_files['skeleton_file'],
-        design_mat=Path(design_result['design_mat_file']),
-        contrast_con=Path(design_result['contrast_con_file']),
-        output_dir=randomise_dir,
-        mask=prepared_files['mask_file'],
-        n_permutations=n_permutations,
-        tfce=tfce,
-        seed=seed
-    )
-
-    logger.info(f"✓ Randomise completed in {randomise_result['elapsed_time']:.1f} seconds")
-
-    # Step 4: Summarize results
-    logger.info("\n" + "=" * 80)
-    logger.info("[Step 4] Summarizing results")
-    logger.info("=" * 80)
-
-    summary = summarize_results(randomise_dir, threshold=cluster_threshold)
-
-    # Step 5: Extract clusters and generate reports
-    logger.info("\n" + "=" * 80)
-    logger.info("[Step 5] Extracting clusters and generating reports")
-    logger.info("=" * 80)
-
-    cluster_reports_dir = output_dir / "cluster_reports"
+    # Initialize results
+    randomise_result = None
+    glm_result = None
+    cluster_results = None
     contrast_names = [c['name'] for c in contrasts]
 
-    cluster_results = generate_reports_for_all_contrasts(
-        randomise_output_dir=randomise_dir,
-        output_dir=cluster_reports_dir,
-        contrast_names=contrast_names,
-        threshold=cluster_threshold,
-        min_cluster_size=min_cluster_size
-    )
+    # Step 3: Run statistical analysis (randomise and/or GLM)
+    if method in ['randomise', 'both']:
+        logger.info("\n" + "=" * 80)
+        logger.info("[Step 3a] Running FSL Randomise (Nonparametric)")
+        logger.info("=" * 80)
+
+        randomise_dir = output_dir / "randomise_output"
+
+        randomise_result = run_randomise(
+            input_file=prepared_files['skeleton_file'],
+            design_mat=Path(design_result['design_mat_file']),
+            contrast_con=Path(design_result['contrast_con_file']),
+            output_dir=randomise_dir,
+            mask=prepared_files['mask_file'],
+            n_permutations=n_permutations,
+            tfce=tfce,
+            seed=seed
+        )
+
+        logger.info(f"✓ Randomise completed in {randomise_result['elapsed_time']:.1f} seconds")
+
+        # Summarize randomise results
+        logger.info("\n" + "=" * 80)
+        logger.info("[Step 4a] Summarizing Randomise results")
+        logger.info("=" * 80)
+
+        randomise_summary = summarize_results(randomise_dir, threshold=cluster_threshold)
+
+        # Extract clusters and generate reports
+        logger.info("\n" + "=" * 80)
+        logger.info("[Step 5a] Extracting clusters and generating Randomise reports")
+        logger.info("=" * 80)
+
+        cluster_reports_dir = output_dir / "cluster_reports_randomise"
+
+        cluster_results = generate_reports_for_all_contrasts(
+            randomise_output_dir=randomise_dir,
+            output_dir=cluster_reports_dir,
+            contrast_names=contrast_names,
+            threshold=cluster_threshold,
+            min_cluster_size=min_cluster_size
+        )
+
+    if method in ['glm', 'both']:
+        step_num = 'Step 3b' if method == 'both' else 'Step 3'
+        logger.info("\n" + "=" * 80)
+        logger.info(f"[{step_num}] Running FSL GLM (Parametric)")
+        logger.info("=" * 80)
+
+        glm_dir = output_dir / "glm_output"
+
+        glm_result = run_fsl_glm(
+            input_file=prepared_files['skeleton_file'],
+            design_mat=Path(design_result['design_mat_file']),
+            contrast_con=Path(design_result['contrast_con_file']),
+            output_dir=glm_dir,
+            mask=prepared_files['mask_file']
+        )
+
+        logger.info(f"✓ FSL GLM completed in {glm_result['elapsed_time']:.1f} seconds")
+
+        # Threshold and summarize GLM results
+        step_num = 'Step 4b' if method == 'both' else 'Step 4'
+        logger.info("\n" + "=" * 80)
+        logger.info(f"[{step_num}] Thresholding and summarizing GLM results")
+        logger.info("=" * 80)
+
+        threshold_dir = glm_dir / "thresholded"
+        threshold_result = threshold_zstat(
+            zstat_file=Path(glm_result['output_files']['zstat']),
+            output_dir=threshold_dir,
+            z_threshold=z_threshold,
+            cluster_threshold=min_cluster_size,
+            mask=prepared_files['mask_file']
+        )
+
+        glm_summary = summarize_glm_results(
+            output_dir=glm_dir,
+            contrast_names=contrast_names,
+            z_threshold=z_threshold
+        )
 
     # Final summary
     logger.info("\n" + "=" * 80)
@@ -306,30 +362,65 @@ def run_tbss_statistical_analysis(
     logger.info("=" * 80)
     logger.info(f"Output directory: {output_dir}")
     logger.info(f"  Design files: {output_dir}")
-    logger.info(f"  Randomise results: {randomise_dir}")
-    logger.info(f"  Cluster reports: {cluster_reports_dir}")
+
+    if randomise_result:
+        logger.info(f"  Randomise results: {output_dir / 'randomise_output'}")
+        logger.info(f"  Cluster reports (Randomise): {output_dir / 'cluster_reports_randomise'}")
+
+    if glm_result:
+        logger.info(f"  GLM results: {output_dir / 'glm_output'}")
+        logger.info(f"  GLM thresholded: {output_dir / 'glm_output' / 'thresholded'}")
 
     logger.info("\nSignificant findings:")
-    n_sig = sum(1 for r in cluster_results['reports'] if r['significant'])
-    logger.info(f"  {n_sig}/{len(contrasts)} contrasts showed significant clusters")
 
-    for report in cluster_results['reports']:
-        if report['significant']:
-            logger.info(f"    ✓ {report['contrast_name']}: {report['n_clusters']} clusters, "
-                       f"{report['total_voxels']} voxels")
-        else:
-            logger.info(f"    ✗ {report['contrast_name']}: No significant clusters")
+    if randomise_result and cluster_results:
+        n_sig = sum(1 for r in cluster_results['reports'] if r['significant'])
+        logger.info(f"\n  Randomise (nonparametric):")
+        logger.info(f"    {n_sig}/{len(contrasts)} contrasts showed significant clusters")
+
+        for report in cluster_results['reports']:
+            if report['significant']:
+                logger.info(f"      ✓ {report['contrast_name']}: {report['n_clusters']} clusters, "
+                           f"{report['total_voxels']} voxels")
+            else:
+                logger.info(f"      ✗ {report['contrast_name']}: No significant clusters")
+
+    if glm_result:
+        logger.info(f"\n  GLM (parametric, z > {z_threshold}):")
+        n_sig_glm = sum(1 for c in glm_summary['contrasts'] if c['significant'])
+        logger.info(f"    {n_sig_glm}/{len(contrasts)} contrasts showed significant voxels")
+
+        for contrast in glm_summary['contrasts']:
+            if contrast['significant']:
+                logger.info(f"      ✓ {contrast['name']}: {contrast['n_positive_voxels']} pos, "
+                           f"{contrast['n_negative_voxels']} neg voxels")
+            else:
+                logger.info(f"      ✗ {contrast['name']}: No significant voxels")
 
     logger.info("=" * 80)
 
-    return {
+    result_dict = {
         'success': True,
         'output_dir': str(output_dir),
         'design_result': design_result,
-        'randomise_result': randomise_result,
-        'cluster_results': cluster_results,
-        'n_significant_contrasts': n_sig
+        'method': method
     }
+
+    if randomise_result:
+        result_dict['randomise_result'] = randomise_result
+        result_dict['cluster_results'] = cluster_results
+        result_dict['n_significant_contrasts_randomise'] = sum(
+            1 for r in cluster_results['reports'] if r['significant']
+        )
+
+    if glm_result:
+        result_dict['glm_result'] = glm_result
+        result_dict['glm_summary'] = glm_summary
+        result_dict['n_significant_contrasts_glm'] = sum(
+            1 for c in glm_summary['contrasts'] if c['significant']
+        )
+
+    return result_dict
 
 
 def main():
@@ -339,22 +430,34 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic analysis with inline contrasts
+  # Randomise analysis (nonparametric, default)
   python -m neurovrai.analysis.tbss.run_tbss_stats \\
       --data-dir /study/analysis/tbss_FA/ \\
       --participants participants.csv \\
       --formula "age + sex" \\
       --contrast age_positive 0 1 0 \\
       --contrast sex_MvsF 0 0 1 \\
-      --output-dir /study/analysis/tbss_FA/model1/
+      --output-dir /study/analysis/tbss_FA/model1/ \\
+      --method randomise
 
-  # Analysis with contrasts from YAML file
+  # GLM analysis (parametric, faster)
+  python -m neurovrai.analysis.tbss.run_tbss_stats \\
+      --data-dir /study/analysis/tbss_FA/ \\
+      --participants participants.csv \\
+      --formula "age + sex + exposure" \\
+      --contrasts-file contrasts.yaml \\
+      --output-dir /study/analysis/tbss_FA/model_glm/ \\
+      --method glm \\
+      --z-threshold 2.3
+
+  # Run both methods for comparison
   python -m neurovrai.analysis.tbss.run_tbss_stats \\
       --data-dir /study/analysis/tbss_FA/ \\
       --participants participants.csv \\
       --formula "age + sex + exposure + age*sex" \\
       --contrasts-file contrasts.yaml \\
-      --output-dir /study/analysis/tbss_FA/model_interaction/
+      --output-dir /study/analysis/tbss_FA/model_both/ \\
+      --method both
         """
     )
 
@@ -404,10 +507,18 @@ Examples:
     )
 
     parser.add_argument(
+        '--method',
+        type=str,
+        choices=['randomise', 'glm', 'both'],
+        default='randomise',
+        help='Statistical method: randomise (nonparametric), glm (parametric), or both (default: randomise)'
+    )
+
+    parser.add_argument(
         '--n-permutations',
         type=int,
         default=5000,
-        help='Number of permutations (default: 5000)'
+        help='Number of permutations for randomise (default: 5000)'
     )
 
     parser.add_argument(
@@ -428,6 +539,13 @@ Examples:
         type=int,
         default=10,
         help='Minimum cluster size in voxels (default: 10)'
+    )
+
+    parser.add_argument(
+        '--z-threshold',
+        type=float,
+        default=2.3,
+        help='Z-score threshold for GLM (default: 2.3 ≈ p<0.01)'
     )
 
     parser.add_argument(
@@ -459,10 +577,12 @@ Examples:
         formula=args.formula,
         contrasts=contrasts,
         output_dir=args.output_dir,
+        method=args.method,
         n_permutations=args.n_permutations,
         tfce=not args.no_tfce,
         cluster_threshold=args.cluster_threshold,
         min_cluster_size=args.min_cluster_size,
+        z_threshold=args.z_threshold,
         seed=args.seed
     )
 

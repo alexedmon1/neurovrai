@@ -17,6 +17,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 
 from neurovrai.analysis.stats.randomise_wrapper import run_randomise, summarize_results
+from neurovrai.analysis.stats.glm_wrapper import run_fsl_glm, threshold_zstat, summarize_glm_results
 
 
 def setup_logging(log_file: Path):
@@ -246,7 +247,9 @@ def run_group_analysis(
     analysis_dir: Path,
     participants_file: Path,
     study_name: str = 'mock_study',
-    n_permutations: int = 500
+    method: str = 'randomise',
+    n_permutations: int = 500,
+    z_threshold: float = 2.3
 ):
     """
     Run complete group-level analysis for ReHo or fALFF
@@ -257,8 +260,14 @@ def run_group_analysis(
         analysis_dir: Path to analysis directory
         participants_file: Path to participants file
         study_name: Name of analysis study (e.g., 'mock_study', 'age_analysis')
+        method: Statistical method ('randomise', 'glm', or 'both')
         n_permutations: Number of randomise permutations
+        z_threshold: Z-score threshold for GLM (default: 2.3 ≈ p<0.01)
     """
+    # Validate method
+    valid_methods = ['randomise', 'glm', 'both']
+    if method not in valid_methods:
+        raise ValueError(f"Invalid method '{method}'. Must be one of: {valid_methods}")
     logging.info("\n" + "=" * 80)
     logging.info(f"{metric.upper()} GROUP-LEVEL ANALYSIS - {study_name}")
     logging.info("=" * 80)
@@ -278,31 +287,87 @@ def run_group_analysis(
         subject_ids, participants_file, output_dir
     )
 
-    # 4. Run randomise
-    logging.info("\n" + "=" * 80)
-    logging.info("Running FSL Randomise")
-    logging.info("=" * 80)
+    # 4. Run statistical analysis (randomise and/or GLM)
+    results = {}
 
-    randomise_dir = output_dir / 'randomise_output'
+    if method in ['randomise', 'both']:
+        logging.info("\n" + "=" * 80)
+        logging.info("Running FSL Randomise (Nonparametric)")
+        logging.info("=" * 80)
 
-    result = run_randomise(
-        input_file=image_4d,
-        design_mat=design_mat,
-        contrast_con=contrast_con,
-        output_dir=randomise_dir,
-        mask=mask_file,
-        n_permutations=n_permutations,
-        tfce=True,
-        seed=42
-    )
+        randomise_dir = output_dir / 'randomise_output'
 
-    # 5. Summarize results
-    summary = summarize_results(randomise_dir, threshold=0.95)
+        randomise_result = run_randomise(
+            input_file=image_4d,
+            design_mat=design_mat,
+            contrast_con=contrast_con,
+            output_dir=randomise_dir,
+            mask=mask_file,
+            n_permutations=n_permutations,
+            tfce=True,
+            seed=42
+        )
 
+        randomise_summary = summarize_results(randomise_dir, threshold=0.95)
+
+        results['randomise'] = {
+            'result': randomise_result,
+            'summary': randomise_summary,
+            'output_dir': randomise_dir
+        }
+
+        logging.info(f"✓ Randomise completed in {randomise_result['elapsed_time']:.1f} seconds")
+
+    if method in ['glm', 'both']:
+        logging.info("\n" + "=" * 80)
+        logging.info("Running FSL GLM (Parametric)")
+        logging.info("=" * 80)
+
+        glm_dir = output_dir / 'glm_output'
+
+        glm_result = run_fsl_glm(
+            input_file=image_4d,
+            design_mat=design_mat,
+            contrast_con=contrast_con,
+            output_dir=glm_dir,
+            mask=mask_file
+        )
+
+        # Threshold and summarize
+        threshold_dir = glm_dir / 'thresholded'
+        threshold_result = threshold_zstat(
+            zstat_file=Path(glm_result['output_files']['zstat']),
+            output_dir=threshold_dir,
+            z_threshold=z_threshold,
+            cluster_threshold=10,
+            mask=mask_file
+        )
+
+        # Extract contrast names from design
+        contrast_names = ['age_positive', 'age_negative', 'group1_gt_group0', 'group0_gt_group1']
+        glm_summary = summarize_glm_results(
+            output_dir=glm_dir,
+            contrast_names=contrast_names,
+            z_threshold=z_threshold
+        )
+
+        results['glm'] = {
+            'result': glm_result,
+            'summary': glm_summary,
+            'threshold_result': threshold_result,
+            'output_dir': glm_dir
+        }
+
+        logging.info(f"✓ GLM completed in {glm_result['elapsed_time']:.1f} seconds")
+
+    # Summary
     logging.info(f"\n✓ {metric.upper()} analysis complete!")
-    logging.info(f"  Results: {randomise_dir}")
+    if 'randomise' in results:
+        logging.info(f"  Randomise results: {results['randomise']['output_dir']}")
+    if 'glm' in results:
+        logging.info(f"  GLM results: {results['glm']['output_dir']}")
 
-    return result, summary
+    return results
 
 
 def main():
@@ -326,32 +391,45 @@ def main():
     logging.info(f"Analysis: {analysis_dir}")
     logging.info(f"Participants: {participants_file}")
 
+    # Choose method: 'randomise', 'glm', or 'both'
+    method = 'randomise'  # Change to 'glm' or 'both' as needed
+
     try:
         # Run ReHo analysis
-        reho_result, reho_summary = run_group_analysis(
+        reho_results = run_group_analysis(
             metric='reho',
             derivatives_dir=derivatives_dir,
             analysis_dir=analysis_dir,
             participants_file=participants_file,
             study_name='mock_study',
+            method=method,
             n_permutations=500
         )
 
         # Run fALFF analysis
-        falff_result, falff_summary = run_group_analysis(
+        falff_results = run_group_analysis(
             metric='falff',
             derivatives_dir=derivatives_dir,
             analysis_dir=analysis_dir,
             participants_file=participants_file,
             study_name='mock_study',
+            method=method,
             n_permutations=500
         )
 
         logging.info("\n" + "=" * 80)
         logging.info("ALL ANALYSES COMPLETE")
         logging.info("=" * 80)
-        logging.info(f"ReHo results: {reho_result['output_dir']}")
-        logging.info(f"fALFF results: {falff_result['output_dir']}")
+
+        if 'randomise' in reho_results:
+            logging.info(f"ReHo (randomise): {reho_results['randomise']['output_dir']}")
+        if 'glm' in reho_results:
+            logging.info(f"ReHo (GLM): {reho_results['glm']['output_dir']}")
+
+        if 'randomise' in falff_results:
+            logging.info(f"fALFF (randomise): {falff_results['randomise']['output_dir']}")
+        if 'glm' in falff_results:
+            logging.info(f"fALFF (GLM): {falff_results['glm']['output_dir']}")
 
     except Exception as e:
         logging.error(f"Analysis failed: {e}", exc_info=True)

@@ -18,9 +18,9 @@ Three-Pathway Architecture
 
 3. Structural Connectivity (structural_connectivity.py)
    - Probabilistic tractography with probtrackx2
-   - BEDPOSTX integration
-   - Tractography-based connectivity matrices
-   - [Future implementation]
+   - BEDPOSTX integration for fiber orientation modeling
+   - ROI-to-ROI tractography-based connectivity matrices
+   - Network construction from tractography results
 
 Usage Examples
 --------------
@@ -37,6 +37,15 @@ fc_matrix = compute_functional_connectivity(
     method='pearson',
     fisher_z=True
 )
+
+# Structural connectivity from probtrackx2
+sc_results = compute_structural_connectivity(
+    bedpostx_dir='derivatives/sub-001/dwi.bedpostX',
+    atlas_file='parcellations/schaefer_400_dwi.nii.gz',
+    output_dir='connectome/structural/sub-001',
+    n_samples=5000
+)
+sc_matrix = sc_results['connectivity_matrix']
 """
 
 from neurovrai.connectome.roi_extraction import (
@@ -53,6 +62,16 @@ from neurovrai.connectome.functional_connectivity import (
     inverse_fisher_z_transform,
     threshold_matrix,
     compute_seed_connectivity,
+)
+
+from neurovrai.connectome.structural_connectivity import (
+    compute_structural_connectivity,
+    run_bedpostx,
+    validate_bedpostx_outputs,
+    prepare_atlas_for_probtrackx,
+    run_probtrackx2_network,
+    construct_connectivity_matrix,
+    StructuralConnectivityError,
 )
 
 from neurovrai.connectome.visualization import (
@@ -91,6 +110,15 @@ __all__ = [
     'inverse_fisher_z_transform',
     'threshold_matrix',
     'compute_seed_connectivity',
+
+    # Structural connectivity
+    'compute_structural_connectivity',
+    'run_bedpostx',
+    'validate_bedpostx_outputs',
+    'prepare_atlas_for_probtrackx',
+    'run_probtrackx2_network',
+    'construct_connectivity_matrix',
+    'StructuralConnectivityError',
 
     # Visualization
     'plot_connectivity_matrix',
