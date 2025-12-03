@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **✅ Completed & Production-Ready**:
 - **Anatomical Preprocessing**: T1w workflow with N4 bias correction, BET skull stripping, FLIRT/FNIRT registration, tissue segmentation (ANTs Atropos)
-- **DWI Preprocessing**: Multi-shell/single-shell with optional TOPUP distortion correction, GPU eddy, DTI fitting, spatial normalization to FMRIB58_FA
+- **DWI Preprocessing**: Multi-shell/single-shell with optional TOPUP distortion correction, GPU eddy, DTI fitting (FA, MD, AD, RD), spatial normalization to FMRIB58_FA
 - **Advanced Diffusion Models**:
   - DKI (DIPY-based): MK, AK, RK, KFA metrics
   - NODDI (DIPY or AMICO): FICVF, ODI, FISO - AMICO is 100x faster (30 sec vs 20-25 min)

@@ -42,6 +42,7 @@ from neurovrai.preprocess.utils.dwi_normalization import (
     apply_warp_to_metrics
 )
 from neurovrai.preprocess.workflows.advanced_diffusion import run_advanced_diffusion_models
+from neurovrai.preprocess.utils.dti_metrics import calculate_ad_rd
 
 
 def merge_dwi_files(
@@ -714,6 +715,19 @@ def run_dwi_multishell_topup_preprocessing(
     logger.info("  Running Nipype workflow (eddy, brain extraction, DTI fitting)...")
     wf.run(**exec_config)
 
+    # Step 7.1: Calculate AD and RD from eigenvalues
+    logger.info("")
+    logger.info("Step 7.1: Calculating AD and RD from eigenvalues")
+    dti_dir = derivatives_dir / 'dti'
+    if dti_dir.exists():
+        ad_file, rd_file = calculate_ad_rd(dti_dir, prefix='dtifit__')
+        if ad_file and rd_file:
+            logger.info("  ✓ AD and RD calculated successfully")
+        else:
+            logger.warning("  ⚠ Failed to calculate AD/RD (eigenvalue files may be missing)")
+    else:
+        logger.warning(f"  ⚠ DTI directory not found: {dti_dir}")
+
     # Collect outputs
     # derivatives_dir is already set at the top of the function
     # Files are saved directly to derivatives_dir by DataSink
@@ -722,6 +736,8 @@ def run_dwi_multishell_topup_preprocessing(
     eddy_files = list(derivatives_dir.glob('**/eddy_corrected*.nii.gz')) if derivatives_dir.exists() else []
     fa_files = list(derivatives_dir.glob('**/*FA.nii.gz')) if derivatives_dir.exists() else []
     md_files = list(derivatives_dir.glob('**/*MD.nii.gz')) if derivatives_dir.exists() else []
+    ad_files = list(derivatives_dir.glob('**/*AD.nii.gz')) if derivatives_dir.exists() else []
+    rd_files = list(derivatives_dir.glob('**/*RD.nii.gz')) if derivatives_dir.exists() else []
     mask_files = list(derivatives_dir.glob('**/*mask*.nii.gz')) if derivatives_dir.exists() else []
     bvec_files = list(derivatives_dir.glob('**/*rotated_bvecs*')) if derivatives_dir.exists() else []
 
@@ -735,6 +751,8 @@ def run_dwi_multishell_topup_preprocessing(
         'eddy_corrected': eddy_files[0] if eddy_files else None,
         'fa': fa_files[0] if fa_files else None,
         'md': md_files[0] if md_files else None,
+        'ad': ad_files[0] if ad_files else None,
+        'rd': rd_files[0] if rd_files else None,
         'mask': mask_files[0] if mask_files else None,
         'rotated_bvec': bvec_files[0] if bvec_files else None,
     }
@@ -957,8 +975,12 @@ def run_dwi_multishell_topup_preprocessing(
     logger.info("")
     logger.info("Key outputs:")
     logger.info(f"  Eddy-corrected DWI: {outputs['eddy_corrected']}")
-    logger.info(f"  FA map: {outputs['fa']}")
-    logger.info(f"  MD map: {outputs['md']}")
+    logger.info("")
+    logger.info("DTI metrics:")
+    logger.info(f"  FA (Fractional Anisotropy): {outputs['fa']}")
+    logger.info(f"  MD (Mean Diffusivity): {outputs['md']}")
+    logger.info(f"  AD (Axial Diffusivity): {outputs['ad']}")
+    logger.info(f"  RD (Radial Diffusivity): {outputs['rd']}")
     logger.info(f"  Brain mask: {outputs['mask']}")
     logger.info("")
     logger.info("TOPUP outputs:")
