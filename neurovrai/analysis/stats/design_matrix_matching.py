@@ -228,9 +228,14 @@ def discover_subjects_for_analysis(
         # Look for DKI (Diffusion Kurtosis Imaging) metrics
         for subject_dir in sorted(derivatives_dir.glob('*/dwi')):
             dki_dir = subject_dir / 'dki'
-            # Check for MK (mean kurtosis) file
-            mk_file = dki_dir / 'dki_mk.nii.gz'
-            if mk_file.exists():
+            # Check for MK (mean kurtosis) file - try multiple naming conventions
+            # DIPY outputs: mean_kurtosis.nii.gz, axial_kurtosis.nii.gz, etc.
+            mk_files = [
+                dki_dir / 'mean_kurtosis.nii.gz',  # DIPY naming (primary)
+                dki_dir / 'MK.nii.gz',              # Short form
+                dki_dir / 'dki_mk.nii.gz'           # Legacy naming
+            ]
+            if any(f.exists() for f in mk_files):
                 subject_id = subject_dir.parent.name
                 subjects.append(subject_id)
 

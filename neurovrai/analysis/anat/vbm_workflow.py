@@ -18,7 +18,15 @@ VBM Workflow:
    - Generate cluster reports with anatomical localization
 
 Usage:
-    # Prepare subject data
+    # Prepare subject data (using design matrix subject list - RECOMMENDED)
+    python vbm_workflow.py prepare \
+        --derivatives-dir /study/derivatives \
+        --subject-list /study/designs/vbm/subject_list.txt \
+        --output-dir /study/analysis/vbm \
+        --tissue GM \
+        --smooth-fwhm 4
+
+    # Or specify subjects manually
     python vbm_workflow.py prepare \
         --derivatives-dir /study/derivatives \
         --subjects sub-001 sub-002 ... \
@@ -838,8 +846,14 @@ if __name__ == '__main__':
     prepare_parser.add_argument(
         '--subjects',
         nargs='+',
-        required=True,
         help='List of subject IDs'
+    )
+    prepare_parser.add_argument(
+        '--subject-list',
+        type=Path,
+        help='Path to text file with subject IDs (one per line). '
+             'If provided, subjects will be processed in the exact order specified. '
+             'This should match your design matrix subject order.'
     )
     prepare_parser.add_argument(
         '--output-dir',
@@ -919,9 +933,30 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.command == 'prepare':
+        # Validate and load subjects
+        if not args.subjects and not args.subject_list:
+            parser.error("Must specify either --subjects or --subject-list")
+
+        if args.subjects and args.subject_list:
+            parser.error("Cannot specify both --subjects and --subject-list")
+
+        # Read subject list from file if provided
+        subjects = None
+        if args.subject_list:
+            if not args.subject_list.exists():
+                parser.error(f"Subject list file not found: {args.subject_list}")
+
+            with open(args.subject_list, 'r') as f:
+                subjects = [line.strip() for line in f if line.strip()]
+
+            print(f"Loaded {len(subjects)} subjects from {args.subject_list}")
+            print(f"Subjects will be processed in the order specified in the file.")
+        else:
+            subjects = args.subjects
+
         # Prepare VBM data
         results = prepare_vbm_data(
-            subjects=args.subjects,
+            subjects=subjects,
             derivatives_dir=args.derivatives_dir,
             output_dir=args.output_dir,
             tissue_type=args.tissue,

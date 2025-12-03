@@ -2,25 +2,38 @@
 """
 TBSS Data Preparation Workflow
 
-Prepares DTI data for group-level statistical analysis using FSL's TBSS pipeline.
+Prepares DTI, DKI, and NODDI data for group-level statistical analysis using FSL's TBSS pipeline.
 
 This workflow:
-1. Collects DTI metric maps (FA, MD, AD, RD) from preprocessed subjects
-2. Validates data availability and logs missing subjects
-3. Runs FSL TBSS pipeline (tbss_1_preproc through tbss_4_prestats)
-4. Generates subject manifest and analysis-ready 4D volumes
-5. Outputs skeleton-projected data ready for randomise
+1. For FA: Runs full TBSS pipeline (tbss_1_preproc through tbss_4_prestats) to create skeleton
+2. For non-FA metrics: Uses tbss_non_FA to project onto existing FA skeleton
+3. Supports DTI (FA, MD, AD, RD), DKI (MK, AK, RK, KFA), and NODDI (FICVF, ODI, FISO) metrics
+4. Validates data availability and logs missing subjects
+5. Generates subject manifest and analysis-ready 4D volumes
+6. Outputs skeleton-projected data ready for statistical analysis
+
+Workflow Order:
+1. MUST run with --metric FA first to create the FA skeleton
+2. Then run with other metrics (MD, AD, RD, MK, etc.) to project onto FA skeleton
 
 Separation of Concerns:
-- This module ONLY prepares data (run once)
+- This module ONLY prepares data (run once per metric)
 - Statistical analysis (design matrix, randomise) is handled separately
 - Allows iterating on statistical models without re-running TBSS
 
 Usage:
+    # Step 1: Create FA skeleton (REQUIRED FIRST)
     python -m neurovrai.analysis.tbss.prepare_tbss \\
         --config config.yaml \\
         --metric FA \\
-        --output-dir /study/analysis/tbss_FA/
+        --output-dir /study/analysis/tbss/
+
+    # Step 2: Project other metrics onto FA skeleton
+    python -m neurovrai.analysis.tbss.prepare_tbss \\
+        --config config.yaml \\
+        --metric MD \\
+        --fa-skeleton-dir /study/analysis/tbss/ \\
+        --output-dir /study/analysis/tbss/
 """
 
 import argparse
@@ -37,6 +50,24 @@ import nibabel as nib
 import numpy as np
 
 from neurovrai.config import load_config
+
+
+# Supported metrics organized by modality
+METRIC_GROUPS = {
+    'DTI': ['FA', 'MD', 'AD', 'RD'],
+    'DKI': ['MK', 'AK', 'RK', 'KFA'],
+    'NODDI': ['FICVF', 'ODI', 'FISO']
+}
+
+ALL_METRICS = METRIC_GROUPS['DTI'] + METRIC_GROUPS['DKI'] + METRIC_GROUPS['NODDI']
+
+# Mapping from short metric names to actual file names (for DIPY output)
+DKI_FILE_MAPPING = {
+    'MK': 'mean_kurtosis',
+    'AK': 'axial_kurtosis',
+    'RK': 'radial_kurtosis',
+    'KFA': 'kurtosis_fa'
+}
 
 
 class SubjectData:
@@ -120,7 +151,7 @@ def collect_subject_data(
     Args:
         subject_id: Subject identifier
         derivatives_dir: Path to derivatives directory
-        metric: DTI metric (FA, MD, AD, RD)
+        metric: DTI, DKI, or NODDI metric
         logger: Logger instance
 
     Returns:
@@ -129,15 +160,43 @@ def collect_subject_data(
     # Look for metric file in subject's DWI directory
     dwi_dir = derivatives_dir / subject_id / "dwi"
 
-    # Try different possible filenames
-    possible_files = [
-        dwi_dir / "dti" / f"{metric}.nii.gz",
-        dwi_dir / "dti" / f"dti_{metric}.nii.gz",
-        dwi_dir / "dti" / f"dtifit__{metric}.nii.gz",  # neurovrai preprocessing output
-        dwi_dir / f"{metric}.nii.gz",
-        dwi_dir / f"dti_{metric}.nii.gz",
-        dwi_dir / f"dtifit__{metric}.nii.gz",
-    ]
+    # Determine which subdirectory to search based on metric type
+    if metric in METRIC_GROUPS['DTI']:
+        # DTI metrics: FA, MD, AD, RD
+        possible_files = [
+            dwi_dir / "dti" / f"{metric}.nii.gz",
+            dwi_dir / "dti" / f"dti_{metric}.nii.gz",
+            dwi_dir / "dti" / f"dtifit__{metric}.nii.gz",  # neurovrai preprocessing output
+            dwi_dir / f"{metric}.nii.gz",
+            dwi_dir / f"dti_{metric}.nii.gz",
+            dwi_dir / f"dtifit__{metric}.nii.gz",
+        ]
+    elif metric in METRIC_GROUPS['DKI']:
+        # DKI metrics: MK, AK, RK, KFA
+        # Map short names to DIPY output file names
+        file_name = DKI_FILE_MAPPING.get(metric, metric.lower())
+        possible_files = [
+            dwi_dir / "dki" / f"{file_name}.nii.gz",  # DIPY naming: mean_kurtosis.nii.gz
+            dwi_dir / "dki" / f"{metric}.nii.gz",      # Short form: MK.nii.gz
+            dwi_dir / "dki" / f"dki_{metric.lower()}.nii.gz",  # Legacy: dki_mk.nii.gz
+            dwi_dir / f"{file_name}.nii.gz",
+        ]
+    elif metric in METRIC_GROUPS['NODDI']:
+        # NODDI metrics: FICVF, ODI, FISO
+        metric_lower = metric.lower()
+        possible_files = [
+            dwi_dir / "noddi" / f"{metric_lower}.nii.gz",
+            dwi_dir / "noddi" / f"noddi_{metric_lower}.nii.gz",
+            dwi_dir / "noddi_amico" / f"{metric_lower}.nii.gz",  # AMICO output
+            dwi_dir / f"{metric_lower}.nii.gz",
+        ]
+    else:
+        logger.error(f"Unknown metric: {metric}")
+        return SubjectData(
+            subject_id=subject_id,
+            included=False,
+            exclusion_reason=f"Unknown metric type: {metric}"
+        )
 
     for metric_file in possible_files:
         if metric_file.exists():
@@ -320,6 +379,177 @@ def run_tbss_pipeline(
         return False
 
 
+def validate_fa_skeleton(fa_skeleton_dir: Path, logger: logging.Logger) -> Dict:
+    """
+    Validate that FA skeleton has been created and is ready for non-FA projection
+
+    Args:
+        fa_skeleton_dir: Directory containing FA TBSS preparation
+        logger: Logger instance
+
+    Returns:
+        Dictionary with paths to required FA skeleton files
+
+    Raises:
+        FileNotFoundError: If FA skeleton is not found or incomplete
+    """
+    fa_skeleton_dir = Path(fa_skeleton_dir)
+
+    logger.info("=" * 80)
+    logger.info("Validating FA Skeleton")
+    logger.info("=" * 80)
+    logger.info(f"FA skeleton directory: {fa_skeleton_dir}")
+
+    # Check for required FA skeleton files
+    required_files = {
+        'fa_dir': fa_skeleton_dir / 'FA',
+        'mean_fa': fa_skeleton_dir / 'FA' / 'mean_FA.nii.gz',
+        'mean_fa_skeleton': fa_skeleton_dir / 'FA' / 'mean_FA_skeleton.nii.gz',
+        'all_fa_skeletonised': fa_skeleton_dir / 'FA' / 'all_FA_skeletonised.nii.gz',
+        'subject_list': fa_skeleton_dir / 'subject_list.txt'
+    }
+
+    # Validate each required file
+    missing_files = []
+    for name, path in required_files.items():
+        if not path.exists():
+            missing_files.append(f"{name}: {path}")
+
+    if missing_files:
+        error_msg = (
+            f"FA skeleton not found or incomplete in {fa_skeleton_dir}\n"
+            f"Missing files:\n  " + "\n  ".join(missing_files) + "\n\n"
+            f"You MUST run FA preparation first:\n"
+            f"  python -m neurovrai.analysis.tbss.prepare_tbss \\\n"
+            f"      --config config.yaml \\\n"
+            f"      --metric FA \\\n"
+            f"      --output-dir {fa_skeleton_dir}"
+        )
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+
+    logger.info("✓ FA skeleton validation successful")
+    logger.info(f"  FA directory: {required_files['fa_dir']}")
+    logger.info(f"  Mean FA skeleton: {required_files['mean_fa_skeleton']}")
+    logger.info(f"  Skeletonised FA: {required_files['all_fa_skeletonised']}")
+
+    return required_files
+
+
+def run_tbss_non_fa(
+    metric: str,
+    fa_skeleton_dir: Path,
+    output_dir: Path,
+    subjects_data: List[SubjectData],
+    logger: logging.Logger
+) -> bool:
+    """
+    Run tbss_non_FA to project non-FA metric onto FA skeleton
+
+    Args:
+        metric: Non-FA metric name (e.g., 'MD', 'MK', 'FICVF')
+                For DKI: Uses short form (MK, AK, RK, KFA) but handles DIPY file names
+        fa_skeleton_dir: Directory containing FA skeleton
+        output_dir: Output directory (typically same as fa_skeleton_dir)
+        subjects_data: List of subject data
+        logger: Logger instance
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        logger.info("=" * 80)
+        logger.info(f"Running tbss_non_FA for {metric}")
+        logger.info("=" * 80)
+
+        # Validate FA skeleton exists
+        fa_files = validate_fa_skeleton(fa_skeleton_dir, logger)
+
+        # Read subject list from FA preparation to ensure same order
+        with open(fa_files['subject_list'], 'r') as f:
+            fa_subject_order = [line.strip() for line in f]
+
+        logger.info(f"FA skeleton has {len(fa_subject_order)} subjects")
+
+        # Create alternate directory for the new metric
+        # tbss_non_FA expects files in: origdata/{subject_id}_{METRIC}.nii.gz
+        origdata_dir = output_dir / "origdata"
+        origdata_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy metric files to origdata with proper naming
+        logger.info(f"\nCopying {metric} files to origdata/...")
+        included_subjects = [s for s in subjects_data if s.included]
+
+        # Create mapping of subject_id to metric file
+        subject_to_file = {s.subject_id: s.metric_file for s in included_subjects}
+
+        # Copy files in FA subject order
+        copied_count = 0
+        for subject_id in fa_subject_order:
+            if subject_id not in subject_to_file:
+                logger.warning(f"  ! {subject_id}: Not found in {metric} data (was in FA)")
+                continue
+
+            # tbss_non_FA expects: origdata/{subject_id}_{METRIC}.nii.gz
+            dest_file = origdata_dir / f"{subject_id}_{metric}.nii.gz"
+            shutil.copy2(subject_to_file[subject_id], dest_file)
+            copied_count += 1
+            logger.info(f"  ✓ {subject_id}")
+
+        logger.info(f"\nCopied {copied_count}/{len(fa_subject_order)} subjects")
+
+        if copied_count < len(fa_subject_order):
+            logger.warning(
+                f"Warning: Only {copied_count}/{len(fa_subject_order)} subjects have {metric} data. "
+                f"Statistical analysis will use only these subjects."
+            )
+
+        # Run tbss_non_FA
+        logger.info(f"\nRunning tbss_non_FA...")
+        original_dir = os.getcwd()
+        os.chdir(output_dir)
+
+        env = os.environ.copy()
+        env['FSLSUBALREADYRUN'] = 'true'
+
+        cmd = ['tbss_non_FA', metric]
+        logger.info(f"Command: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env=env
+        )
+
+        os.chdir(original_dir)
+
+        if result.returncode != 0:
+            logger.error(f"tbss_non_FA failed: {result.stderr}")
+            return False
+
+        # Verify output was created
+        stats_dir = output_dir / "stats"
+        expected_output = stats_dir / f"all_{metric}_skeletonised.nii.gz"
+
+        if not expected_output.exists():
+            logger.error(f"Expected output not found: {expected_output}")
+            return False
+
+        logger.info(f"✓ Successfully created: {expected_output}")
+        logger.info("=" * 80)
+
+        return True
+
+    except Exception as e:
+        logger.error(f"tbss_non_FA failed: {str(e)}", exc_info=True)
+        try:
+            os.chdir(original_dir)
+        except:
+            pass
+        return False
+
+
 def generate_manifest(
     subjects_data: List[SubjectData],
     output_dir: Path,
@@ -389,16 +619,23 @@ def prepare_tbss_analysis(
     config: Dict,
     metric: str,
     output_dir: Path,
-    subjects: Optional[List[str]] = None
+    subjects: Optional[List[str]] = None,
+    fa_skeleton_dir: Optional[Path] = None
 ) -> Dict:
     """
-    Main workflow: Prepare TBSS analysis from preprocessed DTI data
+    Main workflow: Prepare TBSS analysis from preprocessed DTI/DKI/NODDI data
+
+    Workflow:
+    - For FA: Runs full TBSS pipeline to create skeleton
+    - For non-FA: Uses tbss_non_FA to project onto existing FA skeleton
 
     Args:
         config: Configuration dictionary
-        metric: DTI metric to analyze (FA, MD, AD, RD)
+        metric: Metric to analyze (FA, MD, AD, RD, MK, AK, RK, KFA, FICVF, ODI, FISO)
         output_dir: Output directory for prepared analysis
         subjects: Optional list of specific subjects to include (if None, discovers all)
+        fa_skeleton_dir: Required for non-FA metrics. Directory containing FA skeleton.
+                        If None, uses output_dir (assumes FA is in same location)
 
     Returns:
         Dictionary containing preparation results and manifest
@@ -408,11 +645,24 @@ def prepare_tbss_analysis(
     output_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logging(output_dir)
 
+    # Determine if this is FA or non-FA metric
+    is_fa = (metric == 'FA')
+
     logger.info("=" * 80)
     logger.info("TBSS Data Preparation Workflow")
     logger.info("=" * 80)
     logger.info(f"Metric: {metric}")
+    logger.info(f"Workflow: {'Full TBSS pipeline (FA skeleton creation)' if is_fa else 'tbss_non_FA projection'}")
     logger.info(f"Output directory: {output_dir}")
+
+    # For non-FA metrics, determine FA skeleton directory
+    if not is_fa:
+        if fa_skeleton_dir is None:
+            fa_skeleton_dir = output_dir
+            logger.info(f"FA skeleton directory: {fa_skeleton_dir} (using output_dir)")
+        else:
+            fa_skeleton_dir = Path(fa_skeleton_dir)
+            logger.info(f"FA skeleton directory: {fa_skeleton_dir}")
 
     # Get derivatives directory
     derivatives_dir = Path(config['derivatives_dir'])
@@ -451,25 +701,46 @@ def prepare_tbss_analysis(
     logger.info("-" * 80)
     logger.info(f"Validation complete: {included_count}/{len(subjects)} subjects have valid data")
 
-    # Copy files to TBSS structure
-    logger.info("\n" + "=" * 80)
-    tbss_input_dir = copy_to_tbss_structure(
-        subjects_data=subjects_data,
-        output_dir=output_dir,
-        metric=metric,
-        logger=logger
-    )
+    # Route to appropriate workflow: FA (full pipeline) or non-FA (tbss_non_FA)
+    if is_fa:
+        # FA: Run full TBSS pipeline to create skeleton
+        logger.info("\n" + "=" * 80)
+        logger.info("FA METRIC: Running full TBSS pipeline")
+        logger.info("=" * 80)
 
-    # Run TBSS pipeline
-    success = run_tbss_pipeline(
-        tbss_input_dir=tbss_input_dir,
-        output_dir=output_dir,
-        metric=metric,
-        logger=logger
-    )
+        tbss_input_dir = copy_to_tbss_structure(
+            subjects_data=subjects_data,
+            output_dir=output_dir,
+            metric=metric,
+            logger=logger
+        )
 
-    if not success:
-        return {"success": False, "error": "TBSS pipeline failed"}
+        success = run_tbss_pipeline(
+            tbss_input_dir=tbss_input_dir,
+            output_dir=output_dir,
+            metric=metric,
+            logger=logger
+        )
+
+        if not success:
+            return {"success": False, "error": "TBSS pipeline failed"}
+
+    else:
+        # Non-FA: Use tbss_non_FA to project onto FA skeleton
+        logger.info("\n" + "=" * 80)
+        logger.info(f"NON-FA METRIC ({metric}): Using tbss_non_FA projection")
+        logger.info("=" * 80)
+
+        success = run_tbss_non_fa(
+            metric=metric,
+            fa_skeleton_dir=fa_skeleton_dir,
+            output_dir=output_dir,
+            subjects_data=subjects_data,
+            logger=logger
+        )
+
+        if not success:
+            return {"success": False, "error": f"tbss_non_FA failed for {metric}"}
 
     # Generate manifest
     logger.info("\n" + "=" * 80)
@@ -487,10 +758,24 @@ def prepare_tbss_analysis(
     logger.info(f"Output directory: {output_dir}")
     logger.info(f"Subjects included: {manifest['subjects_included']}")
     logger.info(f"Subjects excluded: {manifest['subjects_excluded']}")
-    logger.info("\nNext steps:")
-    logger.info("  1. Review subject_manifest.json for excluded subjects")
-    logger.info("  2. Filter your participants.csv to match subject_list.txt")
-    logger.info("  3. Run statistical analysis with run_tbss_stats.py")
+
+    if is_fa:
+        logger.info("\nNext steps:")
+        logger.info("  1. Review subject_manifest.json for excluded subjects")
+        logger.info("  2. Prepare other metrics (MD, AD, RD, MK, etc.) using --fa-skeleton-dir")
+        logger.info("     Example:")
+        logger.info(f"       python -m neurovrai.analysis.tbss.prepare_tbss \\")
+        logger.info(f"           --config config.yaml \\")
+        logger.info(f"           --metric MD \\")
+        logger.info(f"           --fa-skeleton-dir {output_dir} \\")
+        logger.info(f"           --output-dir {output_dir}")
+        logger.info("  3. Run statistical analysis with run_tbss_stats.py")
+    else:
+        logger.info("\nNext steps:")
+        logger.info(f"  1. Review subject_manifest.json for excluded subjects")
+        logger.info(f"  2. Prepare additional metrics if needed")
+        logger.info(f"  3. Run statistical analysis with run_tbss_stats.py on {metric}")
+
     logger.info("=" * 80)
 
     return {
@@ -503,22 +788,59 @@ def prepare_tbss_analysis(
 def main():
     """Command-line interface for TBSS preparation"""
     parser = argparse.ArgumentParser(
-        description="Prepare DTI data for TBSS group analysis",
+        description="Prepare DTI/DKI/NODDI data for TBSS group analysis",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Workflow:
+  1. MUST run with --metric FA first to create the FA skeleton
+  2. Then run with other metrics to project onto the FA skeleton
+
 Examples:
-  # Prepare FA analysis for all subjects
+  # Step 1: Prepare FA skeleton (REQUIRED FIRST)
   python -m neurovrai.analysis.tbss.prepare_tbss \\
       --config config.yaml \\
       --metric FA \\
-      --output-dir /study/analysis/tbss_FA/
+      --output-dir /study/analysis/tbss/
 
-  # Prepare MD analysis for specific subjects
+  # Step 2: Project DTI metrics onto FA skeleton
   python -m neurovrai.analysis.tbss.prepare_tbss \\
       --config config.yaml \\
       --metric MD \\
-      --subjects sub-001 sub-002 sub-003 \\
-      --output-dir /study/analysis/tbss_MD/
+      --fa-skeleton-dir /study/analysis/tbss/ \\
+      --output-dir /study/analysis/tbss/
+
+  # Step 3: Project DKI metrics (if available)
+  python -m neurovrai.analysis.tbss.prepare_tbss \\
+      --config config.yaml \\
+      --metric MK \\
+      --fa-skeleton-dir /study/analysis/tbss/ \\
+      --output-dir /study/analysis/tbss/
+
+  # Step 4: Project NODDI metrics (if available)
+  python -m neurovrai.analysis.tbss.prepare_tbss \\
+      --config config.yaml \\
+      --metric FICVF \\
+      --fa-skeleton-dir /study/analysis/tbss/ \\
+      --output-dir /study/analysis/tbss/
+
+  # Use subjects from design matrix (RECOMMENDED)
+  python -m neurovrai.analysis.tbss.prepare_tbss \\
+      --config config.yaml \\
+      --metric FA \\
+      --subject-list /study/designs/dki/subject_list.txt \\
+      --output-dir /study/analysis/tbss/
+
+  # Or specify subjects manually
+  python -m neurovrai.analysis.tbss.prepare_tbss \\
+      --config config.yaml \\
+      --metric FA \\
+      --subjects IRC805-0580101 IRC805-1230101 \\
+      --output-dir /study/analysis/tbss/
+
+Supported Metrics:
+  DTI:    FA, MD, AD, RD
+  DKI:    MK (mean kurtosis), AK (axial), RK (radial), KFA
+  NODDI:  FICVF (neurite density), ODI (dispersion), FISO (isotropic)
         """
     )
 
@@ -533,8 +855,8 @@ Examples:
         '--metric',
         type=str,
         required=True,
-        choices=['FA', 'MD', 'AD', 'RD'],
-        help='DTI metric to analyze'
+        choices=ALL_METRICS,
+        help='Metric to analyze (DTI: FA/MD/AD/RD, DKI: MK/AK/RK/KFA, NODDI: FICVF/ODI/FISO)'
     )
 
     parser.add_argument(
@@ -545,13 +867,52 @@ Examples:
     )
 
     parser.add_argument(
+        '--fa-skeleton-dir',
+        type=Path,
+        help='Directory containing FA skeleton (required for non-FA metrics). '
+             'If not specified, uses --output-dir'
+    )
+
+    parser.add_argument(
         '--subjects',
         type=str,
         nargs='+',
         help='Specific subjects to include (default: discover all)'
     )
 
+    parser.add_argument(
+        '--subject-list',
+        type=Path,
+        help='Path to text file with subject IDs (one per line). '
+             'If provided, only these subjects will be used in the exact order specified. '
+             'This should match your design matrix subject order.'
+    )
+
     args = parser.parse_args()
+
+    # Validate mutually exclusive subject specification
+    if args.subjects and args.subject_list:
+        parser.error("Cannot specify both --subjects and --subject-list")
+
+    # Read subject list from file if provided
+    subjects = None
+    if args.subject_list:
+        if not args.subject_list.exists():
+            parser.error(f"Subject list file not found: {args.subject_list}")
+
+        with open(args.subject_list, 'r') as f:
+            subjects = [line.strip() for line in f if line.strip()]
+
+        print(f"Loaded {len(subjects)} subjects from {args.subject_list}")
+        print(f"Subjects will be processed in the order specified in the file.")
+    elif args.subjects:
+        subjects = args.subjects
+
+    # Validate that FA skeleton dir is provided or same as output_dir for non-FA metrics
+    if args.metric != 'FA' and args.fa_skeleton_dir is None:
+        print(f"Warning: --fa-skeleton-dir not specified for non-FA metric '{args.metric}'")
+        print(f"Using --output-dir as FA skeleton location: {args.output_dir}")
+        print("This assumes FA skeleton was already created in this directory.\n")
 
     # Load config
     config = load_config(args.config)
@@ -561,7 +922,8 @@ Examples:
         config=config,
         metric=args.metric,
         output_dir=args.output_dir,
-        subjects=args.subjects
+        subjects=subjects,
+        fa_skeleton_dir=args.fa_skeleton_dir
     )
 
     # Exit with appropriate code
