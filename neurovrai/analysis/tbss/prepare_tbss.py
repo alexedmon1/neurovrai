@@ -401,11 +401,13 @@ def validate_fa_skeleton(fa_skeleton_dir: Path, logger: logging.Logger) -> Dict:
     logger.info(f"FA skeleton directory: {fa_skeleton_dir}")
 
     # Check for required FA skeleton files
+    # Note: TBSS creates skeleton files in stats/ directory after tbss_4_prestats
     required_files = {
         'fa_dir': fa_skeleton_dir / 'FA',
-        'mean_fa': fa_skeleton_dir / 'FA' / 'mean_FA.nii.gz',
-        'mean_fa_skeleton': fa_skeleton_dir / 'FA' / 'mean_FA_skeleton.nii.gz',
-        'all_fa_skeletonised': fa_skeleton_dir / 'FA' / 'all_FA_skeletonised.nii.gz',
+        'stats_dir': fa_skeleton_dir / 'stats',
+        'mean_fa': fa_skeleton_dir / 'stats' / 'mean_FA.nii.gz',
+        'mean_fa_skeleton': fa_skeleton_dir / 'stats' / 'mean_FA_skeleton.nii.gz',
+        'all_fa_skeletonised': fa_skeleton_dir / 'stats' / 'all_FA_skeletonised.nii.gz',
         'subject_list': fa_skeleton_dir / 'subject_list.txt'
     }
 
@@ -430,6 +432,7 @@ def validate_fa_skeleton(fa_skeleton_dir: Path, logger: logging.Logger) -> Dict:
 
     logger.info("✓ FA skeleton validation successful")
     logger.info(f"  FA directory: {required_files['fa_dir']}")
+    logger.info(f"  Stats directory: {required_files['stats_dir']}")
     logger.info(f"  Mean FA skeleton: {required_files['mean_fa_skeleton']}")
     logger.info(f"  Skeletonised FA: {required_files['all_fa_skeletonised']}")
 
@@ -471,13 +474,13 @@ def run_tbss_non_fa(
 
         logger.info(f"FA skeleton has {len(fa_subject_order)} subjects")
 
-        # Create alternate directory for the new metric
-        # tbss_non_FA expects files in: origdata/{subject_id}_{METRIC}.nii.gz
-        origdata_dir = output_dir / "origdata"
-        origdata_dir.mkdir(parents=True, exist_ok=True)
+        # Create directory for the new metric
+        # tbss_non_FA expects files in: {METRIC}/{subject_id}.nii.gz (no metric suffix)
+        metric_dir = output_dir / metric
+        metric_dir.mkdir(parents=True, exist_ok=True)
 
-        # Copy metric files to origdata with proper naming
-        logger.info(f"\nCopying {metric} files to origdata/...")
+        # Copy metric files to metric directory with proper naming
+        logger.info(f"\nCopying {metric} files to {metric}/ directory...")
         included_subjects = [s for s in subjects_data if s.included]
 
         # Create mapping of subject_id to metric file
@@ -490,8 +493,8 @@ def run_tbss_non_fa(
                 logger.warning(f"  ! {subject_id}: Not found in {metric} data (was in FA)")
                 continue
 
-            # tbss_non_FA expects: origdata/{subject_id}_{METRIC}.nii.gz
-            dest_file = origdata_dir / f"{subject_id}_{metric}.nii.gz"
+            # tbss_non_FA expects: {METRIC}/{subject_id}.nii.gz (WITHOUT metric suffix)
+            dest_file = metric_dir / f"{subject_id}.nii.gz"
             shutil.copy2(subject_to_file[subject_id], dest_file)
             copied_count += 1
             logger.info(f"  ✓ {subject_id}")
