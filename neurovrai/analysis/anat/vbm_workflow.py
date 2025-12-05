@@ -379,7 +379,7 @@ def prepare_vbm_data(
 
             if tissue_file is None or not tissue_file.exists():
                 logger.warning(f"  ✗ Tissue file not found (tried both FAST and Atropos)")
-                logger.warning(f"    FAST: {tissue_file_fast}")
+                logger.warning(f"    FAST: {seg_dir / tissue_map_fast[tissue_type]}")
                 logger.warning(f"    Atropos: {seg_dir / 'POSTERIOR_*.nii.gz'}")
                 missing_subjects.append(subject)
                 continue
@@ -607,12 +607,31 @@ def run_vbm_analysis(
     logger.info("CREATING DESIGN MATRIX")
     logger.info("=" * 80)
 
+    # Detect if first variable is a binary group variable for dummy coding
+    formula_terms = [t.strip() for t in formula.split('+')]
+    first_var = formula_terms[0].replace('C(', '').replace(')', '')
+
+    # Check if first variable is categorical with 2 levels (binary group comparison)
+    use_dummy_coding = False
+    if first_var in participants_df.columns:
+        n_levels = participants_df[first_var].nunique()
+        if n_levels == 2:
+            use_dummy_coding = True
+            logger.info(f"Detected binary group variable '{first_var}' with {n_levels} levels")
+            logger.info(f"Using dummy coding WITHOUT intercept for direct group comparison")
+            # Explicitly mark as categorical in formula
+            formula_categorical = f"C({first_var})" + '+' + '+'.join(formula_terms[1:])
+        else:
+            formula_categorical = formula
+    else:
+        formula_categorical = formula
+
     # Call design matrix function with correct parameters
     design_mat, column_names = create_design_matrix(
         df=participants_df,
-        formula=formula,
+        formula=formula_categorical,
         demean_continuous=True,
-        add_intercept=True
+        add_intercept=not use_dummy_coding  # No intercept for dummy coding
     )
 
     # Save design matrix in FSL vest format
@@ -628,10 +647,49 @@ def run_vbm_analysis(
 
     # Create contrasts matrix
     n_predictors = design_mat.shape[1]
+
+    # Generate contrast vectors based on design matrix structure
+    if use_dummy_coding:
+        # For dummy-coded binary groups, we have two group columns
+        # e.g., columns = ['mriglu_1', 'mriglu_2', 'sex', 'age']
+        group_cols = [i for i, name in enumerate(column_names) if first_var in name]
+        if len(group_cols) != 2:
+            raise ValueError(
+                f"Expected 2 group columns for binary variable '{first_var}', "
+                f"found {len(group_cols)}: {[column_names[i] for i in group_cols]}"
+            )
+
+        logger.info(f"Group columns: {[column_names[i] for i in group_cols]}")
+
+        # Generate contrasts for group comparisons
+        for contrast_name, contrast_vec in list(contrasts.items()):
+            var_name = contrast_name.replace('_positive', '').replace('_negative', '')
+
+            # Create contrast vector
+            contrast_vec_new = [0] * n_predictors
+            if 'positive' in contrast_name.lower():
+                # First group > Second group: [1, -1, 0, 0, ...]
+                contrast_vec_new[group_cols[0]] = 1
+                contrast_vec_new[group_cols[1]] = -1
+                logger.info(f"  Contrast: {contrast_name} = {column_names[group_cols[0]]} > {column_names[group_cols[1]]}")
+            elif 'negative' in contrast_name.lower():
+                # Second group > First group: [-1, 1, 0, 0, ...]
+                contrast_vec_new[group_cols[0]] = -1
+                contrast_vec_new[group_cols[1]] = 1
+                logger.info(f"  Contrast: {contrast_name} = {column_names[group_cols[1]]} > {column_names[group_cols[0]]}")
+
+            contrasts[contrast_name] = contrast_vec_new
+
+    # Validate and build contrast matrix
     contrast_mat = []
     contrast_names = []
 
     for contrast_name, contrast_vec in contrasts.items():
+        if contrast_vec is None:
+            raise ValueError(
+                f"Contrast '{contrast_name}' was not properly generated. "
+                f"This may be due to an issue with the design matrix structure."
+            )
         if len(contrast_vec) != n_predictors:
             raise ValueError(
                 f"Contrast '{contrast_name}' has {len(contrast_vec)} values "
@@ -976,14 +1034,12 @@ if __name__ == '__main__':
         # Parse contrasts
         contrast_names = [c.strip() for c in args.contrasts.split(',')]
 
-        # Create simple contrasts (will need to be customized based on design matrix)
-        # For now, assume first column is intercept, second is main effect
+        # Parse formula to build proper contrast vectors based on design matrix structure
+        # The contrasts will be built dynamically after creating the design matrix
+        # This placeholder will be replaced by actual contrast vectors from design matrix columns
         contrasts = {}
-        for i, name in enumerate(contrast_names):
-            if 'positive' in name.lower():
-                contrasts[name] = [0, 1] + [0] * (len(contrast_names) - 1)
-            elif 'negative' in name.lower():
-                contrasts[name] = [0, -1] + [0] * (len(contrast_names) - 1)
+        for name in contrast_names:
+            contrasts[name] = None  # Will be filled after design matrix creation
 
         # Run VBM analysis
         results = run_vbm_analysis(

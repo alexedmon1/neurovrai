@@ -209,8 +209,11 @@ def create_design_matrix(
                     "Are you sure it's categorical?"
                 )
 
-            # Create dummy variables (drop first level to avoid collinearity)
-            dummies = pd.get_dummies(series, drop_first=True, dtype=float)
+            # Create dummy variables
+            # When intercept is present: drop first level to avoid collinearity
+            # When no intercept: include all levels for group mean comparison
+            drop_first = add_intercept
+            dummies = pd.get_dummies(series, drop_first=drop_first, dtype=float)
 
             for col in dummies.columns:
                 design_cols.append(dummies[col].values)

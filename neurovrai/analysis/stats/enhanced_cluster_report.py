@@ -10,7 +10,7 @@ from scipy import ndimage
 import subprocess
 import json
 
-# JHU white matter atlas labels (FSL's JHU-ICBM-DTI-81)
+# JHU white matter atlas labels (FSL's JHU-ICBM-DTI-81) - 48 regions
 JHU_LABELS = {
     0: "Background",
     1: "Middle cerebellar peduncle",
@@ -61,6 +61,31 @@ JHU_LABELS = {
     46: "Uncinate fasciculus L",
     47: "Tapetum R",
     48: "Tapetum L"
+}
+
+# JHU White Matter Tractography Atlas - 20 major tracts (more comprehensive)
+JHU_TRACTS_LABELS = {
+    0: "Background",
+    1: "Anterior thalamic radiation L",
+    2: "Anterior thalamic radiation R",
+    3: "Corticospinal tract L",
+    4: "Corticospinal tract R",
+    5: "Cingulum (cingulate gyrus) L",
+    6: "Cingulum (cingulate gyrus) R",
+    7: "Cingulum (hippocampus) L",
+    8: "Cingulum (hippocampus) R",
+    9: "Forceps major (splenium of corpus callosum)",
+    10: "Forceps minor (genu of corpus callosum)",
+    11: "Inferior fronto-occipital fasciculus L",
+    12: "Inferior fronto-occipital fasciculus R",
+    13: "Inferior longitudinal fasciculus L",
+    14: "Inferior longitudinal fasciculus R",
+    15: "Superior longitudinal fasciculus L",
+    16: "Superior longitudinal fasciculus R",
+    17: "Uncinate fasciculus L",
+    18: "Uncinate fasciculus R",
+    19: "Superior longitudinal fasciculus (temporal part) L",
+    20: "Superior longitudinal fasciculus (temporal part) R"
 }
 
 # Harvard-Oxford Cortical atlas labels (48 regions)
@@ -147,16 +172,88 @@ def get_fsl_dir():
     return Path(fsl_dir)
 
 
-def load_jhu_atlas():
-    """Load JHU white matter atlas from FSL"""
-    fsl_dir = get_fsl_dir()
-    atlas_path = fsl_dir / 'data' / 'atlases' / 'JHU' / 'JHU-ICBM-labels-1mm.nii.gz'
+def load_jhu_atlas(use_combined=True):
+    """
+    Load JHU white matter atlas from FSL.
 
-    if atlas_path.exists():
-        return nib.load(str(atlas_path)), JHU_LABELS
-    else:
-        print(f"Warning: JHU atlas not found at {atlas_path}")
-        return None, None
+    Parameters
+    ----------
+    use_combined : bool or str
+        - True or 'combined': Combine both tractography and labels atlases (best coverage)
+        - 'tracts': Use only JHU tractography atlas (20 major tracts)
+        - False or 'labels': Use only JHU labels atlas (48 regions)
+
+    Returns
+    -------
+    tuple
+        (atlas_img, atlas_labels_dict)
+    """
+    fsl_dir = get_fsl_dir()
+
+    # Paths
+    tracts_path = fsl_dir / 'data' / 'atlases' / 'JHU' / 'JHU-ICBM-tracts-maxprob-thr0-1mm.nii.gz'
+    labels_path = fsl_dir / 'data' / 'atlases' / 'JHU' / 'JHU-ICBM-labels-1mm.nii.gz'
+
+    # Determine mode
+    if use_combined is True or use_combined == 'combined':
+        # COMBINED MODE: Best anatomical coverage
+        if not tracts_path.exists() or not labels_path.exists():
+            print(f"Warning: Cannot combine atlases - one or both not found")
+            print(f"   Tracts: {tracts_path.exists()}")
+            print(f"   Labels: {labels_path.exists()}")
+            # Fallback to whichever is available
+            if tracts_path.exists():
+                return load_jhu_atlas(use_combined='tracts')
+            elif labels_path.exists():
+                return load_jhu_atlas(use_combined='labels')
+            return None, None
+
+        print(f"   Using Combined JHU Atlas (Tracts + Labels)")
+
+        # Load both atlases
+        tracts_img = nib.load(str(tracts_path))
+        labels_img = nib.load(str(labels_path))
+
+        tracts_data = tracts_img.get_fdata()
+        labels_data = labels_img.get_fdata()
+
+        # Combine: tracts take priority (they're major fiber bundles)
+        # Labels fill in gaps with offset of 100 to avoid conflicts
+        combined_data = np.zeros_like(tracts_data)
+        combined_data = tracts_data.copy()  # Start with tracts
+
+        # Add labels where tracts are empty (background)
+        mask = tracts_data == 0
+        combined_data[mask] = labels_data[mask] + 100  # Offset by 100
+
+        # Create combined image
+        combined_img = nib.Nifti1Image(combined_data, tracts_img.affine, tracts_img.header)
+
+        # Create combined labels dictionary
+        combined_labels = JHU_TRACTS_LABELS.copy()
+        for idx, label in JHU_LABELS.items():
+            if idx > 0:  # Skip background
+                combined_labels[idx + 100] = label  # Offset labels
+
+        return combined_img, combined_labels
+
+    elif use_combined == 'tracts':
+        # TRACTS ONLY MODE
+        if tracts_path.exists():
+            print(f"   Using JHU White Matter Tractography Atlas (20 tracts)")
+            return nib.load(str(tracts_path)), JHU_TRACTS_LABELS
+        else:
+            print(f"Warning: JHU tracts atlas not found at {tracts_path}")
+            return None, None
+
+    else:  # 'labels' or False
+        # LABELS ONLY MODE
+        if labels_path.exists():
+            print(f"   Using JHU White Matter Labels Atlas (48 regions)")
+            return nib.load(str(labels_path)), JHU_LABELS
+        else:
+            print(f"Warning: JHU labels atlas not found at {labels_path}")
+            return None, None
 
 
 def load_harvard_oxford_atlas(resolution='2mm'):
@@ -327,8 +424,8 @@ def extract_clusters_with_atlas(stat_file, corrp_file, mean_fa_file,
     # Load atlas based on type
     if atlas_type == 'harvard-oxford':
         atlas_img, atlas_labels = load_harvard_oxford_atlas(resolution=atlas_resolution)
-    else:  # Default to JHU for TBSS
-        atlas_img, atlas_labels = load_jhu_atlas()
+    else:  # Default to JHU for TBSS (use combined atlas - best coverage)
+        atlas_img, atlas_labels = load_jhu_atlas(use_combined=True)
 
     # Threshold by p-value
     sig_mask = corrp_data >= p_thresh
@@ -406,7 +503,7 @@ def generate_enhanced_html_report(clusters, mean_fa_data, contrast_name,
     if atlas_type == 'harvard-oxford':
         atlas_name = "Harvard-Oxford Cortical & Subcortical Atlas"
     else:
-        atlas_name = "JHU White Matter Atlas"
+        atlas_name = "JHU Combined White Matter Atlas (Tractography + Labels)"
 
     # Generate mosaic images for top clusters
     img_dir = output_dir / 'images'
@@ -590,6 +687,28 @@ def generate_enhanced_html_report(clusters, mean_fa_data, contrast_name,
         </div>
 """
 
+    # Add demographics section if provided
+    if demographics:
+        g1 = demographics['group1']
+        g2 = demographics['group2']
+        html += f"""
+        <div class="summary" style="margin-top: 20px;">
+            <div class="summary-item" style="grid-column: span 5;">
+                <strong>📋 Sample Demographics (N={demographics['total_n']})</strong>
+            </div>
+            <div class="summary-item">
+                <strong>{g1['label']}</strong><br>
+                N={g1['n']} ({g1['n_male']}M/{g1['n_female']}F)<br>
+                Age: M={g1['age_mean']:.1f}, SD={g1['age_std']:.1f}
+            </div>
+            <div class="summary-item">
+                <strong>{g2['label']}</strong><br>
+                N={g2['n']} ({g2['n_male']}M/{g2['n_female']}F)<br>
+                Age: M={g2['age_mean']:.1f}, SD={g2['age_std']:.1f}
+            </div>
+        </div>
+"""
+
     # Add cluster cards
     for rank, cluster in enumerate(clusters, 1):
         p_class = "p-significant" if cluster['peak_p'] < 0.05 else "p-marginal" if cluster['peak_p'] < 0.30 else "p-ns"
@@ -730,7 +849,7 @@ if __name__ == '__main__':
 def create_enhanced_cluster_report(stat_map, corrp_map, threshold, output_dir,
                                   contrast_name, max_clusters=10, liberal_threshold=0.7,
                                   background_image=None, atlas_type='harvard-oxford',
-                                  study_name=None, analysis_type=None):
+                                  study_name=None, analysis_type=None, demographics=None):
     """
     Create enhanced cluster report for VBM analysis.
 
