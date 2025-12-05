@@ -120,6 +120,12 @@ NOTE: GLM uses nilearn's SecondLevelModel with FDR and Bonferroni correction.
         default='vbm_analysis',
         help='Analysis name for output directory (default: vbm_analysis)'
     )
+    parser.add_argument(
+        '--design-dir',
+        type=Path,
+        required=False,
+        help='Directory with pre-generated design matrices (design.mat, design.con). If not specified, uses {study-root}/data/designs/vbm/'
+    )
 
     args = parser.parse_args()
 
@@ -128,10 +134,30 @@ NOTE: GLM uses nilearn's SecondLevelModel with FDR and Bonferroni correction.
     derivatives_dir = study_root / 'derivatives'
     analysis_dir = study_root / 'analysis'
 
-    # Try to use design-matched participants file first, fall back to synthetic
-    participants_file = study_root / 'data' / 'designs' / 'vbm' / 'participants_matched.tsv'
+    # Set design directory (use provided or default)
+    if args.design_dir:
+        design_dir = args.design_dir.resolve()
+    else:
+        design_dir = study_root / 'data' / 'designs' / 'vbm'
+
+    # Verify design files exist
+    design_mat = design_dir / 'design.mat'
+    design_con = design_dir / 'design.con'
+    participants_file = design_dir / 'participants_matched.tsv'
+
+    if not design_mat.exists():
+        logger.error(f"Design matrix not found: {design_mat}")
+        logger.info("\nPlease generate design matrices first:")
+        logger.info("  python generate_design_matrices.py --all")
+        sys.exit(1)
+
+    if not design_con.exists():
+        logger.error(f"Contrast file not found: {design_con}")
+        sys.exit(1)
+
     if not participants_file.exists():
-        participants_file = analysis_dir / 'participants_synthetic.tsv'
+        logger.error(f"Participants file not found: {participants_file}")
+        sys.exit(1)
 
     # Setup logging
     log_file = Path('logs') / f'vbm_group_analysis_{args.tissue.lower()}.log'
@@ -228,18 +254,18 @@ NOTE: GLM uses nilearn's SecondLevelModel with FDR and Bonferroni correction.
         logger.info("STEP 2: STATISTICAL ANALYSIS")
         logger.info("=" * 80)
 
-        # Define contrasts
-        # For a design with: [intercept, mriglu, sex, age]
-        contrasts = {
-            'group2_gt_group1': [0, 1, 0, 0],
-            'group1_gt_group2': [0, -1, 0, 0]
-        }
+        # Use pre-generated design matrices from design directory
+        # Design matrices created by generate_design_matrices.py with neuroaider
+        # Contains: design.mat, design.con, participants_matched.tsv
+        # For binary mriglu groups: 6 contrasts auto-generated
+        #   - mriglu_positive [0, 0, 1, -1]: Controlled > Uncontrolled
+        #   - mriglu_negative [0, 0, -1, 1]: Uncontrolled > Controlled
+        #   - sex_positive/negative: Sex effects
+        #   - age_positive/negative: Age effects
 
         analysis_results = run_vbm_analysis(
             vbm_dir=output_dir,
-            participants_file=participants_file,
-            formula='mriglu + sex + age',
-            contrasts=contrasts,
+            design_dir=design_dir,
             method=args.method,
             n_permutations=args.n_permutations,
             tfce=not args.no_tfce,

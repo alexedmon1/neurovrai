@@ -34,9 +34,10 @@ from typing import Dict, List, Optional
 
 import yaml
 
-from neuroaider import DesignHelper
+# Design matrices now generated separately with generate_design_matrices.py
 from neurovrai.analysis.stats.randomise_wrapper import run_randomise, summarize_results
-from neurovrai.analysis.stats.glm_wrapper import run_fsl_glm, threshold_zstat, summarize_glm_results
+# GLM analysis not yet implemented for TBSS
+# from neurovrai.analysis.stats.nilearn_glm import run_second_level_glm
 from neurovrai.analysis.stats.cluster_report import generate_reports_for_all_contrasts
 import pandas as pd
 
@@ -183,9 +184,7 @@ def validate_prepared_data(data_dir: Path) -> Dict:
 
 def run_tbss_statistical_analysis(
     data_dir: Path,
-    participants_file: Path,
-    formula: str,
-    contrasts: List[Dict],
+    design_dir: Path,
     output_dir: Path,
     method: str = 'randomise',
     n_permutations: int = 5000,
@@ -200,9 +199,7 @@ def run_tbss_statistical_analysis(
 
     Args:
         data_dir: Directory containing prepared TBSS data
-        participants_file: Path to participants CSV
-        formula: Model formula (e.g., "age + sex + exposure")
-        contrasts: List of contrast specifications
+        design_dir: Directory with pre-generated design matrices (design.mat, design.con)
         output_dir: Output directory for analysis results
         method: Statistical method ('randomise', 'glm', or 'both')
         n_permutations: Number of permutations for randomise
@@ -230,8 +227,7 @@ def run_tbss_statistical_analysis(
     logger.info("=" * 80)
     logger.info(f"Data directory: {data_dir}")
     logger.info(f"Output directory: {output_dir}")
-    logger.info(f"Model formula: {formula}")
-    logger.info(f"Number of contrasts: {len(contrasts)}")
+    logger.info(f"Design directory: {design_dir}")
     logger.info(f"Statistical method: {method}")
 
     # Step 1: Validate prepared data
@@ -244,120 +240,74 @@ def run_tbss_statistical_analysis(
     logger.info(f"✓ Subjects included: {prepared_files['n_subjects']}")
     logger.info(f"✓ Skeleton file: {prepared_files['skeleton_file']}")
 
-    # Step 2: Generate design matrix and contrasts using neuroaider
+    # Step 2: Load pre-generated design matrices
     logger.info("\n" + "=" * 80)
-    logger.info("[Step 2] Generating design matrix and contrasts with neuroaider")
+    logger.info("[Step 2] Loading pre-generated design matrices")
     logger.info("=" * 80)
 
-    # Load participants data
+    design_dir = Path(design_dir)
+    source_design_mat = design_dir / 'design.mat'
+    source_design_con = design_dir / 'design.con'
+    source_design_summary = design_dir / 'design_summary.json'
+    participants_file = design_dir / 'participants_matched.tsv'
+
+    # Validate design files exist
+    if not source_design_mat.exists():
+        raise FileNotFoundError(f"Design matrix not found: {source_design_mat}")
+    if not source_design_con.exists():
+        raise FileNotFoundError(f"Contrast file not found: {source_design_con}")
+    if not participants_file.exists():
+        raise FileNotFoundError(f"Participants file not found: {participants_file}")
+
+    # Load design summary
+    import json
+    import shutil
+    if source_design_summary.exists():
+        with open(source_design_summary, 'r') as f:
+            design_summary = json.load(f)
+        logger.info(f"✓ Design summary loaded:")
+        logger.info(f"    Subjects: {design_summary['n_subjects']}")
+        logger.info(f"    Predictors: {design_summary['n_predictors']}")
+        logger.info(f"    Columns: {design_summary['columns']}")
+        logger.info(f"    Contrasts ({design_summary['n_contrasts']}): {design_summary['contrasts']}")
+        contrast_names = design_summary['contrasts']
+    else:
+        logger.warning(f"Design summary not found: {source_design_summary}")
+        with open(source_design_con, 'r') as f:
+            con_lines = f.readlines()
+            n_contrasts = int([l for l in con_lines if '/NumContrasts' in l][0].split()[1])
+        contrast_names = [f"contrast_{i+1}" for i in range(n_contrasts)]
+
+    # Load participants
     participants_df = pd.read_csv(participants_file, sep='\t')
+    subject_list = participants_df['participant_id'].tolist()
 
-    # Load subject list if provided
-    if prepared_files['subject_list_file']:
-        with open(prepared_files['subject_list_file']) as f:
-            subject_list = [line.strip() for line in f if line.strip()]
-        participants_df = participants_df[participants_df['participant_id'].isin(subject_list)]
-        logger.info(f"✓ Filtered to {len(participants_df)} subjects from preparation")
+    logger.info(f"✓ Loaded {len(subject_list)} subjects from design")
 
-    # Parse formula to detect binary groups
-    formula_terms = [t.strip() for t in formula.split('+')]
-    first_var = formula_terms[0].replace('C(', '').replace(')', '')
-
-    # Detect binary categorical for no-intercept dummy coding
-    use_binary_coding = False
-    if first_var in participants_df.columns:
-        n_levels = participants_df[first_var].nunique()
-        if n_levels == 2:
-            use_binary_coding = True
-            logger.info(f"✓ Detected binary group variable '{first_var}' with {n_levels} levels")
-            logger.info(f"✓ Using dummy coding WITHOUT intercept for direct group comparison")
-
-    # Initialize DesignHelper
-    helper = DesignHelper(
-        participants_file=participants_df,
-        subject_column='participant_id',
-        add_intercept=not use_binary_coding
+    # Validate design alignment with TBSS data
+    from neurovrai.analysis.utils.design_validation import validate_design_alignment
+    
+    validation_result = validate_design_alignment(
+        design_dir=design_dir,
+        mri_files=[prepared_files['all_FA']],
+        subject_ids=subject_list,
+        analysis_type=f"TBSS {prepared_files['metric']}"
     )
 
-    # Add variables from formula
-    for term in formula_terms:
-        var_name = term.replace('C(', '').replace(')', '').strip()
+    logger.info(f"✓ Design validation passed: {validation_result['n_subjects']} subjects aligned")
 
-        if var_name not in participants_df.columns:
-            raise ValueError(f"Variable '{var_name}' not found in participants file")
-
-        # Determine if categorical or continuous
-        if pd.api.types.is_numeric_dtype(participants_df[var_name]):
-            n_unique = participants_df[var_name].nunique()
-            if n_unique <= 10 and use_binary_coding and var_name == first_var:
-                helper.add_categorical(var_name, coding='dummy')
-                logger.info(f"✓ Added categorical: {var_name} (dummy coding, no intercept)")
-            elif n_unique <= 10:
-                logger.warning(f"Variable '{var_name}' has {n_unique} unique values - treating as continuous")
-                helper.add_covariate(var_name, mean_center=True)
-            else:
-                helper.add_covariate(var_name, mean_center=True)
-                logger.info(f"✓ Added covariate: {var_name} (mean-centered)")
-        else:
-            helper.add_categorical(var_name, coding='effect' if not use_binary_coding else 'dummy')
-            logger.info(f"✓ Added categorical: {var_name}")
-
-    # Build design matrix
-    design_mat, column_names = helper.build_design_matrix()
-
-    # Add contrasts
-    contrast_names = [c['name'] for c in contrasts]
-
-    # Auto-generate contrasts for binary groups if needed
-    if use_binary_coding:
-        auto_contrast_names = [f"{first_var}_positive", f"{first_var}_negative"]
-        has_auto_contrasts = any(name in contrast_names for name in auto_contrast_names)
-
-        if has_auto_contrasts:
-            logger.info(f"✓ Auto-generating binary group contrasts for '{first_var}'")
-            helper.add_binary_group_contrasts(first_var)
-        else:
-            # User provided custom contrasts
-            for contrast in contrasts:
-                helper.add_contrast(contrast['name'], vector=contrast['vector'])
-    else:
-        # Add user-provided contrasts
-        for contrast in contrasts:
-            helper.add_contrast(contrast['name'], vector=contrast['vector'])
-
-    # Save design files
+    # Copy design files to output directory
     design_mat_file = output_dir / 'design.mat'
     design_con_file = output_dir / 'design.con'
     design_summary_file = output_dir / 'design_summary.json'
 
-    helper.save(
-        design_mat_file=design_mat_file,
-        design_con_file=design_con_file,
-        summary_file=design_summary_file
-    )
+    shutil.copy(source_design_mat, design_mat_file)
+    shutil.copy(source_design_con, design_con_file)
+    if source_design_summary.exists():
+        shutil.copy(source_design_summary, design_summary_file)
 
-    logger.info(f"✓ Design matrix created: {len(participants_df)} subjects, {len(column_names)} predictors")
-    logger.info(f"✓ Columns: {column_names}")
+    logger.info(f"✓ Copied design files to output directory")
 
-    # Check subject count matches
-    if len(participants_df) != prepared_files['n_subjects']:
-        logger.warning(
-            f"Subject count mismatch: design={len(participants_df)}, "
-            f"prepared={prepared_files['n_subjects']}"
-        )
-
-    # Update design_result for downstream compatibility
-    design_result = {
-        'design_mat_file': str(design_mat_file),
-        'contrast_con_file': str(design_con_file),
-        'n_subjects': len(participants_df),
-        'n_predictors': len(column_names)
-    }
-
-    # Initialize results
-    randomise_result = None
-    glm_result = None
-    cluster_results = None
     contrast_names = [c['name'] for c in contrasts]
 
     # Step 3: Run statistical analysis (randomise and/or GLM)
@@ -568,13 +518,13 @@ Examples:
         help='Model formula (e.g., "age + sex + exposure")'
     )
 
-    # Contrast specification (mutually exclusive)
-    contrast_group = parser.add_mutually_exclusive_group(required=True)
+    # Contrast specification (mutually exclusive, OPTIONAL - will auto-generate for binary groups)
+    contrast_group = parser.add_mutually_exclusive_group(required=False)
 
     contrast_group.add_argument(
         '--contrasts-file',
         type=Path,
-        help='Path to contrasts YAML file'
+        help='Path to contrasts YAML file (optional - auto-generates for binary groups)'
     )
 
     contrast_group.add_argument(
@@ -582,7 +532,7 @@ Examples:
         action='append',
         nargs='+',
         metavar=('NAME', 'WEIGHT'),
-        help='Inline contrast: name followed by weights (can specify multiple)'
+        help='Inline contrast: name followed by weights (can specify multiple, optional)'
     )
 
     parser.add_argument(
@@ -642,26 +592,10 @@ Examples:
 
     args = parser.parse_args()
 
-    # Parse contrasts
-    if args.contrasts_file:
-        contrasts = load_contrasts(args.contrasts_file)
-    else:
-        # Parse inline contrasts
-        contrasts = []
-        for contrast in args.contrast:
-            name = contrast[0]
-            weights = [float(w) for w in contrast[1:]]
-            contrasts.append({
-                'name': name,
-                'vector': weights
-            })
-
     # Run analysis
     result = run_tbss_statistical_analysis(
         data_dir=args.data_dir,
-        participants_file=args.participants,
-        formula=args.formula,
-        contrasts=contrasts,
+        design_dir=args.design_dir,
         output_dir=args.output_dir,
         method=args.method,
         n_permutations=args.n_permutations,

@@ -422,67 +422,109 @@ def run_group_analysis(
 
 def main():
     """Main execution"""
-    # Paths
-    study_root = Path('/mnt/bytopia/IRC805')
-    derivatives_dir = study_root / 'derivatives'
-    analysis_dir = study_root / 'analysis'
-    participants_file = analysis_dir / 'participants_synthetic.tsv'
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Run group-level ReHo or fALFF analysis with neuroaider',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument(
+        '--metric',
+        type=str,
+        required=True,
+        choices=['reho', 'falff'],
+        help='Functional metric to analyze'
+    )
+    parser.add_argument(
+        '--derivatives-dir',
+        type=Path,
+        required=True,
+        help='Path to derivatives directory'
+    )
+    parser.add_argument(
+        '--analysis-dir',
+        type=Path,
+        required=True,
+        help='Path to analysis output directory'
+    )
+    parser.add_argument(
+        '--participants',
+        type=Path,
+        required=True,
+        help='Path to participants file (TSV)'
+    )
+    parser.add_argument(
+        '--formula',
+        type=str,
+        required=True,
+        help='Model formula (e.g., mriglu+sex+age)'
+    )
+    parser.add_argument(
+        '--method',
+        type=str,
+        default='randomise',
+        choices=['randomise', 'glm', 'both'],
+        help='Statistical method (default: randomise)'
+    )
+    parser.add_argument(
+        '--n-permutations',
+        type=int,
+        default=5000,
+        help='Number of randomise permutations (default: 5000)'
+    )
+    parser.add_argument(
+        '--z-threshold',
+        type=float,
+        default=2.3,
+        help='Z-score threshold for GLM (default: 2.3)'
+    )
+    parser.add_argument(
+        '--study-name',
+        type=str,
+        default='mriglu_analysis',
+        help='Analysis study name (default: mriglu_analysis)'
+    )
+
+    args = parser.parse_args()
 
     # Setup logging
-    log_file = Path('logs/func_group_analysis.log')
+    metric_name = args.metric.upper()
+    log_file = Path('logs') / f'{args.metric}_group_analysis.log'
     log_file.parent.mkdir(exist_ok=True)
     setup_logging(log_file)
 
     logging.info("=" * 80)
-    logging.info("FUNCTIONAL CONNECTIVITY GROUP ANALYSIS")
+    logging.info(f"{metric_name} GROUP ANALYSIS")
     logging.info("=" * 80)
-    logging.info(f"Study root: {study_root}")
-    logging.info(f"Derivatives: {derivatives_dir}")
-    logging.info(f"Analysis: {analysis_dir}")
-    logging.info(f"Participants: {participants_file}")
-
-    # Model specification
-    formula = 'mriglu+sex+age'  # Binary group comparison with covariates
-    method = 'randomise'  # Change to 'glm' or 'both' as needed
+    logging.info(f"Derivatives: {args.derivatives_dir}")
+    logging.info(f"Analysis: {args.analysis_dir}")
+    logging.info(f"Participants: {args.participants}")
+    logging.info(f"Formula: {args.formula}")
+    logging.info(f"Method: {args.method}")
 
     try:
-        # Run ReHo analysis
-        reho_results = run_group_analysis(
-            metric='reho',
-            derivatives_dir=derivatives_dir,
-            analysis_dir=analysis_dir,
-            participants_file=participants_file,
-            formula=formula,
-            study_name='mock_study',
-            method=method,
-            n_permutations=500
-        )
-
-        # Run fALFF analysis
-        falff_results = run_group_analysis(
-            metric='falff',
-            derivatives_dir=derivatives_dir,
-            analysis_dir=analysis_dir,
-            participants_file=participants_file,
-            formula=formula,
-            study_name='mock_study',
-            method=method,
-            n_permutations=500
+        # Run analysis for the specified metric
+        results = run_group_analysis(
+            metric=args.metric,
+            derivatives_dir=args.derivatives_dir,
+            analysis_dir=args.analysis_dir.parent,  # Remove metric from path (run_group_analysis adds it)
+            participants_file=args.participants,
+            formula=args.formula,
+            study_name=args.study_name,
+            method=args.method,
+            n_permutations=args.n_permutations,
+            z_threshold=args.z_threshold
         )
 
         logging.info("\n" + "=" * 80)
-        logging.info("ALL ANALYSES COMPLETE")
+        logging.info(f"{metric_name} ANALYSIS COMPLETE")
         logging.info("=" * 80)
 
-        if 'randomise' in reho_results:
-            logging.info(f"ReHo (randomise): {reho_results['randomise']['output_dir']}")
-        if 'glm' in reho_results:
-            logging.info(f"ReHo (GLM): {reho_results['glm']['output_dir']}")
-
-        if 'randomise' in falff_results:
-            logging.info(f"fALFF (randomise): {falff_results['randomise']['output_dir']}")
-        if 'glm' in falff_results:
-            logging.info(f"fALFF (GLM): {falff_results['glm']['output_dir']}")
+        if 'randomise' in results:
+            logging.info(f"Randomise: {results['randomise']['output_dir']}")
+        if 'glm' in results:
+            logging.info(f"GLM: {results['glm']['output_dir']}")
 
     except Exception as e:
         logging.error(f"Analysis failed: {e}", exc_info=True)

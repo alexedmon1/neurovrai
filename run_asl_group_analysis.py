@@ -53,15 +53,14 @@ def gather_subject_maps(
     logging.info(f"\nGathering ASL CBF maps...")
     logging.info("=" * 80)
 
-    # Find all subject CBF maps (using MNI-normalized masked versions)
-    map_name = 'cbf_mni_masked.nii.gz'
-
+    # Find all subject CBF maps (using MNI-normalized versions)
     subject_maps = []
     subject_ids = []
 
     # Search for subjects
     for subject_dir in sorted(derivatives_dir.glob('IRC805-*/asl')):
         subject_id = subject_dir.parent.name
+        map_name = f'{subject_id}_cbf_mni.nii.gz'
         map_file = subject_dir / map_name
 
         if map_file.exists():
