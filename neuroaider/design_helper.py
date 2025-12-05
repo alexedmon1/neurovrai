@@ -42,7 +42,8 @@ class DesignHelper:
     def __init__(
         self,
         participants_file: Union[str, Path, pd.DataFrame],
-        subject_column: str = 'participant_id'
+        subject_column: str = 'participant_id',
+        add_intercept: bool = True
     ):
         """
         Initialize design helper
@@ -50,6 +51,8 @@ class DesignHelper:
         Args:
             participants_file: Path to CSV/TSV file or DataFrame with participant data
             subject_column: Column name containing subject IDs
+            add_intercept: Include intercept column (default True). Set False for binary
+                          group comparisons where you want to model group means directly.
         """
         # Load participants data
         if isinstance(participants_file, pd.DataFrame):
@@ -72,6 +75,7 @@ class DesignHelper:
                     self.df = pd.read_csv(participants_file, sep='\t')
 
         self.subject_column = subject_column
+        self.add_intercept = add_intercept
         self.covariates: List[Dict] = []
         self.factors: List[Dict] = []
         self.contrasts: List[Dict] = []
@@ -216,6 +220,104 @@ class DesignHelper:
                 "  - vector (custom)"
             )
 
+    def add_binary_group_contrasts(
+        self,
+        factor_name: str,
+        positive_name: Optional[str] = None,
+        negative_name: Optional[str] = None
+    ):
+        """
+        Automatically generate contrasts for binary group comparison (no intercept mode)
+
+        For a binary factor with levels [A, B], creates:
+        - Positive contrast: [1, -1, 0, 0, ...] (A > B)
+        - Negative contrast: [-1, 1, 0, 0, ...] (B > A)
+
+        This is designed for use with add_intercept=False and dummy coding.
+
+        Args:
+            factor_name: Name of binary categorical factor
+            positive_name: Name for positive contrast (default: {factor_name}_positive)
+            negative_name: Name for negative contrast (default: {factor_name}_negative)
+
+        Raises:
+            ValueError: If factor not found or doesn't have exactly 2 levels
+
+        Example:
+            helper = DesignHelper('participants.tsv', add_intercept=False)
+            helper.add_categorical('group', coding='dummy')  # Has levels: [1, 2]
+            helper.add_covariate('age', mean_center=True)
+            helper.add_binary_group_contrasts('group')
+            # Creates contrasts: group_positive [1, -1, 0] and group_negative [-1, 1, 0]
+        """
+        # Find factor in factors list
+        factor = None
+        for f in self.factors:
+            if f['name'] == factor_name:
+                factor = f
+                break
+
+        if not factor:
+            raise ValueError(
+                f"Factor '{factor_name}' not found. "
+                f"Add it first with add_categorical()"
+            )
+
+        if len(factor['levels']) != 2:
+            raise ValueError(
+                f"Binary contrast generation requires exactly 2 levels. "
+                f"Factor '{factor_name}' has {len(factor['levels'])} levels: {factor['levels']}"
+            )
+
+        if not self.add_intercept and factor['coding'] != 'dummy':
+            logger.warning(
+                f"Binary group contrasts are typically used with dummy coding "
+                f"and no intercept, but factor '{factor_name}' uses '{factor['coding']}' coding"
+            )
+
+        # Must build design matrix first to get column order
+        if self.design_matrix is None:
+            self.build_design_matrix()
+
+        # Find the two group columns
+        levels = sorted(factor['levels'])
+        col1_name = f"{factor_name}_{levels[0]}"
+        col2_name = f"{factor_name}_{levels[1]}"
+
+        if col1_name not in self.design_column_names or col2_name not in self.design_column_names:
+            raise ValueError(
+                f"Could not find columns for binary groups. Expected '{col1_name}' and '{col2_name}' "
+                f"but design matrix has: {self.design_column_names}"
+            )
+
+        idx1 = self.design_column_names.index(col1_name)
+        idx2 = self.design_column_names.index(col2_name)
+
+        n_predictors = len(self.design_column_names)
+
+        # Create positive contrast: group1 > group2
+        positive_vector = [0.0] * n_predictors
+        positive_vector[idx1] = 1.0
+        positive_vector[idx2] = -1.0
+
+        # Create negative contrast: group2 > group1
+        negative_vector = [0.0] * n_predictors
+        negative_vector[idx1] = -1.0
+        negative_vector[idx2] = 1.0
+
+        # Add contrasts
+        pos_name = positive_name or f"{factor_name}_positive"
+        neg_name = negative_name or f"{factor_name}_negative"
+
+        self.add_contrast(pos_name, vector=positive_vector)
+        self.add_contrast(neg_name, vector=negative_vector)
+
+        logger.info(
+            f"Added binary group contrasts for '{factor_name}': "
+            f"'{pos_name}' ({col1_name} > {col2_name}) and "
+            f"'{neg_name}' ({col2_name} > {col1_name})"
+        )
+
     def build_design_matrix(self) -> Tuple[np.ndarray, List[str]]:
         """
         Build design matrix from added covariates and factors
@@ -229,9 +331,10 @@ class DesignHelper:
         columns = []
         column_names = []
 
-        # Add intercept
-        columns.append(np.ones(len(self.df)))
-        column_names.append('Intercept')
+        # Add intercept (optional)
+        if self.add_intercept:
+            columns.append(np.ones(len(self.df)))
+            column_names.append('Intercept')
 
         # Add covariates
         for cov in self.covariates:
@@ -276,20 +379,30 @@ class DesignHelper:
 
             elif coding == 'dummy':
                 # Dummy coding
-                # Reference level = 0, others = 1
-                if reference:
-                    ref_idx = levels.index(reference)
+                # With intercept: Reference level = 0, others = 1 (k-1 columns)
+                # Without intercept: Include all levels (k columns) for direct group mean modeling
+
+                if self.add_intercept:
+                    # Standard dummy coding: drop reference level
+                    if reference:
+                        ref_idx = levels.index(reference)
+                    else:
+                        ref_idx = 0
+                        reference = levels[0]
+
+                    for i, level in enumerate(levels):
+                        if i == ref_idx:
+                            continue  # Skip reference level
+
+                        col = (self.df[name] == level).astype(float).values
+                        columns.append(col)
+                        column_names.append(f"{name}_{level}")
                 else:
-                    ref_idx = 0
-                    reference = levels[0]
-
-                for i, level in enumerate(levels):
-                    if i == ref_idx:
-                        continue  # Skip reference level
-
-                    col = (self.df[name] == level).astype(float).values
-                    columns.append(col)
-                    column_names.append(f"{name}_{level}")
+                    # No intercept: include ALL levels for direct group mean comparison
+                    for level in levels:
+                        col = (self.df[name] == level).astype(float).values
+                        columns.append(col)
+                        column_names.append(f"{name}_{level}")
 
             elif coding == 'one-hot':
                 # One-hot encoding (not recommended with intercept)

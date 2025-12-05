@@ -156,8 +156,62 @@ def example_custom_contrasts():
     print(f"\n✓ Design files saved to: {output_dir}")
 
 
+def example_binary_group_comparison():
+    """Example: Binary group comparison with no intercept (NEW)"""
+    print("\n" + "=" * 60)
+    print("EXAMPLE: Binary Group Comparison (No Intercept)")
+    print("=" * 60 + "\n")
+
+    # Load participant data
+    helper = DesignHelper(
+        participants_file='/study/participants.tsv',
+        add_intercept=False  # KEY: No intercept for direct group mean modeling
+    )
+
+    # Add binary categorical variable (e.g., mriglu: 1=Controlled, 2=Uncontrolled)
+    # Using dummy coding with no intercept creates columns for BOTH groups
+    helper.add_categorical('mriglu', coding='dummy')
+
+    # Add covariates (mean-centered)
+    helper.add_covariate('age', mean_center=True)
+    helper.add_covariate('sex', mean_center=False)  # Often binary 0/1, don't center
+
+    # Automatically generate binary group contrasts
+    # This creates [1, -1, 0, 0] for positive and [-1, 1, 0, 0] for negative
+    helper.add_binary_group_contrasts('mriglu')
+
+    # Validate subjects
+    helper.validate(
+        file_pattern='/study/vbm/GM/subjects/*_GM_mni_smooth.nii.gz',
+        drop_missing=True
+    )
+
+    # Print summary
+    print(helper.summary())
+
+    # Save design files
+    output_dir = Path('/study/vbm/GM/stats_binary')
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    helper.save(
+        design_mat_file=output_dir / 'design.mat',
+        design_con_file=output_dir / 'design.con',
+        contrast_names_file=output_dir / 'contrast_names.txt',
+        summary_file=output_dir / 'design_summary.json'
+    )
+
+    print(f"\n✓ Design files saved to: {output_dir}")
+    print("\nDesign Matrix Columns:", helper.design_column_names)
+    print("- mriglu_1: Controlled group (value=1 for controlled subjects, 0 otherwise)")
+    print("- mriglu_2: Uncontrolled group (value=1 for uncontrolled subjects, 0 otherwise)")
+    print("\nContrasts:")
+    print("- mriglu_positive [1, -1, 0, 0]: Controlled > Uncontrolled")
+    print("- mriglu_negative [-1, 1, 0, 0]: Uncontrolled > Controlled")
+
+
 if __name__ == '__main__':
     # Run examples
     example_vbm_design()
     # example_tbss_design()
     # example_custom_contrasts()
+    # example_binary_group_comparison()

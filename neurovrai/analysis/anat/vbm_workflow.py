@@ -76,7 +76,7 @@ from nipype.interfaces import fsl
 from nipype.pipeline import engine as pe
 from nipype.interfaces.utility import IdentityInterface, Function
 
-from neurovrai.analysis.stats.design_matrix import create_design_matrix
+from neuroaider import DesignHelper
 from neurovrai.analysis.stats.randomise_wrapper import run_randomise
 from neurovrai.analysis.stats.nilearn_glm import run_second_level_glm, summarize_glm_results
 
@@ -602,119 +602,105 @@ def run_vbm_analysis(
 
     logger.info(f"Loaded demographics for {len(participants_df)} subjects")
 
-    # Create design matrix
+    # Create design matrix using neuroaider
     logger.info("\n" + "=" * 80)
-    logger.info("CREATING DESIGN MATRIX")
+    logger.info("CREATING DESIGN MATRIX WITH NEUROAIDER")
     logger.info("=" * 80)
 
-    # Detect if first variable is a binary group variable for dummy coding
+    # Parse formula to extract variables
     formula_terms = [t.strip() for t in formula.split('+')]
     first_var = formula_terms[0].replace('C(', '').replace(')', '')
 
-    # Check if first variable is categorical with 2 levels (binary group comparison)
-    use_dummy_coding = False
+    # Detect if first variable is binary categorical for no-intercept dummy coding
+    use_binary_coding = False
     if first_var in participants_df.columns:
         n_levels = participants_df[first_var].nunique()
         if n_levels == 2:
-            use_dummy_coding = True
-            logger.info(f"Detected binary group variable '{first_var}' with {n_levels} levels")
-            logger.info(f"Using dummy coding WITHOUT intercept for direct group comparison")
-            # Explicitly mark as categorical in formula
-            formula_categorical = f"C({first_var})" + '+' + '+'.join(formula_terms[1:])
-        else:
-            formula_categorical = formula
-    else:
-        formula_categorical = formula
+            use_binary_coding = True
+            logger.info(f"✓ Detected binary group variable '{first_var}' with {n_levels} levels")
+            logger.info(f"✓ Using dummy coding WITHOUT intercept for direct group comparison")
 
-    # Call design matrix function with correct parameters
-    design_mat, column_names = create_design_matrix(
-        df=participants_df,
-        formula=formula_categorical,
-        demean_continuous=True,
-        add_intercept=not use_dummy_coding  # No intercept for dummy coding
+    # Initialize DesignHelper
+    helper = DesignHelper(
+        participants_file=participants_df.reset_index(),
+        subject_column='participant_id',
+        add_intercept=not use_binary_coding
     )
 
-    # Save design matrix in FSL vest format
+    # Add variables from formula
+    for term in formula_terms:
+        var_name = term.replace('C(', '').replace(')', '').strip()
+
+        if var_name not in participants_df.columns:
+            raise ValueError(f"Variable '{var_name}' not found in participants file")
+
+        # Determine if categorical or continuous
+        if pd.api.types.is_numeric_dtype(participants_df[var_name]):
+            # Check if it's truly continuous or just numeric categorical
+            n_unique = participants_df[var_name].nunique()
+            if n_unique <= 10 and use_binary_coding and var_name == first_var:
+                # Binary group variable - use dummy coding
+                helper.add_categorical(var_name, coding='dummy')
+                logger.info(f"✓ Added categorical: {var_name} (dummy coding, no intercept)")
+            elif n_unique <= 10:
+                # Other categorical with few levels
+                logger.warning(f"Variable '{var_name}' has {n_unique} unique values - treating as continuous")
+                helper.add_covariate(var_name, mean_center=True)
+            else:
+                # Continuous variable
+                helper.add_covariate(var_name, mean_center=True)
+                logger.info(f"✓ Added covariate: {var_name} (mean-centered)")
+        else:
+            # Explicitly categorical
+            helper.add_categorical(var_name, coding='effect' if not use_binary_coding else 'dummy')
+            logger.info(f"✓ Added categorical: {var_name}")
+
+    # Build design matrix
+    design_mat, column_names = helper.build_design_matrix()
+
+    # Auto-generate contrasts for binary groups
+    if use_binary_coding:
+        # Check if contrasts contain auto-generated names (e.g., 'mriglu_positive')
+        auto_contrast_names = [f"{first_var}_positive", f"{first_var}_negative"]
+        has_auto_contrasts = any(name in contrasts for name in auto_contrast_names)
+
+        if has_auto_contrasts:
+            logger.info(f"✓ Auto-generating binary group contrasts for '{first_var}'")
+            helper.add_binary_group_contrasts(first_var)
+        else:
+            # User provided custom contrasts - add them manually
+            logger.info("✓ Using user-provided contrasts")
+            for contrast_name, contrast_vec in contrasts.items():
+                helper.add_contrast(contrast_name, vector=contrast_vec)
+    else:
+        # Add user-provided contrasts
+        for contrast_name, contrast_vec in contrasts.items():
+            helper.add_contrast(contrast_name, vector=contrast_vec)
+
+    # Save design files using neuroaider
     design_mat_file = stats_dir / 'design.mat'
-    with open(design_mat_file, 'w') as f:
-        f.write(f"/NumWaves {design_mat.shape[1]}\n")
-        f.write(f"/NumPoints {design_mat.shape[0]}\n")
-        f.write("/Matrix\n")
-        np.savetxt(f, design_mat, fmt='%.6f')
-    logger.info(f"Design matrix shape: {design_mat.shape}")
-    logger.info(f"Columns: {column_names}")
-    logger.info(f"✓ Saved: {design_mat_file}")
-
-    # Create contrasts matrix
-    n_predictors = design_mat.shape[1]
-
-    # Generate contrast vectors based on design matrix structure
-    if use_dummy_coding:
-        # For dummy-coded binary groups, we have two group columns
-        # e.g., columns = ['mriglu_1', 'mriglu_2', 'sex', 'age']
-        group_cols = [i for i, name in enumerate(column_names) if first_var in name]
-        if len(group_cols) != 2:
-            raise ValueError(
-                f"Expected 2 group columns for binary variable '{first_var}', "
-                f"found {len(group_cols)}: {[column_names[i] for i in group_cols]}"
-            )
-
-        logger.info(f"Group columns: {[column_names[i] for i in group_cols]}")
-
-        # Generate contrasts for group comparisons
-        for contrast_name, contrast_vec in list(contrasts.items()):
-            var_name = contrast_name.replace('_positive', '').replace('_negative', '')
-
-            # Create contrast vector
-            contrast_vec_new = [0] * n_predictors
-            if 'positive' in contrast_name.lower():
-                # First group > Second group: [1, -1, 0, 0, ...]
-                contrast_vec_new[group_cols[0]] = 1
-                contrast_vec_new[group_cols[1]] = -1
-                logger.info(f"  Contrast: {contrast_name} = {column_names[group_cols[0]]} > {column_names[group_cols[1]]}")
-            elif 'negative' in contrast_name.lower():
-                # Second group > First group: [-1, 1, 0, 0, ...]
-                contrast_vec_new[group_cols[0]] = -1
-                contrast_vec_new[group_cols[1]] = 1
-                logger.info(f"  Contrast: {contrast_name} = {column_names[group_cols[1]]} > {column_names[group_cols[0]]}")
-
-            contrasts[contrast_name] = contrast_vec_new
-
-    # Validate and build contrast matrix
-    contrast_mat = []
-    contrast_names = []
-
-    for contrast_name, contrast_vec in contrasts.items():
-        if contrast_vec is None:
-            raise ValueError(
-                f"Contrast '{contrast_name}' was not properly generated. "
-                f"This may be due to an issue with the design matrix structure."
-            )
-        if len(contrast_vec) != n_predictors:
-            raise ValueError(
-                f"Contrast '{contrast_name}' has {len(contrast_vec)} values "
-                f"but design matrix has {n_predictors} predictors"
-            )
-        contrast_mat.append(contrast_vec)
-        contrast_names.append(contrast_name)
-        logger.info(f"  Contrast: {contrast_name} = {contrast_vec}")
-
-    contrast_mat = np.array(contrast_mat)
-
-    # Save contrasts in FSL vest format
     design_con_file = stats_dir / 'design.con'
-    with open(design_con_file, 'w') as f:
-        f.write(f"/NumWaves {contrast_mat.shape[1]}\n")
-        f.write(f"/NumContrasts {contrast_mat.shape[0]}\n")
-        f.write("/Matrix\n")
-        np.savetxt(f, contrast_mat, fmt='%.6f')
-    logger.info(f"✓ Saved: {design_con_file} ({len(contrast_names)} contrasts)")
+    design_summary_file = stats_dir / 'design_summary.json'
 
-    # Save contrast names for reference
-    contrast_names_file = stats_dir / 'contrast_names.txt'
-    with open(contrast_names_file, 'w') as f:
-        f.write('\n'.join(contrast_names))
-    logger.info(f"✓ Saved: {contrast_names_file}")
+    helper.save(
+        design_mat_file=design_mat_file,
+        design_con_file=design_con_file,
+        summary_file=design_summary_file
+    )
+
+    logger.info(f"✓ Design matrix shape: {design_mat.shape}")
+    logger.info(f"✓ Columns: {column_names}")
+    logger.info(f"✓ Saved design files:")
+    logger.info(f"    - {design_mat_file}")
+    logger.info(f"    - {design_con_file}")
+    logger.info(f"    - {design_summary_file}")
+
+    # Build contrast matrix for downstream processing
+    contrast_mat, contrast_names = helper.build_contrast_matrix()
+
+    logger.info(f"✓ Contrasts ({len(contrast_names)}):")
+    for contrast_name in contrast_names:
+        logger.info(f"    - {contrast_name}")
 
     # Initialize results
     randomise_result = None

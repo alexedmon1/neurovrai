@@ -132,6 +132,45 @@ helper.add_categorical('group', coding='dummy', reference='control')
 # control = 0, patient = 1
 ```
 
+### Binary Group Comparison (No Intercept)
+
+**NEW**: For direct binary group mean comparisons without intercept:
+
+```python
+# Initialize with no intercept
+helper = DesignHelper('participants.tsv', add_intercept=False)
+
+# Add binary categorical variable (e.g., Controlled vs Uncontrolled)
+helper.add_categorical('group', coding='dummy')  # levels: [1, 2]
+
+# Add covariates
+helper.add_covariate('age', mean_center=True)
+helper.add_covariate('sex', mean_center=True)
+
+# Automatically generate binary group contrasts
+helper.add_binary_group_contrasts('group')
+# Creates: group_positive [1, -1, 0, 0] and group_negative [-1, 1, 0, 0]
+```
+
+**Why use this?**
+- Models group means directly instead of group differences
+- Statistically appropriate for categorical group comparisons
+- Contrasts test: Group1 > Group2 and Group2 > Group1
+- Equivalent to t-test when no covariates present
+
+**Design Matrix Structure:**
+```
+          group_1  group_2  age   sex
+Subject1:    1       0     -5.2   0.1
+Subject2:    1       0      3.1  -0.9
+Subject3:    0       1     -2.1   0.1
+Subject4:    0       1      4.2  -0.9
+```
+
+**Contrast Vectors:**
+- `group_positive`: `[1, -1, 0, 0]` → Group1 > Group2
+- `group_negative`: `[-1, 1, 0, 0]` → Group2 > Group1
+
 ### One-Hot Encoding
 
 Each level gets its own column (not recommended with intercept):

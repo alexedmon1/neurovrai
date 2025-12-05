@@ -16,6 +16,7 @@ import numpy as np
 # Add neurovrai to path
 sys.path.insert(0, str(Path(__file__).parent))
 
+from neuroaider import DesignHelper
 from neurovrai.analysis.stats.randomise_wrapper import run_randomise, summarize_results
 from neurovrai.analysis.stats.nilearn_glm import run_second_level_glm, summarize_glm_results
 
@@ -145,17 +146,19 @@ def create_mean_mask(image_4d: Path, output_dir: Path) -> Path:
 def create_design_matrices(
     subject_ids: list[str],
     participants_file: Path,
+    formula: str,
     output_dir: Path
 ):
     """
-    Create FSL design matrices and contrasts
+    Create FSL design matrices and contrasts using neuroaider
 
     Args:
         subject_ids: List of subject IDs in 4D image order
         participants_file: Path to participants.tsv
+        formula: Model formula (e.g., 'mriglu+sex+age' for binary group comparison)
         output_dir: Output directory
     """
-    logging.info("\nCreating design matrices...")
+    logging.info("\nCreating design matrices with neuroaider...")
     logging.info("=" * 80)
 
     # Load participants data
@@ -169,74 +172,91 @@ def create_design_matrices(
     for subject_id in subject_ids:
         match = df[df['participant_id'] == subject_id]
         if len(match) == 0:
-            logging.warning(f"Subject {subject_id} not found in participants file")
-            # Use default values
-            match = pd.DataFrame({
-                'participant_id': [subject_id],
-                'age': [30.0],
-                'group': [0]
-            })
+            raise ValueError(f"Subject {subject_id} not found in participants file")
         df_ordered = pd.concat([df_ordered, match.iloc[0:1]], ignore_index=True)
 
-    # Normalize age (z-score) and get group (already 0/1)
-    age_norm = (df_ordered['age'] - df_ordered['age'].mean()) / df_ordered['age'].std()
-    group = df_ordered['group'].values
+    logging.info(f"✓ Matched {len(df_ordered)} subjects to 4D image order")
 
-    # Create design matrix (FSL format)
-    # Columns: intercept, age, group
-    n_subjects = len(subject_ids)
-    design = np.column_stack([
-        np.ones(n_subjects),  # Intercept
-        age_norm.values,       # Age (normalized)
-        group                  # Group (0/1)
-    ])
+    # Parse formula to detect binary groups
+    formula_terms = [t.strip() for t in formula.split('+')]
+    first_var = formula_terms[0].replace('C(', '').replace(')', '')
 
-    # Save design matrix (FSL format)
+    # Detect binary categorical for no-intercept dummy coding
+    use_binary_coding = False
+    if first_var in df_ordered.columns:
+        n_levels = df_ordered[first_var].nunique()
+        if n_levels == 2:
+            use_binary_coding = True
+            logging.info(f"✓ Detected binary group variable '{first_var}' with {n_levels} levels")
+            logging.info(f"✓ Using dummy coding WITHOUT intercept for direct group comparison")
+
+    # Initialize DesignHelper
+    helper = DesignHelper(
+        participants_file=df_ordered,
+        subject_column='participant_id',
+        add_intercept=not use_binary_coding
+    )
+
+    # Add variables from formula
+    for term in formula_terms:
+        var_name = term.replace('C(', '').replace(')', '').strip()
+
+        if var_name not in df_ordered.columns:
+            raise ValueError(f"Variable '{var_name}' not found in participants file")
+
+        # Determine if categorical or continuous
+        if pd.api.types.is_numeric_dtype(df_ordered[var_name]):
+            n_unique = df_ordered[var_name].nunique()
+            if n_unique <= 10 and use_binary_coding and var_name == first_var:
+                helper.add_categorical(var_name, coding='dummy')
+                logging.info(f"✓ Added categorical: {var_name} (dummy coding, no intercept)")
+            elif n_unique <= 10:
+                logging.warning(f"Variable '{var_name}' has {n_unique} unique values - treating as continuous")
+                helper.add_covariate(var_name, mean_center=True)
+            else:
+                helper.add_covariate(var_name, mean_center=True)
+                logging.info(f"✓ Added covariate: {var_name} (mean-centered)")
+        else:
+            helper.add_categorical(var_name, coding='effect' if not use_binary_coding else 'dummy')
+            logging.info(f"✓ Added categorical: {var_name}")
+
+    # Build design matrix
+    design_mat, column_names = helper.build_design_matrix()
+
+    # Auto-generate contrasts for binary groups
+    if use_binary_coding:
+        logging.info(f"✓ Auto-generating binary group contrasts for '{first_var}'")
+        helper.add_binary_group_contrasts(first_var)
+
+    # Add covariate contrasts if present
+    for term in formula_terms:
+        var_name = term.replace('C(', '').replace(')', '').strip()
+        if var_name in column_names and var_name != first_var:
+            # Add positive and negative contrasts for continuous covariates
+            helper.add_contrast(f"{var_name}_positive", covariate=var_name, direction='+')
+            helper.add_contrast(f"{var_name}_negative", covariate=var_name, direction='-')
+            logging.info(f"✓ Added contrasts for covariate: {var_name}")
+
+    # Save design files
     design_file = output_dir / 'design.mat'
-    with open(design_file, 'w') as f:
-        # Header
-        f.write('/NumWaves\t3\n')
-        f.write(f'/NumPoints\t{n_subjects}\n')
-        f.write('/PPheights\t\t1.000000e+00\t1.000000e+00\t1.000000e+00\n\n')
-        f.write('/Matrix\n')
-        # Data
-        for row in design:
-            f.write('\t'.join([f'{val:.6e}' for val in row]) + '\n')
+    contrast_file = output_dir / 'design.con'
+    summary_file = output_dir / 'design_summary.json'
+
+    helper.save(
+        design_mat_file=design_file,
+        design_con_file=contrast_file,
+        summary_file=summary_file
+    )
 
     logging.info(f"✓ Design matrix: {design_file}")
-    logging.info(f"  Subjects: {n_subjects}")
-    logging.info(f"  Regressors: 3 (intercept, age, group)")
+    logging.info(f"  Subjects: {len(df_ordered)}")
+    logging.info(f"  Predictors: {len(column_names)}")
+    logging.info(f"  Columns: {column_names}")
 
-    # Create contrast matrix
-    # Contrast 1: Age positive
-    # Contrast 2: Age negative
-    # Contrast 3: Group 1 > Group 0
-    # Contrast 4: Group 0 > Group 1
-    contrasts = np.array([
-        [0, 1, 0],   # Age positive
-        [0, -1, 0],  # Age negative
-        [0, 0, 1],   # Group 1 > Group 0
-        [0, 0, -1],  # Group 0 > Group 1
-    ])
-
-    contrast_file = output_dir / 'design.con'
-    with open(contrast_file, 'w') as f:
-        # Header
-        f.write('/ContrastName1\tage_positive\n')
-        f.write('/ContrastName2\tage_negative\n')
-        f.write('/ContrastName3\tgroup1_gt_group0\n')
-        f.write('/ContrastName4\tgroup0_gt_group1\n')
-        f.write('/NumWaves\t3\n')
-        f.write(f'/NumContrasts\t{len(contrasts)}\n')
-        f.write('/PPheights\t\t1.000000e+00\t1.000000e+00\n')
-        f.write('/RequiredEffect\t\t1.000\t1.000\n\n')
-        f.write('/Matrix\n')
-        # Data
-        for row in contrasts:
-            f.write('\t'.join([f'{val:.6e}' for val in row]) + '\n')
-
+    # Get contrast information
+    _, contrast_names = helper.build_contrast_matrix()
     logging.info(f"✓ Contrast matrix: {contrast_file}")
-    logging.info(f"  Contrasts: 4 (age+, age-, group1>group0, group0>group1)")
+    logging.info(f"  Contrasts ({len(contrast_names)}): {contrast_names}")
 
     return design_file, contrast_file
 
@@ -246,6 +266,7 @@ def run_group_analysis(
     derivatives_dir: Path,
     analysis_dir: Path,
     participants_file: Path,
+    formula: str,
     study_name: str = 'mock_study',
     method: str = 'randomise',
     n_permutations: int = 500,
@@ -259,6 +280,7 @@ def run_group_analysis(
         derivatives_dir: Path to derivatives directory
         analysis_dir: Path to analysis directory
         participants_file: Path to participants file
+        formula: Model formula (e.g., 'mriglu+sex+age' for binary group comparison)
         study_name: Name of analysis study (e.g., 'mock_study', 'age_analysis')
         method: Statistical method ('randomise', 'glm', or 'both')
         n_permutations: Number of randomise permutations
@@ -284,7 +306,7 @@ def run_group_analysis(
 
     # 3. Create design matrices
     design_mat, contrast_con = create_design_matrices(
-        subject_ids, participants_file, output_dir
+        subject_ids, participants_file, formula, output_dir
     )
 
     # 4. Run statistical analysis (randomise and/or GLM)
@@ -419,7 +441,8 @@ def main():
     logging.info(f"Analysis: {analysis_dir}")
     logging.info(f"Participants: {participants_file}")
 
-    # Choose method: 'randomise', 'glm', or 'both'
+    # Model specification
+    formula = 'mriglu+sex+age'  # Binary group comparison with covariates
     method = 'randomise'  # Change to 'glm' or 'both' as needed
 
     try:
@@ -429,6 +452,7 @@ def main():
             derivatives_dir=derivatives_dir,
             analysis_dir=analysis_dir,
             participants_file=participants_file,
+            formula=formula,
             study_name='mock_study',
             method=method,
             n_permutations=500
@@ -440,6 +464,7 @@ def main():
             derivatives_dir=derivatives_dir,
             analysis_dir=analysis_dir,
             participants_file=participants_file,
+            formula=formula,
             study_name='mock_study',
             method=method,
             n_permutations=500

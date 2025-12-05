@@ -34,10 +34,11 @@ from typing import Dict, List, Optional
 
 import yaml
 
-from neurovrai.analysis.stats.design_matrix import generate_design_files
+from neuroaider import DesignHelper
 from neurovrai.analysis.stats.randomise_wrapper import run_randomise, summarize_results
 from neurovrai.analysis.stats.glm_wrapper import run_fsl_glm, threshold_zstat, summarize_glm_results
 from neurovrai.analysis.stats.cluster_report import generate_reports_for_all_contrasts
+import pandas as pd
 
 
 def setup_logging(output_dir: Path) -> logging.Logger:
@@ -243,30 +244,115 @@ def run_tbss_statistical_analysis(
     logger.info(f"✓ Subjects included: {prepared_files['n_subjects']}")
     logger.info(f"✓ Skeleton file: {prepared_files['skeleton_file']}")
 
-    # Step 2: Generate design matrix and contrasts
+    # Step 2: Generate design matrix and contrasts using neuroaider
     logger.info("\n" + "=" * 80)
-    logger.info("[Step 2] Generating design matrix and contrasts")
+    logger.info("[Step 2] Generating design matrix and contrasts with neuroaider")
     logger.info("=" * 80)
 
-    design_result = generate_design_files(
-        participants_file=participants_file,
-        formula=formula,
-        contrasts=contrasts,
-        output_dir=output_dir,
-        subject_list_file=prepared_files['subject_list_file'],
-        demean_continuous=True,
-        add_intercept=True
+    # Load participants data
+    participants_df = pd.read_csv(participants_file, sep='\t')
+
+    # Load subject list if provided
+    if prepared_files['subject_list_file']:
+        with open(prepared_files['subject_list_file']) as f:
+            subject_list = [line.strip() for line in f if line.strip()]
+        participants_df = participants_df[participants_df['participant_id'].isin(subject_list)]
+        logger.info(f"✓ Filtered to {len(participants_df)} subjects from preparation")
+
+    # Parse formula to detect binary groups
+    formula_terms = [t.strip() for t in formula.split('+')]
+    first_var = formula_terms[0].replace('C(', '').replace(')', '')
+
+    # Detect binary categorical for no-intercept dummy coding
+    use_binary_coding = False
+    if first_var in participants_df.columns:
+        n_levels = participants_df[first_var].nunique()
+        if n_levels == 2:
+            use_binary_coding = True
+            logger.info(f"✓ Detected binary group variable '{first_var}' with {n_levels} levels")
+            logger.info(f"✓ Using dummy coding WITHOUT intercept for direct group comparison")
+
+    # Initialize DesignHelper
+    helper = DesignHelper(
+        participants_file=participants_df,
+        subject_column='participant_id',
+        add_intercept=not use_binary_coding
     )
 
-    logger.info(f"✓ Design matrix created: {design_result['n_subjects']} subjects, "
-                f"{design_result['n_predictors']} predictors")
+    # Add variables from formula
+    for term in formula_terms:
+        var_name = term.replace('C(', '').replace(')', '').strip()
+
+        if var_name not in participants_df.columns:
+            raise ValueError(f"Variable '{var_name}' not found in participants file")
+
+        # Determine if categorical or continuous
+        if pd.api.types.is_numeric_dtype(participants_df[var_name]):
+            n_unique = participants_df[var_name].nunique()
+            if n_unique <= 10 and use_binary_coding and var_name == first_var:
+                helper.add_categorical(var_name, coding='dummy')
+                logger.info(f"✓ Added categorical: {var_name} (dummy coding, no intercept)")
+            elif n_unique <= 10:
+                logger.warning(f"Variable '{var_name}' has {n_unique} unique values - treating as continuous")
+                helper.add_covariate(var_name, mean_center=True)
+            else:
+                helper.add_covariate(var_name, mean_center=True)
+                logger.info(f"✓ Added covariate: {var_name} (mean-centered)")
+        else:
+            helper.add_categorical(var_name, coding='effect' if not use_binary_coding else 'dummy')
+            logger.info(f"✓ Added categorical: {var_name}")
+
+    # Build design matrix
+    design_mat, column_names = helper.build_design_matrix()
+
+    # Add contrasts
+    contrast_names = [c['name'] for c in contrasts]
+
+    # Auto-generate contrasts for binary groups if needed
+    if use_binary_coding:
+        auto_contrast_names = [f"{first_var}_positive", f"{first_var}_negative"]
+        has_auto_contrasts = any(name in contrast_names for name in auto_contrast_names)
+
+        if has_auto_contrasts:
+            logger.info(f"✓ Auto-generating binary group contrasts for '{first_var}'")
+            helper.add_binary_group_contrasts(first_var)
+        else:
+            # User provided custom contrasts
+            for contrast in contrasts:
+                helper.add_contrast(contrast['name'], vector=contrast['vector'])
+    else:
+        # Add user-provided contrasts
+        for contrast in contrasts:
+            helper.add_contrast(contrast['name'], vector=contrast['vector'])
+
+    # Save design files
+    design_mat_file = output_dir / 'design.mat'
+    design_con_file = output_dir / 'design.con'
+    design_summary_file = output_dir / 'design_summary.json'
+
+    helper.save(
+        design_mat_file=design_mat_file,
+        design_con_file=design_con_file,
+        summary_file=design_summary_file
+    )
+
+    logger.info(f"✓ Design matrix created: {len(participants_df)} subjects, {len(column_names)} predictors")
+    logger.info(f"✓ Columns: {column_names}")
 
     # Check subject count matches
-    if design_result['n_subjects'] != prepared_files['n_subjects']:
+    if len(participants_df) != prepared_files['n_subjects']:
         logger.warning(
-            f"Subject count mismatch: design={design_result['n_subjects']}, "
+            f"Subject count mismatch: design={len(participants_df)}, "
             f"prepared={prepared_files['n_subjects']}"
         )
+
+    # Update design_result for downstream compatibility
+    design_result = {
+        'design_mat_file': str(design_mat_file),
+        'contrast_con_file': str(design_con_file),
+        'n_subjects': len(participants_df),
+        'n_predictors': len(column_names)
+    }
 
     # Initialize results
     randomise_result = None
