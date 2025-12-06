@@ -112,8 +112,25 @@ def validate_design_alignment(
 
     # 4. Check MRI files
     n_mri_files = len(mri_files)
-    logger.info(f"\n✓ MRI data:")
-    logger.info(f"    Files: {n_mri_files}")
+
+    # If single file, check if it's a 4D image (multiple volumes)
+    n_volumes = n_mri_files  # Default: each file is one volume
+    is_4d = False
+    if n_mri_files == 1:
+        # Check if single file is 4D
+        img = nib.load(mri_files[0])
+        if len(img.shape) == 4:
+            n_volumes = img.shape[3]  # Number of volumes in 4D image
+            is_4d = True
+            logger.info(f"\n✓ MRI data:")
+            logger.info(f"    Files: 1 (4D merged image)")
+            logger.info(f"    Volumes: {n_volumes}")
+        else:
+            logger.info(f"\n✓ MRI data:")
+            logger.info(f"    Files: {n_mri_files}")
+    else:
+        logger.info(f"\n✓ MRI data:")
+        logger.info(f"    Files: {n_mri_files}")
 
     # 5. Load design summary if available
     design_summary = None
@@ -138,10 +155,17 @@ def validate_design_alignment(
     else:
         logger.info(f"✓ Subject count matches: {n_design_subjects} subjects")
 
-    if n_design_subjects != n_mri_files:
-        errors.append(f"Design matrix has {n_design_subjects} subjects but found {n_mri_files} MRI files")
+    # Validate against number of volumes (handles both individual files and 4D merged images)
+    if n_design_subjects != n_volumes:
+        if is_4d:
+            errors.append(f"Design matrix has {n_design_subjects} subjects but 4D image has {n_volumes} volumes")
+        else:
+            errors.append(f"Design matrix has {n_design_subjects} subjects but found {n_volumes} MRI files")
     else:
-        logger.info(f"✓ MRI file count matches: {n_mri_files} files")
+        if is_4d:
+            logger.info(f"✓ Volume count matches: {n_volumes} volumes in 4D image")
+        else:
+            logger.info(f"✓ MRI file count matches: {n_volumes} files")
 
     # 7. CRITICAL: Verify subject order matches
     participants_ordered = participants_df['participant_id'].tolist()

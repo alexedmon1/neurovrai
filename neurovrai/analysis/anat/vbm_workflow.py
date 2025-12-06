@@ -568,35 +568,6 @@ def run_vbm_analysis(
     logger.info("VBM GROUP ANALYSIS")
     logger.info("=" * 80)
 
-    # Load VBM metadata
-    info_file = vbm_dir / 'vbm_info.json'
-    if not info_file.exists():
-        raise FileNotFoundError(f"VBM info file not found: {info_file}. Run prepare_vbm_data first.")
-
-    with open(info_file) as f:
-        vbm_info = json.load(f)
-
-    merged_file = Path(vbm_info['merged_file'])
-    mask_file = Path(vbm_info['mask_file'])
-    processed_subjects = vbm_info['processed_subjects']
-
-    logger.info(f"Input data: {merged_file}")
-    logger.info(f"Mask: {mask_file}")
-    logger.info(f"Subjects: {len(processed_subjects)}")
-    logger.info(f"Formula: {formula}")
-    logger.info(f"Contrasts: {list(contrasts.keys())}")
-    logger.info("")
-
-    # Load participant demographics
-    participants_df = pd.read_csv(participants_file, sep='\t')
-
-    # Filter to processed subjects
-    participants_df = participants_df[participants_df['participant_id'].isin(processed_subjects)]
-    participants_df = participants_df.set_index('participant_id')
-    participants_df = participants_df.loc[processed_subjects]  # Ensure same order
-
-    logger.info(f"Loaded demographics for {len(participants_df)} subjects")
-
     # Load pre-generated design matrices from design_dir
     logger.info("\n" + "=" * 80)
     logger.info("LOADING PRE-GENERATED DESIGN MATRICES")
@@ -607,16 +578,17 @@ def run_vbm_analysis(
     source_design_mat = design_dir / 'design.mat'
     source_design_con = design_dir / 'design.con'
     source_design_summary = design_dir / 'design_summary.json'
+    participants_file = design_dir / 'participants_matched.tsv'
 
     # Validate design files exist
     if not source_design_mat.exists():
         raise FileNotFoundError(f"Design matrix not found: {source_design_mat}")
     if not source_design_con.exists():
         raise FileNotFoundError(f"Contrast file not found: {source_design_con}")
+    if not participants_file.exists():
+        raise FileNotFoundError(f"Participants file not found: {participants_file}")
 
     # Load design summary
-    import json
-    import shutil
     if source_design_summary.exists():
         with open(source_design_summary, 'r') as f:
             design_summary = json.load(f)
@@ -633,6 +605,33 @@ def run_vbm_analysis(
             con_lines = f.readlines()
             n_contrasts = int([l for l in con_lines if '/NumContrasts' in l][0].split()[1])
         contrast_names = [f"contrast_{i+1}" for i in range(n_contrasts)]
+
+    # Load VBM metadata
+    info_file = vbm_dir / 'vbm_info.json'
+    if not info_file.exists():
+        raise FileNotFoundError(f"VBM info file not found: {info_file}. Run prepare_vbm_data first.")
+
+    with open(info_file) as f:
+        vbm_info = json.load(f)
+
+    merged_file = Path(vbm_info['merged_file'])
+    mask_file = Path(vbm_info['mask_file'])
+    processed_subjects = vbm_info['processed_subjects']
+
+    logger.info(f"\nInput data: {merged_file}")
+    logger.info(f"Mask: {mask_file}")
+    logger.info(f"Subjects: {len(processed_subjects)}")
+    logger.info("")
+
+    # Load participant demographics
+    participants_df = pd.read_csv(participants_file, sep='\t')
+
+    # Filter to processed subjects
+    participants_df = participants_df[participants_df['participant_id'].isin(processed_subjects)]
+    participants_df = participants_df.set_index('participant_id')
+    participants_df = participants_df.loc[processed_subjects]  # Ensure same order
+
+    logger.info(f"Loaded demographics for {len(participants_df)} subjects")
 
     # Validate design alignment with MRI data using validation utility
     from neurovrai.analysis.utils.design_validation import validate_design_alignment

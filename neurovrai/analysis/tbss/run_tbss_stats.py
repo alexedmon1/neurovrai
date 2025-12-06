@@ -466,33 +466,27 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Randomise analysis (nonparametric, default)
+  # Randomise analysis with pre-generated design matrices
   python -m neurovrai.analysis.tbss.run_tbss_stats \\
-      --data-dir /study/analysis/tbss_FA/ \\
-      --participants participants.csv \\
-      --formula "age + sex" \\
-      --contrast age_positive 0 1 0 \\
-      --contrast sex_MvsF 0 0 1 \\
-      --output-dir /study/analysis/tbss_FA/model1/ \\
-      --method randomise
+      --data-dir /study/analysis/tbss/FA \\
+      --design-dir /study/data/designs/tbss \\
+      --output-dir /study/analysis/tbss/FA/stats \\
+      --method randomise \\
+      --n-permutations 5000
 
-  # GLM analysis (parametric, faster)
+  # GLM analysis (faster, parametric)
   python -m neurovrai.analysis.tbss.run_tbss_stats \\
-      --data-dir /study/analysis/tbss_FA/ \\
-      --participants participants.csv \\
-      --formula "age + sex + exposure" \\
-      --contrasts-file contrasts.yaml \\
-      --output-dir /study/analysis/tbss_FA/model_glm/ \\
+      --data-dir /study/analysis/tbss/FA \\
+      --design-dir /study/data/designs/tbss \\
+      --output-dir /study/analysis/tbss/FA/stats_glm \\
       --method glm \\
       --z-threshold 2.3
 
   # Run both methods for comparison
   python -m neurovrai.analysis.tbss.run_tbss_stats \\
-      --data-dir /study/analysis/tbss_FA/ \\
-      --participants participants.csv \\
-      --formula "age + sex + exposure + age*sex" \\
-      --contrasts-file contrasts.yaml \\
-      --output-dir /study/analysis/tbss_FA/model_both/ \\
+      --data-dir /study/analysis/tbss/FA \\
+      --design-dir /study/data/designs/tbss \\
+      --output-dir /study/analysis/tbss/FA/stats_both \\
       --method both
         """
     )
@@ -505,34 +499,10 @@ Examples:
     )
 
     parser.add_argument(
-        '--participants',
+        '--design-dir',
         type=Path,
         required=True,
-        help='Path to participants CSV file'
-    )
-
-    parser.add_argument(
-        '--formula',
-        type=str,
-        required=True,
-        help='Model formula (e.g., "age + sex + exposure")'
-    )
-
-    # Contrast specification (mutually exclusive, OPTIONAL - will auto-generate for binary groups)
-    contrast_group = parser.add_mutually_exclusive_group(required=False)
-
-    contrast_group.add_argument(
-        '--contrasts-file',
-        type=Path,
-        help='Path to contrasts YAML file (optional - auto-generates for binary groups)'
-    )
-
-    contrast_group.add_argument(
-        '--contrast',
-        action='append',
-        nargs='+',
-        metavar=('NAME', 'WEIGHT'),
-        help='Inline contrast: name followed by weights (can specify multiple, optional)'
+        help='Directory with pre-generated design matrices (design.mat, design.con)'
     )
 
     parser.add_argument(

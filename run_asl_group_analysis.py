@@ -19,9 +19,9 @@ import numpy as np
 # Add neurovrai to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from neuroaider import DesignHelper
 from neurovrai.analysis.stats.randomise_wrapper import run_randomise, summarize_results
 from neurovrai.analysis.stats.nilearn_glm import run_second_level_glm, summarize_glm_results
+from neurovrai.analysis.utils.design_validation import validate_design_alignment
 
 
 def setup_logging(log_file: Path):
@@ -38,7 +38,8 @@ def setup_logging(log_file: Path):
 
 def gather_subject_maps(
     derivatives_dir: Path,
-    output_dir: Path
+    output_dir: Path,
+    design_dir: Path
 ) -> tuple[Path, list[str]]:
     """
     Gather individual subject CBF maps into a 4D volume
@@ -46,6 +47,7 @@ def gather_subject_maps(
     Args:
         derivatives_dir: Path to derivatives directory
         output_dir: Output directory for 4D image
+        design_dir: Path to design directory (for subject order)
 
     Returns:
         Tuple of (4D image path, list of subject IDs)
@@ -53,13 +55,25 @@ def gather_subject_maps(
     logging.info(f"\nGathering ASL CBF maps...")
     logging.info("=" * 80)
 
+    # Load design matrix to get correct subject order
+    participants_file = design_dir / 'participants_matched.tsv'
+    if not participants_file.exists():
+        raise FileNotFoundError(f"Participants file not found: {participants_file}")
+
+    participants_df = pd.read_csv(participants_file, sep='\t')
+    design_subjects = participants_df['participant_id'].tolist()
+
+    logging.info(f"Design matrix has {len(design_subjects)} subjects")
+    logging.info(f"Will use design matrix subject order for 4D image")
+
     # Find all subject CBF maps (using MNI-normalized versions)
+    # IMPORTANT: Iterate in design matrix order
     subject_maps = []
     subject_ids = []
 
-    # Search for subjects
-    for subject_dir in sorted(derivatives_dir.glob('IRC805-*/asl')):
-        subject_id = subject_dir.parent.name
+    # Search for subjects IN DESIGN MATRIX ORDER
+    for subject_id in design_subjects:
+        subject_dir = derivatives_dir / subject_id / 'asl'
         map_name = f'{subject_id}_cbf_mni.nii.gz'
         map_file = subject_dir / map_name
 
@@ -140,129 +154,93 @@ def create_mean_mask(image_4d: Path, output_dir: Path) -> Path:
     return mask_file
 
 
-def create_design_matrices(
+def load_design_matrices(
     subject_ids: list[str],
-    participants_file: Path,
-    formula: str,
-    output_dir: Path
+    design_dir: Path,
+    output_dir: Path,
+    image_4d: Path
 ):
     """
-    Create FSL design matrices and contrasts using neuroaider
+    Load pre-generated FSL design matrices and validate alignment
 
     Args:
         subject_ids: List of subject IDs in 4D image order
-        participants_file: Path to participants.tsv
-        formula: Model formula (e.g., 'mriglu+sex+age' for binary group comparison)
-        output_dir: Output directory
+        design_dir: Directory containing pre-generated design files
+        output_dir: Output directory to copy design files
+        image_4d: Path to 4D merged image for validation
+
+    Returns:
+        Tuple of (design_mat_file, contrast_file, contrast_names)
     """
-    logging.info("\nCreating design matrices with neuroaider...")
+    import json
+    import shutil
+
+    logging.info("\nLoading pre-generated design matrices...")
     logging.info("=" * 80)
+    logging.info(f"Design directory: {design_dir}")
 
-    # Load participants data
-    if participants_file.suffix == '.tsv':
-        df = pd.read_csv(participants_file, sep='\t')
+    design_dir = Path(design_dir)
+    source_design_mat = design_dir / 'design.mat'
+    source_design_con = design_dir / 'design.con'
+    source_design_summary = design_dir / 'design_summary.json'
+
+    # Validate design files exist
+    if not source_design_mat.exists():
+        raise FileNotFoundError(f"Design matrix not found: {source_design_mat}")
+    if not source_design_con.exists():
+        raise FileNotFoundError(f"Contrast file not found: {source_design_con}")
+
+    # Load design summary
+    if source_design_summary.exists():
+        with open(source_design_summary, 'r') as f:
+            design_summary = json.load(f)
+        logging.info(f"✓ Design summary loaded:")
+        logging.info(f"    Subjects: {design_summary['n_subjects']}")
+        logging.info(f"    Predictors: {design_summary['n_predictors']}")
+        logging.info(f"    Columns: {design_summary['columns']}")
+        logging.info(f"    Contrasts ({design_summary['n_contrasts']}): {design_summary['contrasts']}")
+        contrast_names = design_summary['contrasts']
     else:
-        df = pd.read_csv(participants_file)
+        logging.warning(f"Design summary not found: {source_design_summary}")
+        # Parse from design.con if summary not available
+        with open(source_design_con, 'r') as f:
+            con_lines = f.readlines()
+            n_contrasts = int([l for l in con_lines if '/NumContrasts' in l][0].split()[1])
+        contrast_names = [f"contrast_{i+1}" for i in range(n_contrasts)]
 
-    # Match subjects to 4D image order
-    df_ordered = pd.DataFrame()
-    for subject_id in subject_ids:
-        match = df[df['participant_id'] == subject_id]
-        if len(match) == 0:
-            raise ValueError(f"Subject {subject_id} not found in participants file")
-        df_ordered = pd.concat([df_ordered, match.iloc[0:1]], ignore_index=True)
-
-    logging.info(f"✓ Matched {len(df_ordered)} subjects to 4D image order")
-
-    # Parse formula to detect binary groups
-    formula_terms = [t.strip() for t in formula.split('+')]
-    first_var = formula_terms[0].replace('C(', '').replace(')', '')
-
-    # Detect binary categorical for no-intercept dummy coding
-    use_binary_coding = False
-    if first_var in df_ordered.columns:
-        n_levels = df_ordered[first_var].nunique()
-        if n_levels == 2:
-            use_binary_coding = True
-            logging.info(f"✓ Detected binary group variable '{first_var}' with {n_levels} levels")
-            logging.info(f"✓ Using dummy coding WITHOUT intercept for direct group comparison")
-
-    # Initialize DesignHelper
-    helper = DesignHelper(
-        participants_file=df_ordered,
-        subject_column='participant_id',
-        add_intercept=not use_binary_coding
+    # Validate design alignment with MRI data
+    validation_result = validate_design_alignment(
+        design_dir=design_dir,
+        mri_files=[image_4d],  # 4D merged file
+        subject_ids=subject_ids,
+        analysis_type="ASL"
     )
 
-    # Add variables from formula
-    for term in formula_terms:
-        var_name = term.replace('C(', '').replace(')', '').strip()
+    logging.info(f"✓ Design validation passed: {validation_result['n_subjects']} subjects aligned")
 
-        if var_name not in df_ordered.columns:
-            raise ValueError(f"Variable '{var_name}' not found in participants file")
+    # Copy design files to output directory
+    design_mat_file = output_dir / 'design.mat'
+    design_con_file = output_dir / 'design.con'
+    design_summary_file = output_dir / 'design_summary.json'
 
-        # Determine if categorical or continuous
-        if pd.api.types.is_numeric_dtype(df_ordered[var_name]):
-            n_unique = df_ordered[var_name].nunique()
-            if n_unique <= 10 and use_binary_coding and var_name == first_var:
-                helper.add_categorical(var_name, coding='dummy')
-                logging.info(f"✓ Added categorical: {var_name} (dummy coding, no intercept)")
-            elif n_unique <= 10:
-                logging.warning(f"Variable '{var_name}' has {n_unique} unique values - treating as continuous")
-                helper.add_covariate(var_name, mean_center=True)
-            else:
-                helper.add_covariate(var_name, mean_center=True)
-                logging.info(f"✓ Added covariate: {var_name} (mean-centered)")
-        else:
-            helper.add_categorical(var_name, coding='effect' if not use_binary_coding else 'dummy')
-            logging.info(f"✓ Added categorical: {var_name}")
+    shutil.copy(source_design_mat, design_mat_file)
+    shutil.copy(source_design_con, design_con_file)
+    if source_design_summary.exists():
+        shutil.copy(source_design_summary, design_summary_file)
 
-    # Build design matrix
-    design_mat, column_names = helper.build_design_matrix()
+    logging.info(f"✓ Copied design files to output directory:")
+    logging.info(f"    - {design_mat_file}")
+    logging.info(f"    - {design_con_file}")
+    if source_design_summary.exists():
+        logging.info(f"    - {design_summary_file}")
 
-    # Auto-generate contrasts for binary groups
-    if use_binary_coding:
-        logging.info(f"✓ Auto-generating binary group contrasts for '{first_var}'")
-        helper.add_binary_group_contrasts(first_var)
-
-    # Add covariate contrasts if present
-    for term in formula_terms:
-        var_name = term.replace('C(', '').replace(')', '').strip()
-        if var_name in column_names and var_name != first_var:
-            # Add positive and negative contrasts for continuous covariates
-            helper.add_contrast(f"{var_name}_positive", covariate=var_name, direction='+')
-            helper.add_contrast(f"{var_name}_negative", covariate=var_name, direction='-')
-            logging.info(f"✓ Added contrasts for covariate: {var_name}")
-
-    # Save design files
-    design_file = output_dir / 'design.mat'
-    contrast_file = output_dir / 'design.con'
-    summary_file = output_dir / 'design_summary.json'
-
-    helper.save(
-        design_mat_file=design_file,
-        design_con_file=contrast_file,
-        summary_file=summary_file
-    )
-
-    logging.info(f"✓ Design matrix: {design_file}")
-    logging.info(f"  Subjects: {len(df_ordered)}")
-    logging.info(f"  Predictors: {len(column_names)}")
-    logging.info(f"  Columns: {column_names}")
-
-    # Get contrast information
-    _, contrast_names = helper.build_contrast_matrix()
-    logging.info(f"✓ Contrast matrix: {contrast_file}")
-    logging.info(f"  Contrasts ({len(contrast_names)}): {contrast_names}")
-
-    return design_file, contrast_file
+    return design_mat_file, design_con_file, contrast_names
 
 
 def run_group_analysis(
     derivatives_dir: Path,
     analysis_dir: Path,
-    participants_file: Path,
-    formula: str,
+    design_dir: Path,
     study_name: str = 'asl_group',
     method: str = 'randomise',
     n_permutations: int = 5000,
@@ -274,8 +252,7 @@ def run_group_analysis(
     Args:
         derivatives_dir: Path to derivatives directory
         analysis_dir: Path to analysis directory
-        participants_file: Path to participants file
-        formula: Model formula (e.g., 'mriglu+sex+age' for binary group comparison)
+        design_dir: Directory containing pre-generated design matrices
         study_name: Name of analysis study (e.g., 'asl_group', 'age_analysis')
         method: Statistical method ('randomise', 'glm', or 'both')
         n_permutations: Number of randomise permutations
@@ -294,15 +271,15 @@ def run_group_analysis(
     output_dir = analysis_dir / 'asl' / study_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Gather 4D data
-    image_4d, subject_ids = gather_subject_maps(derivatives_dir, output_dir)
+    # 1. Gather 4D data (using design matrix subject order)
+    image_4d, subject_ids = gather_subject_maps(derivatives_dir, output_dir, design_dir)
 
     # 2. Create mask
     mask_file = create_mean_mask(image_4d, output_dir)
 
-    # 3. Create design matrices
-    design_mat, contrast_con = create_design_matrices(
-        subject_ids, participants_file, formula, output_dir
+    # 3. Load pre-generated design matrices
+    design_mat, contrast_con, contrast_names = load_design_matrices(
+        subject_ids, design_dir, output_dir, image_4d
     )
 
     # 4. Run statistical analysis (randomise and/or GLM)
@@ -368,7 +345,6 @@ def run_group_analysis(
         if contrast_data.ndim == 1:
             contrast_data = contrast_data.reshape(1, -1)
 
-        contrast_names = summary['contrasts']
         contrasts_dict = {name: contrast_data[i] for i, name in enumerate(contrast_names)}
 
         # Split 4D image into individual subject files
@@ -423,39 +399,88 @@ def run_group_analysis(
 
 def main():
     """Main execution"""
-    # Paths
-    study_root = Path('/mnt/bytopia/IRC805')
-    derivatives_dir = study_root / 'derivatives'
-    analysis_dir = study_root / 'analysis'
-    participants_file = study_root / 'data' / 'designs' / 'asl' / 'participants_matched.tsv'
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Run group-level ASL CBF analysis with pre-generated design matrices',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument(
+        '--study-root',
+        type=Path,
+        required=True,
+        help='Study root directory'
+    )
+    parser.add_argument(
+        '--design-dir',
+        type=Path,
+        required=True,
+        help='Directory containing pre-generated design matrices (design.mat, design.con, design_summary.json)'
+    )
+    parser.add_argument(
+        '--method',
+        type=str,
+        default='randomise',
+        choices=['randomise', 'glm', 'both'],
+        help='Statistical method (default: randomise)'
+    )
+    parser.add_argument(
+        '--n-permutations',
+        type=int,
+        default=5000,
+        help='Number of randomise permutations (default: 5000)'
+    )
+    parser.add_argument(
+        '--z-threshold',
+        type=float,
+        default=2.3,
+        help='Z-score threshold for GLM (default: 2.3)'
+    )
+    parser.add_argument(
+        '--study-name',
+        type=str,
+        default='asl_analysis',
+        help='Analysis study name (default: asl_analysis)'
+    )
+
+    args = parser.parse_args()
+
+    # Derive paths
+    derivatives_dir = args.study_root / 'derivatives'
+    analysis_dir = args.study_root / 'analysis'
 
     # Setup logging
-    log_file = Path('logs/asl_group_analysis.log')
+    log_file = Path('logs') / 'asl_group_analysis.log'
     log_file.parent.mkdir(exist_ok=True)
     setup_logging(log_file)
 
     logging.info("=" * 80)
     logging.info("ASL CEREBRAL BLOOD FLOW GROUP ANALYSIS")
     logging.info("=" * 80)
-    logging.info(f"Study root: {study_root}")
+    logging.info(f"Study root: {args.study_root}")
     logging.info(f"Derivatives: {derivatives_dir}")
     logging.info(f"Analysis: {analysis_dir}")
-    logging.info(f"Participants: {participants_file}")
+    logging.info(f"Design directory: {args.design_dir}")
+    logging.info(f"Method: {args.method}")
 
-    # Model specification
-    formula = 'mriglu+sex+age'  # Binary group comparison with covariates
-    method = 'randomise'  # Change to 'glm' or 'both' as needed
+    # Validate design files exist
+    design_dir = Path(args.design_dir)
+    if not (design_dir / 'design.mat').exists():
+        logging.error(f"Design matrix not found: {design_dir / 'design.mat'}")
+        logging.error("Please run generate_design_matrices.py first to create design files")
+        sys.exit(1)
 
     try:
         # Run ASL CBF analysis
         asl_results = run_group_analysis(
             derivatives_dir=derivatives_dir,
             analysis_dir=analysis_dir,
-            participants_file=participants_file,
-            formula=formula,
-            study_name='mriglu_analysis',
-            method=method,
-            n_permutations=5000
+            design_dir=args.design_dir,
+            study_name=args.study_name,
+            method=args.method,
+            n_permutations=args.n_permutations,
+            z_threshold=args.z_threshold
         )
 
         logging.info("\n" + "=" * 80)
