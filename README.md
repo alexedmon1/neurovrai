@@ -738,7 +738,30 @@ uv run python -m neurovrai.connectome.run_functional_connectivity \
 
 ### Functional Connectivity
 
-Compute correlation matrices from fMRI timeseries.
+Compute correlation matrices from fMRI timeseries using native-space analysis.
+
+**Batch Processing (Recommended)**:
+```bash
+# Process all subjects with multiple atlases
+uv run python -m neurovrai.connectome.batch_functional_connectivity \
+    --study-root /mnt/bytopia/IRC805 \
+    --atlases all \
+    --output-dir /mnt/bytopia/IRC805/analysis/func/connectivity
+
+# Process specific subjects/atlases
+uv run python -m neurovrai.connectome.batch_functional_connectivity \
+    --study-root /mnt/bytopia/IRC805 \
+    --subjects sub-001 sub-002 \
+    --atlases harvardoxford_cort juelich \
+    --method pearson
+```
+
+**Available Atlases**:
+- `harvardoxford_cort`: Harvard-Oxford Cortical (48 regions)
+- `harvardoxford_sub`: Harvard-Oxford Subcortical (21 regions)
+- `juelich`: Juelich Histological Atlas
+- `talairach`: Talairach Atlas
+- `cerebellum_mniflirt`: Cerebellum MNI FLIRT
 
 **Python API**:
 ```python
@@ -761,11 +784,20 @@ correlation = fc_results['correlation_matrix']  # Raw correlation
 
 **Outputs**:
 ```
-fc_output/
-├── fc_matrix.npy                   # Connectivity matrix (numpy)
-├── fc_matrix.csv                   # Connectivity matrix (CSV)
-└── fc_summary.json                 # Analysis parameters
+connectivity/
+├── {subject}/
+│   ├── {atlas}/
+│   │   ├── fc_matrix.npy                   # Connectivity matrix (numpy)
+│   │   ├── fc_matrix.csv                   # Connectivity matrix (CSV)
+│   │   ├── fc_roi_names.txt                # ROI labels
+│   │   ├── fc_summary.json                 # Analysis parameters
+│   │   ├── atlas_{atlas}_resampled.nii.gz  # Atlas in functional space
+│   │   └── analysis_metadata.json          # Processing metadata
+├── logs/                                    # Processing logs
+└── batch_processing_summary.json            # Batch summary
 ```
+
+**Note**: This pipeline uses **native-space functional connectivity** - atlases are resampled to match each subject's functional data dimensions rather than normalizing functional data to MNI. This approach is simpler, faster, and preserves functional resolution. See `neurovrai/connectome/README.md` for details.
 
 ---
 
