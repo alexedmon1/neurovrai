@@ -611,7 +611,9 @@ def run_func_preprocessing(
         # Step 1f: Run TEDANA on motion-corrected echoes
         tedana_dir = derivatives_dir / 'tedana'
         # Extract TEDANA config (with defaults)
-        tedana_config = config.get('tedana', {})
+        # Check both functional.tedana and top-level tedana for backwards compatibility
+        func_config = config.get('functional', {})
+        tedana_config = func_config.get('tedana', config.get('tedana', {}))
         tedpca = tedana_config.get('tedpca', 0.95)  # Default: 95% variance (auto)
         tree = tedana_config.get('tree', 'kundu')   # Default: kundu decision tree
 
