@@ -51,6 +51,12 @@ from neurovrai.preprocess.utils.acompcor_helper import (
     regress_out_components
 )
 from neurovrai.preprocess.utils.func_normalization import normalize_func_to_mni152
+from neurovrai.preprocess.utils.func_registration import (
+    compute_func_mean,
+    create_func_to_mni_transforms,
+    apply_inverse_transform_to_masks
+)
+from neurovrai.preprocess.qc.func_registration_qc import generate_registration_qc_report
 from neurovrai.utils.transforms import create_transform_registry
 
 logger = logging.getLogger(__name__)
@@ -204,9 +210,9 @@ def create_func_preprocessing_workflow(
     work_dir : Path
         Working directory for Nipype
     use_aroma : bool
-        Whether to include ICA-AROMA (default: False, redundant with TEDANA)
+        DEPRECATED - not used (kept for compatibility)
     is_multiecho : bool
-        Whether input is from multi-echo TEDANA (already motion-corrected)
+        DEPRECATED - not used (both paths now identical)
 
     Returns
     -------
@@ -215,14 +221,15 @@ def create_func_preprocessing_workflow(
 
     Notes
     -----
-    For multi-echo data:
-    - Motion correction is done BEFORE TEDANA (outside this workflow)
-    - Input to this workflow is already motion-corrected TEDANA output
-    - Only bandpass filtering and smoothing are applied
+    This workflow performs temporal filtering and spatial smoothing only.
+    Motion correction and registration must be performed BEFORE this workflow.
 
-    For single-echo data:
-    - Motion correction is done within this workflow
-    - Optional ICA-AROMA can be added for motion artifact removal
+    Workflow: bandpass filtering → spatial smoothing
+
+    Motion correction is now performed outside this workflow to enable:
+    - ANTs-based registration on raw motion-corrected data
+    - Proper fMRI → T1w → MNI transform chain
+    - Inverse transforms for atlas transformation to functional space
     """
     wf = Workflow(name=name, base_dir=str(work_dir))
 
@@ -248,51 +255,15 @@ def create_func_preprocessing_workflow(
         output_type='NIFTI_GZ'
     ), name='spatial_smooth')
 
-    if is_multiecho:
-        # Multi-echo: Input is already motion-corrected TEDANA output
-        # Just do bandpass → smooth
-        wf.connect([
-            (bandpass, smooth, [('out_file', 'in_file')])
-        ])
-    else:
-        # Single-echo: Need motion correction
-        mcflirt = Node(fsl.MCFLIRT(
-            cost='leastsquares',
-            save_plots=True,
-            save_mats=True,
-            save_rms=True,
-            output_type='NIFTI_GZ'
-        ), name='motion_correction')
+    # Both multi-echo and single-echo are now motion-corrected before this workflow
+    # So the workflow is simply: bandpass → smooth for both
+    wf.connect([
+        (bandpass, smooth, [('out_file', 'in_file')])
+    ])
 
-        bet = Node(fsl.BET(
-            frac=bet_frac,
-            functional=True,
-            mask=True,
-            output_type='NIFTI_GZ'
-        ), name='brain_extraction')
-
-        if use_aroma:
-            # Single-echo with ICA-AROMA
-            aroma = Node(fsl.ICA_AROMA(
-                denoise_type='both',
-                TR=tr
-            ), name='ica_aroma')
-
-            wf.connect([
-                (mcflirt, bet, [('out_file', 'in_file')]),
-                (bet, aroma, [('out_file', 'in_file'),
-                              ('mask_file', 'mask')]),
-                (mcflirt, aroma, [('par_file', 'motion_parameters')]),
-                (aroma, bandpass, [('aggr_denoised_file', 'in_file')]),
-                (bandpass, smooth, [('out_file', 'in_file')])
-            ])
-        else:
-            # Single-echo without AROMA
-            wf.connect([
-                (mcflirt, bet, [('out_file', 'in_file')]),
-                (bet, bandpass, [('out_file', 'in_file')]),
-                (bandpass, smooth, [('out_file', 'in_file')])
-            ])
+    # Note: ICA-AROMA support removed - motion correction now happens
+    # before this workflow with proper registration. TEDANA (multi-echo) or
+    # alternative motion correction methods should be used instead.
 
     return wf
 
@@ -555,7 +526,89 @@ def run_func_preprocessing(
             logger.info(f"  Brain mask: {mask_file}")
         logger.info("")
 
-        # Step 1d: Run TEDANA on motion-corrected echoes
+        # Step 1d: Compute functional mean for registration
+        logger.info("Computing functional mean for registration...")
+        func_mean_file = mcflirt_dir / 'func_mean.nii.gz'
+        if not func_mean_file.exists():
+            compute_func_mean(mcflirt_out, func_mean_file)
+        else:
+            logger.info(f"  Using cached func mean: {func_mean_file}")
+        logger.info("")
+
+        # Step 1e: Register functional → T1w → MNI (ANTs-based)
+        if anat_derivatives:
+            registration_dir = derivatives_dir / 'registration'
+            registration_dir.mkdir(parents=True, exist_ok=True)
+
+            # Locate anatomical preprocessing outputs
+            anat_dir = Path(anat_derivatives)
+            brain_files = list(anat_dir.glob('brain/*brain.nii.gz'))
+            t1w_to_mni_transform = anat_dir / 'transforms' / 'ants_Composite.h5'
+            mni_template = Path(config.get('paths', {}).get('mni152_t1_2mm',
+                                '/usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz'))
+
+            if brain_files and t1w_to_mni_transform.exists():
+                brain_file = brain_files[0]
+
+                logger.info("Creating functional → MNI transform pipeline (ANTs)...")
+                logger.info(f"  Functional mean: {func_mean_file.name}")
+                logger.info(f"  T1w brain: {brain_file.name}")
+                logger.info(f"  T1w→MNI transform: {t1w_to_mni_transform.name}")
+                logger.info("")
+
+                try:
+                    registration_results = create_func_to_mni_transforms(
+                        func_mean=func_mean_file,
+                        t1w_brain=brain_file,
+                        t1w_to_mni_transform=t1w_to_mni_transform,
+                        mni_template=mni_template,
+                        output_dir=registration_dir
+                    )
+
+                    # Store registration results
+                    results['func_to_t1w_transform'] = registration_results['func_to_t1w']
+                    results['func_to_mni_transform'] = registration_results['func_to_mni']
+                    results['func_warped_to_t1w'] = registration_results['func_warped_to_t1w']
+
+                    logger.info("Registration pipeline completed successfully")
+                    logger.info("")
+
+                    # Generate registration QC visualizations
+                    if config.get('run_qc', True):
+                        logger.info("Generating registration QC visualizations...")
+                        # QC goes in study-wide QC directory
+                        study_root = output_dir.parent if output_dir.name == subject else output_dir.parent.parent
+                        qc_dir = study_root / 'qc' / subject / 'func' / 'registration'
+                        try:
+                            qc_results = generate_registration_qc_report(
+                                func_mean=func_mean_file,
+                                t1w_brain=brain_file,
+                                mni_template=mni_template,
+                                func_to_t1w_transform=registration_results['func_to_t1w'],
+                                func_to_mni_transform=registration_results['func_to_mni'],
+                                output_dir=qc_dir
+                            )
+                            results['registration_qc'] = qc_results
+                            logger.info(f"  QC visualizations saved to: {qc_dir}")
+                            logger.info("")
+                        except Exception as e:
+                            logger.warning(f"Registration QC generation failed: {e}")
+                            logger.warning("Continuing without QC visualizations")
+                            logger.warning("")
+
+                except Exception as e:
+                    logger.error(f"Registration failed: {e}")
+                    logger.error("Continuing without registration transforms")
+                    logger.error("")
+            else:
+                logger.warning("Anatomical transforms not found - skipping functional registration")
+                logger.warning(f"  Searched for: {t1w_to_mni_transform}")
+                logger.warning("")
+        else:
+            logger.warning("No anatomical derivatives provided - skipping functional registration")
+            logger.warning("")
+
+        # Step 1f: Run TEDANA on motion-corrected echoes
         tedana_dir = derivatives_dir / 'tedana'
         # Extract TEDANA config (with defaults)
         tedana_config = config.get('tedana', {})
@@ -581,10 +634,151 @@ def run_func_preprocessing(
         logger.info(f"TEDANA output: {func_input}")
         logger.info("")
     else:
-        # Single echo - use input directly
+        # Single echo - run motion correction and registration
         func_input = Path(func_file) if not isinstance(func_file, list) else Path(func_file[0])
         logger.info("Single-echo data - skipping TEDANA")
         logger.info("")
+
+        # Step 1a: Run motion correction on single-echo data
+        logger.info("=" * 70)
+        logger.info("Motion Correction (MCFLIRT)")
+        logger.info("=" * 70)
+        logger.info("")
+
+        mcflirt_dir = derivatives_dir / 'motion_correction'
+        mcflirt_dir.mkdir(parents=True, exist_ok=True)
+
+        mcflirt_out = mcflirt_dir / f'{subject}_mcf.nii.gz'
+        motion_params = mcflirt_dir / f'{subject}_mcf.nii.par'
+
+        if mcflirt_out.exists() and motion_params.exists():
+            logger.info("Motion correction already completed - using cached results")
+            logger.info(f"  Cached output: {mcflirt_out}")
+        else:
+            logger.info("Running motion correction...")
+            mcflirt_cmd = [
+                'mcflirt',
+                '-in', str(func_input),
+                '-out', str(mcflirt_dir / f'{subject}_mcf.nii'),
+                '-plots',
+                '-mats',
+                '-rmsrel',
+                '-rmsabs'
+            ]
+            subprocess.run(mcflirt_cmd, check=True, capture_output=True)
+
+        results['motion_params'] = motion_params
+        logger.info(f"  Motion-corrected: {mcflirt_out}")
+        logger.info(f"  Motion parameters: {motion_params}")
+        logger.info("")
+
+        # Step 1b: Create brain mask
+        mask_file = derivatives_dir / 'func_mask.nii.gz'
+        if not mask_file.exists():
+            logger.info("Creating brain mask...")
+            bet_frac = config.get('bet', {}).get('frac', 0.3)
+            bet_cmd = [
+                'bet',
+                str(mcflirt_out),
+                str(derivatives_dir / 'func_brain'),
+                '-f', str(bet_frac),
+                '-m',
+                '-R'
+            ]
+            subprocess.run(bet_cmd, check=True, capture_output=True)
+
+            mask_output = derivatives_dir / 'func_brain_mask.nii.gz'
+            if mask_output.exists():
+                mask_output.rename(mask_file)
+            logger.info(f"  Brain mask: {mask_file}")
+        else:
+            logger.info(f"Brain mask already exists: {mask_file}")
+        logger.info("")
+
+        # Step 1c: Compute functional mean for registration
+        logger.info("Computing functional mean for registration...")
+        func_mean_file = mcflirt_dir / 'func_mean.nii.gz'
+        if not func_mean_file.exists():
+            compute_func_mean(mcflirt_out, func_mean_file)
+        else:
+            logger.info(f"  Using cached func mean: {func_mean_file}")
+        logger.info("")
+
+        # Step 1d: Register functional → T1w → MNI (ANTs-based)
+        if anat_derivatives:
+            registration_dir = derivatives_dir / 'registration'
+            registration_dir.mkdir(parents=True, exist_ok=True)
+
+            # Locate anatomical preprocessing outputs
+            anat_dir = Path(anat_derivatives)
+            brain_files = list(anat_dir.glob('brain/*brain.nii.gz'))
+            t1w_to_mni_transform = anat_dir / 'transforms' / 'ants_Composite.h5'
+            mni_template = Path(config.get('paths', {}).get('mni152_t1_2mm',
+                                '/usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz'))
+
+            if brain_files and t1w_to_mni_transform.exists():
+                brain_file = brain_files[0]
+
+                logger.info("Creating functional → MNI transform pipeline (ANTs)...")
+                logger.info(f"  Functional mean: {func_mean_file.name}")
+                logger.info(f"  T1w brain: {brain_file.name}")
+                logger.info(f"  T1w→MNI transform: {t1w_to_mni_transform.name}")
+                logger.info("")
+
+                try:
+                    registration_results = create_func_to_mni_transforms(
+                        func_mean=func_mean_file,
+                        t1w_brain=brain_file,
+                        t1w_to_mni_transform=t1w_to_mni_transform,
+                        mni_template=mni_template,
+                        output_dir=registration_dir
+                    )
+
+                    # Store registration results
+                    results['func_to_t1w_transform'] = registration_results['func_to_t1w']
+                    results['func_to_mni_transform'] = registration_results['func_to_mni']
+                    results['func_warped_to_t1w'] = registration_results['func_warped_to_t1w']
+
+                    logger.info("Registration pipeline completed successfully")
+                    logger.info("")
+
+                    # Generate registration QC visualizations
+                    if config.get('run_qc', True):
+                        logger.info("Generating registration QC visualizations...")
+                        # QC goes in study-wide QC directory
+                        study_root = output_dir.parent if output_dir.name == subject else output_dir.parent.parent
+                        qc_dir = study_root / 'qc' / subject / 'func' / 'registration'
+                        try:
+                            qc_results = generate_registration_qc_report(
+                                func_mean=func_mean_file,
+                                t1w_brain=brain_file,
+                                mni_template=mni_template,
+                                func_to_t1w_transform=registration_results['func_to_t1w'],
+                                func_to_mni_transform=registration_results['func_to_mni'],
+                                output_dir=qc_dir
+                            )
+                            results['registration_qc'] = qc_results
+                            logger.info(f"  QC visualizations saved to: {qc_dir}")
+                            logger.info("")
+                        except Exception as e:
+                            logger.warning(f"Registration QC generation failed: {e}")
+                            logger.warning("Continuing without QC visualizations")
+                            logger.warning("")
+
+                except Exception as e:
+                    logger.error(f"Registration failed: {e}")
+                    logger.error("Continuing without registration transforms")
+                    logger.error("")
+            else:
+                logger.warning("Anatomical transforms not found - skipping functional registration")
+                logger.warning(f"  Searched for: {t1w_to_mni_transform}")
+                logger.warning("")
+        else:
+            logger.warning("No anatomical derivatives provided - skipping functional registration")
+            logger.warning("")
+
+        # Update func_input to use motion-corrected data
+        func_input = mcflirt_out
 
     # Step 2: Locate tissue masks from anatomical preprocessing for ACompCor
     acompcor_enabled = config.get('acompcor', {}).get('enabled', True)
@@ -660,12 +854,9 @@ def run_func_preprocessing(
     )
 
     # Set input for the first node in the workflow
-    if is_multiecho:
-        # Multi-echo: bandpass is first node (already motion-corrected by TEDANA)
-        wf.get_node('bandpass_filter').inputs.in_file = str(func_input)
-    else:
-        # Single-echo: motion_correction is first node
-        wf.get_node('motion_correction').inputs.in_file = str(func_input)
+    # Both multi-echo and single-echo are now motion-corrected before this point
+    # So bandpass is the first node for both
+    wf.get_node('bandpass_filter').inputs.in_file = str(func_input)
 
     # Write workflow graph
     graph_file = derivatives_dir / 'workflow_graph.png'
@@ -705,30 +896,76 @@ def run_func_preprocessing(
         acompcor_dir = derivatives_dir / 'acompcor'
         acompcor_dir.mkdir(parents=True, exist_ok=True)
 
-        # Step 4a: Register tissue masks to functional space
-        logger.info("Step 1: Registering tissue masks to functional space...")
-        csf_func, wm_func, func_to_anat_bbr = register_masks_to_functional(
-            t1w_brain=brain_file,
-            func_ref=bandpass_output,  # Use bandpass output as reference
-            csf_mask=csf_mask,
-            wm_mask=wm_mask,
-            output_dir=acompcor_dir
-        )
-        results['csf_func_mask'] = csf_func
-        results['wm_func_mask'] = wm_func
+        # Step 4a: Transform tissue masks to functional space using ANTs
+        logger.info("Step 1: Transforming tissue masks to functional space...")
 
-        # Save BBR transform to TransformRegistry for reuse in normalization
-        registry = create_transform_registry(config, subject)
-        bbr_transform = registry.save_linear_transform(
-            transform_file=func_to_anat_bbr,
-            source_space='func',
-            target_space='T1w',
-            source_image=func_input,
-            reference=brain_file
-        )
-        results['func_to_anat_bbr'] = bbr_transform
-        logger.info(f"  BBR transform saved to registry: {bbr_transform}")
-        logger.info("")
+        # Check if we have the ANTs registration transforms
+        if 'func_to_t1w_transform' in results:
+            # Use ANTs inverse transform to bring masks to functional space
+            func_mean_file = derivatives_dir / 'motion_correction' / 'func_mean.nii.gz'
+            if not func_mean_file.exists():
+                # Try multi-echo location
+                func_mean_file = derivatives_dir / 'mcflirt' / 'func_mean.nii.gz'
+
+            csf_func, wm_func = apply_inverse_transform_to_masks(
+                csf_mask=csf_mask,
+                wm_mask=wm_mask,
+                t1w_to_func_transform=results['func_to_t1w_transform'],  # This gets inverted automatically
+                reference_image=func_mean_file,
+                output_dir=acompcor_dir
+            )
+            results['csf_func_mask'] = csf_func
+            results['wm_func_mask'] = wm_func
+            logger.info("  ANTs-based mask transformation complete")
+            logger.info("")
+
+            # Generate tissue mask QC visualizations
+            if config.get('run_qc', True) and 'registration_qc' in results:
+                logger.info("Generating tissue mask QC visualizations...")
+                # QC goes in study-wide QC directory
+                study_root = output_dir.parent if output_dir.name == subject else output_dir.parent.parent
+                qc_dir = study_root / 'qc' / subject / 'func' / 'registration'
+                try:
+                    from neurovrai.preprocess.qc.func_registration_qc import qc_tissue_masks_in_func
+                    tissue_qc = qc_tissue_masks_in_func(
+                        func_mean=func_mean_file,
+                        csf_mask_func=csf_func,
+                        wm_mask_func=wm_func,
+                        output_dir=qc_dir / 'tissue_masks'
+                    )
+                    results['registration_qc']['tissue_masks'] = tissue_qc
+                    logger.info("  Tissue mask QC complete")
+                    logger.info("")
+                except Exception as e:
+                    logger.warning(f"Tissue mask QC generation failed: {e}")
+                    logger.warning("")
+
+        else:
+            # Fallback to old FSL-based registration (should not happen with new pipeline)
+            logger.warning("ANTs transforms not available - falling back to FSL registration")
+            logger.warning("This is not recommended and may produce poor alignment!")
+            csf_func, wm_func, func_to_anat_bbr = register_masks_to_functional(
+                t1w_brain=brain_file,
+                func_ref=bandpass_output,
+                csf_mask=csf_mask,
+                wm_mask=wm_mask,
+                output_dir=acompcor_dir
+            )
+            results['csf_func_mask'] = csf_func
+            results['wm_func_mask'] = wm_func
+
+            # Save BBR transform to TransformRegistry for reuse in normalization
+            registry = create_transform_registry(config, subject)
+            bbr_transform = registry.save_linear_transform(
+                transform_file=func_to_anat_bbr,
+                source_space='func',
+                target_space='T1w',
+                source_image=func_input,
+                reference=brain_file
+            )
+            results['func_to_anat_bbr'] = bbr_transform
+            logger.info(f"  BBR transform saved to registry: {bbr_transform}")
+            logger.info("")
 
         # Step 4b: Prepare masks (threshold and erode)
         logger.info("Step 2: Preparing ACompCor masks...")
