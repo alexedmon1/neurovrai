@@ -544,7 +544,7 @@ def run_func_preprocessing(
             anat_dir = Path(anat_derivatives)
             brain_files = list(anat_dir.glob('brain/*brain.nii.gz'))
             t1w_to_mni_transform = anat_dir / 'transforms' / 'ants_Composite.h5'
-            mni_template = Path(config.get('paths', {}).get('mni152_t1_2mm',
+            mni_template = Path(config.get('templates', {}).get('mni152_t1_2mm',
                                 '/usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz'))
 
             if brain_files and t1w_to_mni_transform.exists():
@@ -713,7 +713,7 @@ def run_func_preprocessing(
             anat_dir = Path(anat_derivatives)
             brain_files = list(anat_dir.glob('brain/*brain.nii.gz'))
             t1w_to_mni_transform = anat_dir / 'transforms' / 'ants_Composite.h5'
-            mni_template = Path(config.get('paths', {}).get('mni152_t1_2mm',
+            mni_template = Path(config.get('templates', {}).get('mni152_t1_2mm',
                                 '/usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz'))
 
             if brain_files and t1w_to_mni_transform.exists():

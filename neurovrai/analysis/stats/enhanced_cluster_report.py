@@ -349,30 +349,46 @@ def identify_cluster_location(cluster_mask, atlas_img, atlas_labels):
 
 def create_mosaic_visualization(stat_data, cluster_mask, bg_data, output_file,
                                 cluster_id, peak_coords):
-    """Create mosaic view (axial, coronal, sagittal) of cluster"""
+    """Create mosaic view (axial, coronal, sagittal) of cluster with filled overlay"""
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     # Get peak coordinates
     peak_x, peak_y, peak_z = peak_coords
 
+    # Create a red colormap for cluster overlay
+    from matplotlib.colors import ListedColormap
+    import numpy as np
+
+    # Red with alpha for overlay
+    colors = np.array([[1, 0, 0, 0],      # Transparent for background
+                       [1, 0, 0, 0.6]])     # Semi-transparent red for cluster
+    cluster_cmap = ListedColormap(colors)
+
     # Axial view (Z slice)
     ax = axes[0]
-    ax.imshow(bg_data[:, :, peak_z].T, cmap='gray', origin='lower', aspect='auto')
-    ax.contour(cluster_mask[:, :, peak_z].T, colors='red', linewidths=2, levels=[0.5])
+    ax.imshow(bg_data[:, :, peak_z].T, cmap='gray', origin='lower', aspect='auto', vmin=0, vmax=np.percentile(bg_data, 99))
+    # Overlay cluster as filled region
+    cluster_slice = cluster_mask[:, :, peak_z].T.astype(float)
+    cluster_slice[cluster_slice == 0] = np.nan  # Set background to transparent
+    ax.imshow(cluster_slice, cmap=cluster_cmap, origin='lower', aspect='auto', alpha=0.6, vmin=0, vmax=1)
     ax.set_title(f'Axial (Z={peak_z})', fontsize=12, fontweight='bold')
     ax.axis('off')
 
     # Coronal view (Y slice)
     ax = axes[1]
-    ax.imshow(bg_data[:, peak_y, :].T, cmap='gray', origin='lower', aspect='auto')
-    ax.contour(cluster_mask[:, peak_y, :].T, colors='red', linewidths=2, levels=[0.5])
+    ax.imshow(bg_data[:, peak_y, :].T, cmap='gray', origin='lower', aspect='auto', vmin=0, vmax=np.percentile(bg_data, 99))
+    cluster_slice = cluster_mask[:, peak_y, :].T.astype(float)
+    cluster_slice[cluster_slice == 0] = np.nan
+    ax.imshow(cluster_slice, cmap=cluster_cmap, origin='lower', aspect='auto', alpha=0.6, vmin=0, vmax=1)
     ax.set_title(f'Coronal (Y={peak_y})', fontsize=12, fontweight='bold')
     ax.axis('off')
 
     # Sagittal view (X slice)
     ax = axes[2]
-    ax.imshow(bg_data[peak_x, :, :].T, cmap='gray', origin='lower', aspect='auto')
-    ax.contour(cluster_mask[peak_x, :, :].T, colors='red', linewidths=2, levels=[0.5])
+    ax.imshow(bg_data[peak_x, :, :].T, cmap='gray', origin='lower', aspect='auto', vmin=0, vmax=np.percentile(bg_data, 99))
+    cluster_slice = cluster_mask[peak_x, :, :].T.astype(float)
+    cluster_slice[cluster_slice == 0] = np.nan
+    ax.imshow(cluster_slice, cmap=cluster_cmap, origin='lower', aspect='auto', alpha=0.6, vmin=0, vmax=1)
     ax.set_title(f'Sagittal (X={peak_x})', fontsize=12, fontweight='bold')
     ax.axis('off')
 
@@ -383,7 +399,8 @@ def create_mosaic_visualization(stat_data, cluster_mask, bg_data, output_file,
 
 def extract_clusters_with_atlas(stat_file, corrp_file, mean_fa_file,
                                 p_thresh=0.7, min_size=5, top_n=10,
-                                atlas_type='jhu', atlas_resolution='2mm'):
+                                atlas_type='jhu', atlas_resolution='2mm',
+                                use_fmrib_template=True):
     """
     Extract clusters with anatomical localization
 
@@ -394,7 +411,7 @@ def extract_clusters_with_atlas(stat_file, corrp_file, mean_fa_file,
     corrp_file : Path
         Corrected p-value map file
     mean_fa_file : Path
-        Background image (FA for TBSS, T1 for VBM)
+        Background image (FA for TBSS, T1 for VBM) - used if use_fmrib_template=False
     p_thresh : float
         Corrected p-value threshold (corrp >= p_thresh)
     min_size : int
@@ -405,6 +422,8 @@ def extract_clusters_with_atlas(stat_file, corrp_file, mean_fa_file,
         Atlas to use: 'jhu' for white matter (TBSS), 'harvard-oxford' for grey matter (VBM)
     atlas_resolution : str
         Atlas resolution ('1mm' or '2mm')
+    use_fmrib_template : bool
+        If True, use FMRIB58_FA template as background (default: True)
 
     Returns
     -------
@@ -415,7 +434,19 @@ def extract_clusters_with_atlas(stat_file, corrp_file, mean_fa_file,
     # Load images
     stat_img = nib.load(stat_file)
     corrp_img = nib.load(corrp_file)
-    mean_fa_img = nib.load(mean_fa_file)
+
+    # Use FMRIB58_FA template if requested, otherwise use provided mean_fa_file
+    if use_fmrib_template and atlas_type == 'jhu':
+        fsl_dir = get_fsl_dir()
+        fmrib_template = fsl_dir / 'data' / 'standard' / 'FMRIB58_FA_1mm.nii.gz'
+        if not fmrib_template.exists():
+            print(f"Warning: FMRIB58_FA template not found, using provided mean_fa_file")
+            mean_fa_img = nib.load(mean_fa_file)
+        else:
+            print(f"   Using FMRIB58_FA template as background")
+            mean_fa_img = nib.load(str(fmrib_template))
+    else:
+        mean_fa_img = nib.load(mean_fa_file)
 
     stat_data = stat_img.get_fdata()
     corrp_data = corrp_img.get_fdata()
@@ -474,7 +505,7 @@ def extract_clusters_with_atlas(stat_file, corrp_file, mean_fa_file,
 def generate_enhanced_html_report(clusters, mean_fa_data, contrast_name,
                                   output_dir, stat_file, atlas_type='jhu',
                                   analysis_type=None, study_name=None,
-                                  threshold_p=0.05):
+                                  threshold_p=0.05, demographics=None):
     """Generate enhanced HTML report with visualizations
 
     Parameters
@@ -487,6 +518,8 @@ def generate_enhanced_html_report(clusters, mean_fa_data, contrast_name,
         Name of the study (e.g., 'mock_study')
     threshold_p : float
         P-value threshold used (default: 0.05)
+    demographics : dict, optional
+        Demographics information for the sample
     """
 
     output_dir = Path(output_dir)
