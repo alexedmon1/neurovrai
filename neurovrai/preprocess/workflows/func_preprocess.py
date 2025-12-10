@@ -907,7 +907,7 @@ def run_func_preprocessing(
             func_mean_file = derivatives_dir / 'motion_correction' / 'func_mean.nii.gz'
             if not func_mean_file.exists():
                 # Try multi-echo location
-                func_mean_file = derivatives_dir / 'mcflirt' / 'func_mean.nii.gz'
+                func_mean_file = derivatives_dir / 'mcflirt_echo' / 'func_mean.nii.gz'
 
             csf_func, wm_func = apply_inverse_transform_to_masks(
                 csf_mask=csf_mask,
@@ -946,9 +946,23 @@ def run_func_preprocessing(
             # Fallback to old FSL-based registration (should not happen with new pipeline)
             logger.warning("ANTs transforms not available - falling back to FSL registration")
             logger.warning("This is not recommended and may produce poor alignment!")
+
+            # CRITICAL: Use motion-corrected mean (NOT bandpass_output)
+            # Registration must use raw structural information before filtering
+            func_mean_file = derivatives_dir / 'motion_correction' / 'func_mean.nii.gz'
+            if not func_mean_file.exists():
+                # Try multi-echo location
+                func_mean_file = derivatives_dir / 'mcflirt_echo' / 'func_mean.nii.gz'
+
+            if not func_mean_file.exists():
+                # Create mean from motion-corrected data (NOT bandpass filtered)
+                logger.info("  Creating functional mean from motion-corrected data...")
+                func_mean_file = acompcor_dir / 'func_mean.nii.gz'
+                compute_func_mean(func_input, func_mean_file)
+
             csf_func, wm_func, func_to_anat_bbr = register_masks_to_functional(
                 t1w_brain=brain_file,
-                func_ref=bandpass_output,
+                func_ref=func_mean_file,  # Use motion-corrected mean (unfiltered)
                 csf_mask=csf_mask,
                 wm_mask=wm_mask,
                 output_dir=acompcor_dir
