@@ -25,6 +25,7 @@ import subprocess
 
 from nipype import Workflow, Node, MapNode
 from nipype.interfaces import fsl, utility as niu, afni
+from nipype.interfaces.base import File, Directory, traits, TraitedSpec
 from nipype.interfaces.io import DataSink
 from nipype.algorithms import confounds
 import nibabel as nib
@@ -60,6 +61,49 @@ from neurovrai.preprocess.qc.func_registration_qc import generate_registration_q
 from neurovrai.utils.transforms import create_transform_registry
 
 logger = logging.getLogger(__name__)
+
+
+# Custom Nipype interface for FSL applyxfm4D
+class ApplyXFM4DInputSpec(fsl.base.FSLCommandInputSpec):
+    """Input specification for applyxfm4D."""
+    in_file = File(exists=True, mandatory=True, argstr='%s', position=0,
+                   desc='4D input file')
+    ref_vol = File(exists=True, mandatory=True, argstr='%s', position=1,
+                   desc='Reference volume')
+    out_file = File(argstr='%s', position=2, name_source=['in_file'],
+                    name_template='%s_warp', desc='Registered output file')
+    trans_dir = Directory(exists=True, mandatory=True, argstr='%s', position=3,
+                          desc='Directory containing transformation matrices')
+    single_matrix = traits.Str(argstr='%s', position=4,
+                                desc='Single matrix filename')
+    four_digit = traits.Bool(argstr='-fourdigit', desc='Use 4-digit MAT file naming')
+
+
+class ApplyXFM4DOutputSpec(TraitedSpec):
+    """Output specification for applyxfm4D."""
+    out_file = File(exists=True, desc='Registered output file')
+
+
+class ApplyXFM4D(fsl.base.FSLCommand):
+    """
+    Use FSL applyxfm4D to apply 4D transformation matrices.
+
+    Applies transformation matrices from mcflirt to register 4D data.
+
+    Examples
+    --------
+    >>> from nipype.interfaces import fsl
+    >>> applyxfm = ApplyXFM4D()
+    >>> applyxfm.inputs.in_file = 'functional.nii.gz'
+    >>> applyxfm.inputs.ref_vol = 'reference.nii.gz'
+    >>> applyxfm.inputs.trans_dir = 'transforms.mat'
+    >>> applyxfm.inputs.four_digit = True
+    >>> applyxfm.cmdline
+    'applyxfm4D functional.nii.gz reference.nii.gz functional_warp.nii.gz transforms.mat -fourdigit'
+    """
+    _cmd = 'applyxfm4D'
+    input_spec = ApplyXFM4DInputSpec
+    output_spec = ApplyXFM4DOutputSpec
 
 
 def run_tedana(
@@ -191,28 +235,333 @@ def run_tedana(
     }
 
 
-def create_func_preprocessing_workflow(
+def create_mcflirt_node(config: Dict[str, Any], name: str = 'motion_correction') -> Node:
+    """
+    Create MCFLIRT motion correction node.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary with MCFLIRT parameters
+    name : str, optional
+        Node name (default: 'motion_correction')
+
+    Returns
+    -------
+    Node
+        Configured MCFLIRT node
+    """
+    mcflirt = Node(
+        fsl.MCFLIRT(
+            cost='normcorr',
+            save_plots=True,
+            save_mats=True,
+            save_rms=True,
+            output_type='NIFTI_GZ'
+        ),
+        name=name
+    )
+    return mcflirt
+
+
+def create_bet_node(config: Dict[str, Any], name: str = 'brain_extraction') -> Node:
+    """
+    Create BET brain extraction node for functional data.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary with BET parameters
+    name : str, optional
+        Node name (default: 'brain_extraction')
+
+    Returns
+    -------
+    Node
+        Configured BET node
+    """
+    bet_config = config.get('bet', {})
+
+    bet = Node(
+        fsl.BET(
+            frac=bet_config.get('frac', 0.3),  # Default 0.3 for functional
+            robust=True,
+            mask=True,
+            output_type='NIFTI_GZ'
+        ),
+        name=name
+    )
+    return bet
+
+
+def create_bandpass_node(config: Dict[str, Any], name: str = 'bandpass_filter') -> Node:
+    """
+    Create AFNI bandpass filtering node.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary with filtering parameters:
+        - highpass: High-pass filter frequency (Hz)
+        - lowpass: Low-pass filter frequency (Hz)
+        - tr: Repetition time (seconds)
+    name : str, optional
+        Node name (default: 'bandpass_filter')
+
+    Returns
+    -------
+    Node
+        Configured Bandpass node
+    """
+    bandpass = Node(
+        afni.Bandpass(
+            highpass=config.get('highpass', 0.001),
+            lowpass=config.get('lowpass', 0.08),
+            tr=config.get('tr', 1.029),
+            outputtype='NIFTI_GZ'
+        ),
+        name=name
+    )
+    return bandpass
+
+
+def create_smooth_node(config: Dict[str, Any], name: str = 'spatial_smooth') -> Node:
+    """
+    Create FSL smoothing node.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary with smoothing parameters:
+        - fwhm: Full-width half-maximum kernel size (mm)
+    name : str, optional
+        Node name (default: 'spatial_smooth')
+
+    Returns
+    -------
+    Node
+        Configured Smooth node
+    """
+    smooth = Node(
+        fsl.Smooth(
+            fwhm=config.get('fwhm', 6),
+            output_type='NIFTI_GZ'
+        ),
+        name=name
+    )
+    return smooth
+
+
+def create_multiecho_motion_correction_workflow(
     name: str,
     config: Dict[str, Any],
     work_dir: Path,
-    use_aroma: bool = False,
-    is_multiecho: bool = False
+    output_dir: Path
 ) -> Workflow:
     """
-    Create functional preprocessing workflow.
+    Phase 1: Multi-echo motion correction and brain extraction workflow.
+
+    Performs motion correction on multi-echo fMRI data:
+    1. Run MCFLIRT on echo 2 (middle echo as reference)
+    2. Apply transforms to echo 1 and echo 3 in parallel using applyxfm4D
+    3. Brain extraction (BET) on motion-corrected echo 2 to create mask for TEDANA
 
     Parameters
     ----------
     name : str
         Workflow name
     config : dict
-        Configuration dictionary with parameters
+        Configuration dictionary with BET parameters
     work_dir : Path
-        Working directory for Nipype
-    use_aroma : bool
-        DEPRECATED - not used (kept for compatibility)
-    is_multiecho : bool
-        DEPRECATED - not used (both paths now identical)
+        Working directory for Nipype intermediate outputs
+    output_dir : Path
+        Output directory for final derivatives (via DataSink)
+
+    Returns
+    -------
+    Workflow
+        Nipype workflow for multi-echo motion correction
+    """
+    wf = Workflow(name=name)
+    wf.base_dir = str(work_dir)
+
+    logger.info(f"Creating {name} workflow (Phase 1: Multi-echo motion correction)")
+    logger.info(f"  Work directory: {work_dir}")
+    logger.info(f"  Output directory: {output_dir}")
+
+    # INPUT NODE - echo files
+    inputnode = Node(
+        niu.IdentityInterface(fields=[
+            'echo1',
+            'echo2',
+            'echo3'
+        ]),
+        name='inputnode'
+    )
+
+    # MCFLIRT on echo 2 (reference/middle echo)
+    mcflirt_echo2 = Node(
+        fsl.MCFLIRT(
+            cost='normcorr',
+            save_plots=True,
+            save_mats=True,
+            save_rms=True,
+            output_type='NIFTI_GZ'
+        ),
+        name='mcflirt_echo2'
+    )
+
+    # Function to extract .mat directory from MCFLIRT mat_file output
+    # mat_file is a list like ['/path/file.mat/MAT_0000', '/path/file.mat/MAT_0001', ...]
+    # We need to extract the directory: '/path/file.mat'
+    def get_mat_directory(mat_file_list):
+        """Extract .mat directory path from MCFLIRT output."""
+        from pathlib import Path
+        if isinstance(mat_file_list, list) and len(mat_file_list) > 0:
+            # Get parent directory of first MAT file
+            return str(Path(mat_file_list[0]).parent)
+        elif isinstance(mat_file_list, str):
+            return str(Path(mat_file_list).parent)
+        else:
+            raise ValueError(f"Unexpected mat_file format: {mat_file_list}")
+
+    get_mat_dir = Node(
+        niu.Function(
+            input_names=['mat_file_list'],
+            output_names=['mat_dir'],
+            function=get_mat_directory
+        ),
+        name='get_mat_dir'
+    )
+
+    # Apply transforms to echo 1
+    applyxfm_echo1 = Node(
+        ApplyXFM4D(
+            four_digit=True
+        ),
+        name='applyxfm_echo1'
+    )
+
+    # Apply transforms to echo 3
+    applyxfm_echo3 = Node(
+        ApplyXFM4D(
+            four_digit=True
+        ),
+        name='applyxfm_echo3'
+    )
+
+    # Compute mean of motion-corrected echo 2 (4D → 3D)
+    mean_func = Node(
+        fsl.MeanImage(
+            dimension='T',
+            output_type='NIFTI_GZ'
+        ),
+        name='mean_func'
+    )
+
+    # Brain extraction on mean functional image
+    bet_config = config.get('functional', {}).get('bet', {})
+    bet = Node(
+        fsl.BET(
+            frac=bet_config.get('frac', 0.3),  # Default 0.3 for functional
+            robust=True,
+            mask=True,
+            output_type='NIFTI_GZ'
+        ),
+        name='brain_extraction'
+    )
+
+    # OUTPUT NODE - motion corrected echoes + brain mask
+    outputnode = Node(
+        niu.IdentityInterface(fields=[
+            'echo1_corrected',
+            'echo2_corrected',
+            'echo3_corrected',
+            'motion_params',
+            'motion_plots',
+            'brain_mask'
+        ]),
+        name='outputnode'
+    )
+
+    # DATASINK - save motion correction outputs
+    datasink = Node(DataSink(), name='datasink')
+    datasink.inputs.base_directory = str(output_dir)
+    datasink.inputs.container = ''
+
+    # WORKFLOW CONNECTIONS
+    wf.connect([
+        # Run MCFLIRT on echo 2
+        (inputnode, mcflirt_echo2, [('echo2', 'in_file')]),
+
+        # Extract .mat directory from MCFLIRT output
+        (mcflirt_echo2, get_mat_dir, [('mat_file', 'mat_file_list')]),
+
+        # Compute mean and run brain extraction
+        (mcflirt_echo2, mean_func, [('out_file', 'in_file')]),
+        (mean_func, bet, [('out_file', 'in_file')]),
+
+        # Apply echo 2 transforms to echo 1
+        (inputnode, applyxfm_echo1, [('echo1', 'in_file')]),
+        (mcflirt_echo2, applyxfm_echo1, [('out_file', 'ref_vol')]),
+        (get_mat_dir, applyxfm_echo1, [('mat_dir', 'trans_dir')]),
+
+        # Apply echo 2 transforms to echo 3
+        (inputnode, applyxfm_echo3, [('echo3', 'in_file')]),
+        (mcflirt_echo2, applyxfm_echo3, [('out_file', 'ref_vol')]),
+        (get_mat_dir, applyxfm_echo3, [('mat_dir', 'trans_dir')]),
+
+        # Collect outputs
+        (applyxfm_echo1, outputnode, [('out_file', 'echo1_corrected')]),
+        (mcflirt_echo2, outputnode, [
+            ('out_file', 'echo2_corrected'),
+            ('par_file', 'motion_params'),
+            ('rms_files', 'motion_plots')
+        ]),
+        (applyxfm_echo3, outputnode, [('out_file', 'echo3_corrected')]),
+        (bet, outputnode, [('mask_file', 'brain_mask')]),
+
+        # Save via DataSink
+        (outputnode, datasink, [
+            ('echo1_corrected', 'motion_correction.@echo1'),
+            ('echo2_corrected', 'motion_correction.@echo2'),
+            ('echo3_corrected', 'motion_correction.@echo3'),
+            ('motion_params', 'motion_correction.@params'),
+            ('motion_plots', 'motion_correction.@plots'),
+            ('brain_mask', 'brain.@mask')
+        ])
+    ])
+
+    return wf
+
+
+def create_func_preprocessing_workflow(
+    name: str,
+    config: Dict[str, Any],
+    work_dir: Path,
+    output_dir: Path,
+    is_multiecho: bool = False
+) -> Workflow:
+    """
+    Phase 2: Functional preprocessing workflow (filtering and smoothing).
+
+    For multi-echo: Processes TEDANA output (motion correction done in Phase 1)
+    For single-echo: Includes motion correction
+
+    Parameters
+    ----------
+    name : str
+        Workflow name
+    config : dict
+        Configuration dictionary with preprocessing parameters
+    work_dir : Path
+        Working directory for Nipype intermediate outputs
+    output_dir : Path
+        Output directory for final derivatives (via DataSink)
+    is_multiecho : bool, optional
+        If True, skips motion correction (input is TEDANA output from Phase 1)
+        If False, runs motion correction on single-echo data
+        Default: False
 
     Returns
     -------
@@ -221,49 +570,110 @@ def create_func_preprocessing_workflow(
 
     Notes
     -----
-    This workflow performs temporal filtering and spatial smoothing only.
-    Motion correction and registration must be performed BEFORE this workflow.
+    Single-echo: motion correction → brain extraction → bandpass → smooth
+    Multi-echo: brain extraction → bandpass → smooth (Phase 1 does motion correction)
 
-    Workflow: bandpass filtering → spatial smoothing
-
-    Motion correction is now performed outside this workflow to enable:
-    - ANTs-based registration on raw motion-corrected data
-    - Proper fMRI → T1w → MNI transform chain
-    - Inverse transforms for atlas transformation to functional space
+    All intermediate outputs stored in work_dir.
+    Final outputs saved to output_dir via DataSink.
     """
-    wf = Workflow(name=name, base_dir=str(work_dir))
+    wf = Workflow(name=name)
+    wf.base_dir = str(work_dir)
 
-    # Extract configuration
-    tr = config.get('tr', 1.029)
-    highpass = config.get('highpass', 0.001)
-    lowpass = config.get('lowpass', 0.08)
-    fwhm = config.get('fwhm', 6)
-    bet_frac = config.get('bet', {}).get('frac', 0.3)  # Default: 0.3 for functional
+    logger.info(f"Creating {name} workflow")
+    logger.info(f"  Work directory: {work_dir}")
+    logger.info(f"  Output directory: {output_dir}")
+    logger.info(f"  Multi-echo mode: {is_multiecho}")
 
-    # Temporal filtering (bandpass)
-    bandpass = Node(afni.Bandpass(
-        highpass=highpass,
-        lowpass=lowpass,
-        tr=tr,
-        outputtype='NIFTI_GZ'
-    ), name='bandpass_filter')
+    # INPUT NODE - Define all workflow inputs
+    inputnode = Node(
+        niu.IdentityInterface(fields=[
+            'func_file',        # Input functional data
+            'csf_mask',         # CSF mask from anatomical (for ACompCor)
+            'wm_mask',          # WM mask from anatomical (for ACompCor)
+            't1w_brain'         # T1w brain for registration (optional)
+        ]),
+        name='inputnode'
+    )
 
-    # Spatial smoothing
-    # Note: ACompCor would go between bandpass and smooth if implemented
-    smooth = Node(fsl.Smooth(
-        fwhm=fwhm,
-        output_type='NIFTI_GZ'
-    ), name='spatial_smooth')
+    # PROCESSING NODES
+    # Only create MCFLIRT and BET for single-echo
+    # Multi-echo: Phase 1 already did motion correction and brain extraction
+    if not is_multiecho:
+        mcflirt = create_mcflirt_node(config, name='motion_correction')
+        bet = create_bet_node(config, name='brain_extraction')
 
-    # Both multi-echo and single-echo are now motion-corrected before this workflow
-    # So the workflow is simply: bandpass → smooth for both
-    wf.connect([
-        (bandpass, smooth, [('out_file', 'in_file')])
+    bandpass = create_bandpass_node(config, name='bandpass_filter')
+    smooth = create_smooth_node(config, name='spatial_smooth')
+
+    # OUTPUT NODE - Aggregate all outputs
+    outputnode = Node(
+        niu.IdentityInterface(fields=[
+            'motion_corrected',
+            'motion_params',
+            'brain_mask',
+            'bandpass_filtered',
+            'preprocessed'
+        ]),
+        name='outputnode'
+    )
+
+    # DATASINK - Save results to derivatives
+    datasink = Node(DataSink(), name='datasink')
+    datasink.inputs.base_directory = str(output_dir)
+    datasink.inputs.container = ''  # Empty - output_dir is already final location
+
+    # WORKFLOW CONNECTIONS
+    connections = []
+
+    if not is_multiecho:
+        # Single-echo: Run motion correction and brain extraction
+        logger.info("  Including motion correction and brain extraction for single-echo data")
+        connections.extend([
+            # Motion correction
+            (inputnode, mcflirt, [('func_file', 'in_file')]),
+            (mcflirt, bet, [('out_file', 'in_file')]),
+            (mcflirt, bandpass, [('out_file', 'in_file')]),
+            (mcflirt, outputnode, [
+                ('out_file', 'motion_corrected'),
+                ('par_file', 'motion_params')
+            ]),
+            # Brain extraction
+            (bet, outputnode, [('mask_file', 'brain_mask')]),
+        ])
+    else:
+        # Multi-echo: Input is TEDANA output, brain extraction done in Phase 1
+        logger.info("  Skipping motion correction and brain extraction (multi-echo - done in Phase 1)")
+        connections.extend([
+            (inputnode, bandpass, [('func_file', 'in_file')]),
+        ])
+
+    # Common connections (both single and multi-echo)
+    connections.extend([
+        # Filtering and smoothing
+        (bandpass, smooth, [('out_file', 'in_file')]),
+        (bandpass, outputnode, [('out_file', 'bandpass_filtered')]),
+        (smooth, outputnode, [('out_file', 'preprocessed')]),
+
+        # Save outputs via DataSink
+        (outputnode, datasink, [
+            ('bandpass_filtered', 'filtered.@bandpass'),
+            ('preprocessed', '@preprocessed')  # Top-level output
+        ])
     ])
 
-    # Note: ICA-AROMA support removed - motion correction now happens
-    # before this workflow with proper registration. TEDANA (multi-echo) or
-    # alternative motion correction methods should be used instead.
+    # Add single-echo specific outputs (motion correction and brain mask)
+    if not is_multiecho:
+        connections.extend([
+            (outputnode, datasink, [
+                ('motion_corrected', 'motion_correction.@corrected'),
+                ('motion_params', 'motion_correction.@params'),
+                ('brain_mask', 'brain.@mask')  # Brain mask from Phase 2 BET
+            ])
+        ])
+
+    wf.connect(connections)
+
+    logger.info(f"Workflow created with {len(wf._graph.nodes())} nodes")
 
     return wf
 
@@ -405,130 +815,70 @@ def run_func_preprocessing(
         logger.info(f"Middle echo (reference): Echo {middle_echo_idx + 1} - {middle_echo.name}")
         logger.info("")
 
-        # Step 1a: Run MCFLIRT on middle echo to get transformation matrices
-        mcflirt_dir = derivatives_dir / 'mcflirt_echo'
-        mcflirt_dir.mkdir(parents=True, exist_ok=True)
-
-        mcflirt_out = mcflirt_dir / f'echo{middle_echo_idx + 1}_mcf.nii.gz'
-        # MCFLIRT creates .nii.mat directory when we remove .nii.gz from output name
-        # e.g., -out echo2_mcf.nii creates echo2_mcf.nii.mat/ directory
-        mcflirt_base = str(mcflirt_out).replace('.nii.gz', '.nii')
-        mcflirt_mat_dir = mcflirt_base + '.mat'
-
-        # Check if motion correction already completed with same parameters
-        import hashlib
-        import json
-        mcflirt_params = {
-            'input_file': str(middle_echo),
-            'output_base': mcflirt_base,
-            'options': ['-plots', '-mats', '-rmsrel', '-rmsabs']
-        }
-        mcflirt_hash = hashlib.md5(json.dumps(mcflirt_params, sort_keys=True).encode()).hexdigest()
-        mcflirt_hash_file = mcflirt_dir / '.mcflirt_params.md5'
-
-        outputs_exist = mcflirt_out.exists() and Path(mcflirt_mat_dir).exists()
-        params_unchanged = mcflirt_hash_file.exists() and mcflirt_hash_file.read_text() == mcflirt_hash
-
-        if outputs_exist and params_unchanged:
-            logger.info("Motion correction already completed - using cached results")
-            logger.info(f"  Cached output: {mcflirt_out}")
-        elif outputs_exist and not mcflirt_hash_file.exists():
-            # Outputs exist but no hash file (first run with new caching code)
-            logger.info("Motion correction already completed - using cached results (no hash file yet)")
-            logger.info(f"  Cached output: {mcflirt_out}")
-            # Save hash for future runs
-            mcflirt_hash_file.write_text(mcflirt_hash)
-        else:
-            if outputs_exist and mcflirt_hash_file.exists() and not params_unchanged:
-                logger.info("Motion correction parameters changed - re-running...")
-            logger.info("Running motion correction on middle echo...")
-            mcflirt_cmd = [
-                'mcflirt',
-                '-in', str(middle_echo),
-                '-out', mcflirt_base,  # Output base name (e.g., echo2_mcf.nii)
-                '-plots',
-                '-mats',
-                '-rmsrel',
-                '-rmsabs'
-            ]
-            subprocess.run(mcflirt_cmd, check=True, capture_output=True)
-
-            # Save parameter hash for future cache validation
-            mcflirt_hash_file.write_text(mcflirt_hash)
-
-        # Store motion parameters from middle echo
-        # MCFLIRT creates .nii.par when output is echo2_mcf.nii
-        motion_params = mcflirt_dir / f'echo{middle_echo_idx + 1}_mcf.nii.par'
-        if motion_params.exists():
-            results['motion_params'] = motion_params
-        logger.info(f"  Motion parameters: {motion_params}")
+        # Step 1a: Run Phase 1 Nipype Workflow - Multi-echo motion correction
+        logger.info("=" * 70)
+        logger.info("PHASE 1: Multi-echo Motion Correction (Nipype Workflow)")
+        logger.info("=" * 70)
         logger.info("")
 
-        # Step 1b: Apply transformations to all echoes
-        logger.info("Applying motion correction to all echoes...")
-        motion_corrected_echoes = []
+        # Get execution configuration
+        exec_config = get_execution_config(config)
 
-        for i, echo_file in enumerate(echo_files):
-            logger.info(f"  Echo {i + 1}: {echo_file.name}")
+        # Create Phase 1 workflow
+        wf_phase1 = create_multiecho_motion_correction_workflow(
+            name='func_phase1_motion',
+            config=config,
+            work_dir=work_dir.parent,  # Nipype adds workflow name subdirectory
+            output_dir=derivatives_dir
+        )
 
-            if i == middle_echo_idx:
-                # Middle echo is already motion corrected
-                motion_corrected_echoes.append(mcflirt_out)
-                logger.info(f"    Already corrected (reference)")
-            else:
-                # Apply transformation matrices from middle echo to other echoes
-                output_echo = mcflirt_dir / f'echo{i + 1}_mcf.nii.gz'
+        # Set workflow inputs
+        wf_phase1.get_node('inputnode').inputs.echo1 = str(echo_files[0])
+        wf_phase1.get_node('inputnode').inputs.echo2 = str(echo_files[1])  # Middle echo (reference)
+        wf_phase1.get_node('inputnode').inputs.echo3 = str(echo_files[2])
 
-                # Check if already processed
-                if output_echo.exists():
-                    logger.info(f"    Using cached motion-corrected echo")
-                    motion_corrected_echoes.append(output_echo)
-                else:
-                    # Use applyxfm4D to apply the transformation matrices
-                    applyxfm_cmd = [
-                        'applyxfm4D',
-                        str(echo_file),           # Input echo
-                        str(middle_echo),         # Reference (middle echo)
-                        str(output_echo),         # Output
-                        str(mcflirt_mat_dir),     # Transformation matrices directory
-                        '-fourdigit'              # MAT file naming convention
-                    ]
-                    subprocess.run(applyxfm_cmd, check=True, capture_output=True)
-                    motion_corrected_echoes.append(output_echo)
-                    logger.info(f"    Corrected using middle echo transforms")
+        # Run Phase 1 workflow
+        logger.info("Running Phase 1 workflow...")
+        wf_phase1_result = wf_phase1.run(**exec_config)
 
         logger.info("")
-        logger.info("All echoes motion-corrected and aligned")
+        logger.info("Phase 1 Complete - Motion correction outputs in work directory")
         logger.info("")
 
-        # Step 1c: Create brain mask from motion-corrected middle echo
-        mask_file = derivatives_dir / 'func_mask.nii.gz'
+        # Find motion-corrected echoes in work directory
+        phase1_work_dir = work_dir.parent / 'func_phase1_motion'
+        mcflirt_echo2_dir = phase1_work_dir / 'mcflirt_echo2'
+        applyxfm_echo1_dir = phase1_work_dir / 'applyxfm_echo1'
+        applyxfm_echo3_dir = phase1_work_dir / 'applyxfm_echo3'
+        bet_dir = phase1_work_dir / 'brain_extraction'
 
-        if mask_file.exists():
-            logger.info("Brain mask already exists - using cached version")
-            logger.info(f"  Cached mask: {mask_file}")
-        else:
-            logger.info("Creating brain mask from motion-corrected middle echo...")
-            bet_cmd = [
-                'bet',
-                str(mcflirt_out),
-                str(derivatives_dir / 'func_brain'),
-                '-f', str(bet_frac),
-                '-m',
-                '-R'
-            ]
-            subprocess.run(bet_cmd, check=True, capture_output=True)
+        # Find the output files
+        echo1_corrected = list(applyxfm_echo1_dir.glob('*_warp.nii.gz'))[0]
+        echo2_corrected = list(mcflirt_echo2_dir.glob('*_mcf.nii.gz'))[0]
+        echo3_corrected = list(applyxfm_echo3_dir.glob('*_warp.nii.gz'))[0]
 
-            # Move mask to expected location
-            mask_output = derivatives_dir / 'func_brain_mask.nii.gz'
-            if mask_output.exists():
-                mask_output.rename(mask_file)
-            logger.info(f"  Brain mask: {mask_file}")
+        motion_corrected_echoes = [echo1_corrected, echo2_corrected, echo3_corrected]
+
+        # Find motion parameters and brain mask
+        motion_params = list(mcflirt_echo2_dir.glob('*_mcf.nii.gz.par'))[0]
+        brain_mask = list(bet_dir.glob('*_mask.nii.gz'))[0]
+
+        results['motion_params'] = motion_params
+
+        logger.info(f"Motion-corrected echoes:")
+        for i, echo in enumerate(motion_corrected_echoes):
+            logger.info(f"  Echo {i + 1}: {echo}")
+        logger.info(f"Motion parameters: {motion_params}")
+        logger.info(f"Brain mask (from Phase 1): {brain_mask}")
         logger.info("")
 
-        # Step 1d: Compute functional mean for registration
+        # Use middle echo for registration reference
+        mcflirt_out = echo2_corrected
+        mask_file = brain_mask  # Use mask from Phase 1
+
+        # Step 1c: Compute functional mean for registration
         logger.info("Computing functional mean for registration...")
-        func_mean_file = mcflirt_dir / 'func_mean.nii.gz'
+        func_mean_file = mcflirt_echo2_dir / 'func_mean.nii.gz'
         if not func_mean_file.exists():
             compute_func_mean(mcflirt_out, func_mean_file)
         else:
@@ -609,7 +959,8 @@ def run_func_preprocessing(
             logger.warning("")
 
         # Step 1f: Run TEDANA on motion-corrected echoes
-        tedana_dir = derivatives_dir / 'tedana'
+        # NOTE: TEDANA outputs go to work_dir (temporary), not derivatives
+        tedana_dir = work_dir / 'tedana'
         # Extract TEDANA config (with defaults)
         # Check both functional.tedana and top-level tedana for backwards compatibility
         func_config = config.get('functional', {})
@@ -647,7 +998,9 @@ def run_func_preprocessing(
         logger.info("=" * 70)
         logger.info("")
 
-        mcflirt_dir = derivatives_dir / 'motion_correction'
+        # NOTE: For single-echo, motion correction will be handled by Nipype workflow
+        # This manual mcflirt section is being phased out
+        mcflirt_dir = work_dir / 'motion_correction_manual'
         mcflirt_dir.mkdir(parents=True, exist_ok=True)
 
         mcflirt_out = mcflirt_dir / f'{subject}_mcf.nii.gz'
@@ -818,8 +1171,14 @@ def run_func_preprocessing(
             acompcor_enabled = False
             logger.info("")
 
-    # Step 3: Create and run preprocessing workflow (bandpass filtering)
-    logger.info("Creating preprocessing workflow...")
+    # Step 3: Create and run Phase 2 preprocessing workflow (filtering and smoothing)
+    if is_multiecho:
+        logger.info("=" * 70)
+        logger.info("PHASE 2: Filtering and Smoothing (Nipype Workflow)")
+        logger.info("=" * 70)
+        logger.info("")
+    else:
+        logger.info("Creating preprocessing workflow...")
 
     # Determine if AROMA should be used
     # Auto-enable for single-echo (primary denoising method)
@@ -847,18 +1206,20 @@ def run_func_preprocessing(
     # This ensures hash_method is set when nodes are instantiated
     exec_config = get_execution_config(config)
 
+    # Create preprocessing workflow with proper Nipype architecture
     wf = create_func_preprocessing_workflow(
         name='func_preproc',
         config=config,
-        work_dir=work_dir,
-        use_aroma=use_aroma,
+        work_dir=work_dir.parent,  # Nipype adds workflow name subdirectory
+        output_dir=derivatives_dir,
         is_multiecho=is_multiecho
     )
 
-    # Set input for the first node in the workflow
-    # Both multi-echo and single-echo are now motion-corrected before this point
-    # So bandpass is the first node for both
-    wf.get_node('bandpass_filter').inputs.in_file = str(func_input)
+    # Set workflow inputs via inputnode
+    wf.get_node('inputnode').inputs.func_file = str(func_input)
+    if csf_mask and wm_mask:
+        wf.get_node('inputnode').inputs.csf_mask = str(csf_mask)
+        wf.get_node('inputnode').inputs.wm_mask = str(wm_mask)
 
     # Write workflow graph
     graph_file = derivatives_dir / 'workflow_graph.png'
@@ -867,10 +1228,24 @@ def run_func_preprocessing(
     logger.info("")
 
     # Run workflow
-    logger.info("Running bandpass filtering and smoothing...")
+    if is_multiecho:
+        logger.info("Running Phase 2 workflow...")
+    else:
+        logger.info("Running preprocessing workflow (motion correction, brain extraction, filtering, smoothing)...")
     wf_result = wf.run(**exec_config)
 
-    # Get outputs from work directory (result pickle may be in temp location)
+    logger.info("")
+    logger.info("=" * 70)
+    if is_multiecho:
+        logger.info("Phase 2 Complete")
+    else:
+        logger.info("Workflow Complete")
+    logger.info("=" * 70)
+    logger.info("")
+
+    # Get outputs from work directory
+    # DataSink has saved final outputs to derivatives_dir
+    # Intermediate outputs remain in work_dir for ACompCor
     bandpass_dir = work_dir / 'func_preproc' / 'bandpass_filter'
     smooth_dir = work_dir / 'func_preproc' / 'spatial_smooth'
 
@@ -885,8 +1260,16 @@ def run_func_preprocessing(
     bandpass_output = bandpass_files[0]
     smooth_output = smooth_files[0]
 
-    logger.info(f"Bandpass filtered: {bandpass_output}")
-    logger.info(f"Smoothed: {smooth_output}")
+    logger.info(f"Bandpass filtered (work): {bandpass_output}")
+    logger.info(f"Smoothed (work): {smooth_output}")
+    logger.info("")
+
+    # Find DataSink outputs in derivatives
+    preprocessed_files = list(derivatives_dir.glob('*_preprocessed.nii.gz'))
+    if preprocessed_files:
+        logger.info(f"Final output (derivatives): {preprocessed_files[0]}")
+        results['preprocessed'] = preprocessed_files[0]
+    logger.info("")
 
     # Step 4: Apply ACompCor (if enabled)
     if acompcor_enabled and csf_mask and wm_mask and brain_file:
@@ -895,7 +1278,8 @@ def run_func_preprocessing(
         logger.info("=" * 70)
         logger.info("")
 
-        acompcor_dir = derivatives_dir / 'acompcor'
+        # ACompCor intermediates go to work_dir (temporary)
+        acompcor_dir = work_dir / 'acompcor'
         acompcor_dir.mkdir(parents=True, exist_ok=True)
 
         # Step 4a: Transform tissue masks to functional space using ANTs
@@ -904,10 +1288,11 @@ def run_func_preprocessing(
         # Check if we have the ANTs registration transforms
         if 'func_to_t1w_transform' in results:
             # Use ANTs inverse transform to bring masks to functional space
-            func_mean_file = derivatives_dir / 'motion_correction' / 'func_mean.nii.gz'
+            # Look for func_mean in work_dir now
+            func_mean_file = work_dir / 'motion_correction_manual' / 'func_mean.nii.gz'
             if not func_mean_file.exists():
-                # Try multi-echo location
-                func_mean_file = derivatives_dir / 'mcflirt_echo' / 'func_mean.nii.gz'
+                # Try multi-echo location in work_dir
+                func_mean_file = work_dir / 'mcflirt_echo' / 'func_mean.nii.gz'
 
             csf_func, wm_func = apply_inverse_transform_to_masks(
                 csf_mask=csf_mask,
