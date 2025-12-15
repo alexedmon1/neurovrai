@@ -42,6 +42,7 @@ from neurovrai.preprocess.qc.func_qc import (
     compute_tsnr,
     compute_dvars,
     create_carpet_plot,
+    compute_skull_strip_qc,
     generate_func_qc_report
 )
 from neurovrai.preprocess.utils.acompcor_helper import (
@@ -352,6 +353,111 @@ def create_smooth_node(config: Dict[str, Any], name: str = 'spatial_smooth') -> 
     return smooth
 
 
+def create_bet_4d_workflow(config: Dict[str, Any], name: str = 'bet_4d') -> Workflow:
+    """
+    Create workflow for brain extraction on 4D functional data.
+
+    This workflow:
+    1. Computes temporal mean (4D → 3D)
+    2. Runs BET on the 3D mean
+    3. Applies mask to the full 4D data
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary with BET parameters
+    name : str, optional
+        Workflow name
+
+    Returns
+    -------
+    Workflow
+        BET workflow for 4D data with inputs: in_file
+        and outputs: masked_file, mask_file
+    """
+    from nipype import Workflow, Node
+    from nipype.interfaces import fsl, utility as niu
+
+    workflow = Workflow(name=name)
+
+    # Input node
+    inputnode = Node(niu.IdentityInterface(fields=['in_file']), name='inputnode')
+
+    # Output node
+    outputnode = Node(niu.IdentityInterface(fields=['masked_file', 'mask_file']), name='outputnode')
+
+    # Compute temporal mean (4D → 3D)
+    mean = Node(
+        fsl.MeanImage(dimension='T', output_type='NIFTI_GZ'),
+        name='temporal_mean'
+    )
+
+    # Brain extraction on 3D mean
+    bet_frac = config.get('functional', {}).get('bet', {}).get('frac', 0.3)
+    bet = Node(
+        fsl.BET(
+            frac=bet_frac,
+            mask=True,
+            robust=True,
+            output_type='NIFTI_GZ'
+        ),
+        name='bet_3d'
+    )
+
+    # Apply mask to 4D data
+    apply_mask = Node(
+        fsl.ApplyMask(output_type='NIFTI_GZ'),
+        name='apply_mask'
+    )
+
+    # Connect nodes
+    workflow.connect([
+        (inputnode, mean, [('in_file', 'in_file')]),
+        (mean, bet, [('out_file', 'in_file')]),
+        (inputnode, apply_mask, [('in_file', 'in_file')]),
+        (bet, apply_mask, [('mask_file', 'mask_file')]),
+        (apply_mask, outputnode, [('out_file', 'masked_file')]),
+        (bet, outputnode, [('mask_file', 'mask_file')])
+    ])
+
+    return workflow
+
+
+def create_aroma_node(config: Dict[str, Any], name: str = 'ica_aroma') -> Node:
+    """
+    Create ICA-AROMA node for motion artifact removal.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary with AROMA parameters:
+        - aroma.denoise_type: 'nonaggr' (non-aggressive, default) or 'aggr' (aggressive)
+    name : str, optional
+        Node name (default: 'ica_aroma')
+
+    Returns
+    -------
+    Node
+        Configured ICA-AROMA node
+
+    Notes
+    -----
+    ICA-AROMA extracts TR from the NIfTI header automatically.
+    """
+    from nipype.interfaces.fsl import ICA_AROMA
+
+    denoise_type = config.get('aroma', {}).get('denoise_type', 'nonaggr')
+
+    aroma = Node(
+        ICA_AROMA(
+            denoise_type=denoise_type,
+            out_dir='aroma_output'
+        ),
+        name=name
+    )
+    return aroma
+
+
 def create_multiecho_motion_correction_workflow(
     name: str,
     config: Dict[str, Any],
@@ -543,10 +649,10 @@ def create_func_preprocessing_workflow(
     is_multiecho: bool = False
 ) -> Workflow:
     """
-    Phase 2: Functional preprocessing workflow (filtering and smoothing).
+    Phase 2: Functional preprocessing workflow (motion correction and denoising).
 
     For multi-echo: Processes TEDANA output (motion correction done in Phase 1)
-    For single-echo: Includes motion correction
+    For single-echo: Includes motion correction and ICA-AROMA
 
     Parameters
     ----------
@@ -570,8 +676,16 @@ def create_func_preprocessing_workflow(
 
     Notes
     -----
-    Single-echo: motion correction → brain extraction → bandpass → smooth
-    Multi-echo: brain extraction → bandpass → smooth (Phase 1 does motion correction)
+    CRITICAL: Workflow outputs motion-corrected/denoised data.
+    ACompCor, bandpass filtering, and smoothing are applied AFTER this workflow.
+
+    Correct pipeline order (HCP-compliant):
+    1. Motion correction (MCFLIRT)
+    2. Brain extraction (BET)
+    3. ICA-AROMA (motion artifact removal, single-echo only)
+    4. ACompCor (nuisance regression) - OUTSIDE workflow
+    5. Bandpass filtering - OUTSIDE workflow
+    6. Spatial smoothing - OUTSIDE workflow
 
     All intermediate outputs stored in work_dir.
     Final outputs saved to output_dir via DataSink.
@@ -600,10 +714,20 @@ def create_func_preprocessing_workflow(
     # Multi-echo: Phase 1 already did motion correction and brain extraction
     if not is_multiecho:
         mcflirt = create_mcflirt_node(config, name='motion_correction')
-        bet = create_bet_node(config, name='brain_extraction')
+        bet_4d = create_bet_4d_workflow(config, name='brain_extraction_4d')
 
-    bandpass = create_bandpass_node(config, name='bandpass_filter')
-    smooth = create_smooth_node(config, name='spatial_smooth')
+        # ICA-AROMA for single-echo (auto-enabled unless explicitly disabled)
+        aroma_config = config.get('aroma', {}).get('enabled', 'auto')
+        use_aroma = (aroma_config == 'auto') or (aroma_config is True)
+        if use_aroma:
+            aroma = create_aroma_node(config, name='ica_aroma')
+        else:
+            aroma = None
+    else:
+        aroma = None
+
+    # NOTE: Bandpass and smoothing removed from workflow
+    # They will be applied AFTER ACompCor (outside this workflow)
 
     # OUTPUT NODE - Aggregate all outputs
     outputnode = Node(
@@ -611,8 +735,7 @@ def create_func_preprocessing_workflow(
             'motion_corrected',
             'motion_params',
             'brain_mask',
-            'bandpass_filtered',
-            'preprocessed'
+            'denoised'  # Motion-corrected + AROMA-denoised (if applicable)
         ]),
         name='outputnode'
     )
@@ -631,33 +754,50 @@ def create_func_preprocessing_workflow(
         connections.extend([
             # Motion correction
             (inputnode, mcflirt, [('func_file', 'in_file')]),
-            (mcflirt, bet, [('out_file', 'in_file')]),
-            (mcflirt, bandpass, [('out_file', 'in_file')]),
+            # Brain extraction on 4D data (mean → BET → apply mask)
+            (mcflirt, bet_4d, [('out_file', 'inputnode.in_file')]),
             (mcflirt, outputnode, [
                 ('out_file', 'motion_corrected'),
                 ('par_file', 'motion_params')
             ]),
-            # Brain extraction
-            (bet, outputnode, [('mask_file', 'brain_mask')]),
+            # Brain mask output from BET 4D workflow
+            (bet_4d, outputnode, [('outputnode.mask_file', 'brain_mask')]),
         ])
+
+        # Add ICA-AROMA if enabled (motion artifact removal)
+        if aroma is not None:
+            logger.info("  Including ICA-AROMA for motion artifact removal")
+            denoise_type = config.get('aroma', {}).get('denoise_type', 'nonaggr')
+            aroma_output_field = 'nonaggr_denoised_file' if denoise_type == 'nonaggr' else 'aggr_denoised_file'
+
+            connections.extend([
+                # AROMA inputs: motion-corrected data, motion params, mask
+                (mcflirt, aroma, [
+                    ('out_file', 'in_file'),
+                    ('par_file', 'motion_parameters')
+                ]),
+                (bet_4d, aroma, [('outputnode.mask_file', 'mask')]),
+                # AROMA output → outputnode (for ACompCor)
+                (aroma, outputnode, [(aroma_output_field, 'denoised')]),
+            ])
+        else:
+            logger.info("  ICA-AROMA disabled - using motion-corrected data directly")
+            connections.extend([
+                # Motion-corrected output → outputnode (for ACompCor)
+                (bet_4d, outputnode, [('outputnode.masked_file', 'denoised')]),
+            ])
     else:
         # Multi-echo: Input is TEDANA output, brain extraction done in Phase 1
         logger.info("  Skipping motion correction and brain extraction (multi-echo - done in Phase 1)")
         connections.extend([
-            (inputnode, bandpass, [('func_file', 'in_file')]),
+            # TEDANA output → outputnode (for ACompCor)
+            (inputnode, outputnode, [('func_file', 'denoised')]),
         ])
 
-    # Common connections (both single and multi-echo)
+    # Save outputs via DataSink
     connections.extend([
-        # Filtering and smoothing
-        (bandpass, smooth, [('out_file', 'in_file')]),
-        (bandpass, outputnode, [('out_file', 'bandpass_filtered')]),
-        (smooth, outputnode, [('out_file', 'preprocessed')]),
-
-        # Save outputs via DataSink
         (outputnode, datasink, [
-            ('bandpass_filtered', 'filtered.@bandpass'),
-            ('preprocessed', '@preprocessed')  # Top-level output
+            ('denoised', 'denoised.@data')  # Motion-corrected + AROMA-denoised
         ])
     ])
 
@@ -739,18 +879,33 @@ def run_func_preprocessing(
 
     Notes
     -----
-    Pipeline (multi-echo): TEDANA → MCFLIRT → Bandpass → Smooth → QC
-    Pipeline (single-echo): MCFLIRT → (optional: ICA-AROMA) → Bandpass → Smooth → QC
+    CORRECTED HCP-COMPLIANT PIPELINE ORDER:
 
-    For multi-echo data:
-    1. TEDANA removes thermal noise and identifies BOLD signal using TE-dependence
-    2. Use optimally combined data for further preprocessing
-    3. ICA-AROMA is redundant and disabled by default (TEDANA is superior)
+    Multi-echo:
+    1. Motion correction (MCFLIRT on middle echo)
+    2. Brain extraction (BET)
+    3. TEDANA denoising (optimal combination + ICA-based denoising)
+    4. ACompCor (nuisance regression using CSF/WM masks)
+    5. Bandpass filtering
+    6. Spatial smoothing
+    7. QC
 
-    For single-echo data:
-    1. Skip TEDANA
-    2. ICA-AROMA can be enabled for motion artifact removal
-    3. Proceed with standard preprocessing
+    Single-echo:
+    1. Motion correction (MCFLIRT)
+    2. Brain extraction (BET)
+    3. ICA-AROMA (motion artifact removal)
+    4. ACompCor (nuisance regression using CSF/WM masks)
+    5. Bandpass filtering
+    6. Spatial smoothing
+    7. QC
+
+    KEY INSIGHT: Both pipelines converge after step 3 (TEDANA or AROMA).
+    Steps 4-7 are IDENTICAL for both multi-echo and single-echo.
+
+    CRITICAL: ACompCor is applied BEFORE bandpass filtering and smoothing.
+    This is the correct order per HCP best practices and neuroimaging literature.
+    Linear filtering operations (bandpass, smooth) are non-commutative with nuisance
+    regression, and the order matters for data quality.
     """
     logger.info("=" * 70)
     logger.info(f"Functional Preprocessing: {subject}")
@@ -987,79 +1142,26 @@ def run_func_preprocessing(
         logger.info(f"TEDANA output: {func_input}")
         logger.info("")
     else:
-        # Single echo - run motion correction and registration
+        # Single echo - compute func_mean and register before workflow
         func_input = Path(func_file) if not isinstance(func_file, list) else Path(func_file[0])
         logger.info("Single-echo data - skipping TEDANA")
         logger.info("")
 
-        # Step 1a: Run motion correction on single-echo data
+        # Step 1: Compute functional mean for registration (before any processing)
         logger.info("=" * 70)
-        logger.info("Motion Correction (MCFLIRT)")
+        logger.info("Single-Echo Preprocessing")
         logger.info("=" * 70)
-        logger.info("")
 
-        # NOTE: For single-echo, motion correction will be handled by Nipype workflow
-        # This manual mcflirt section is being phased out
-        mcflirt_dir = work_dir / 'motion_correction_manual'
-        mcflirt_dir.mkdir(parents=True, exist_ok=True)
-
-        mcflirt_out = mcflirt_dir / f'{subject}_mcf.nii.gz'
-        motion_params = mcflirt_dir / f'{subject}_mcf.nii.par'
-
-        if mcflirt_out.exists() and motion_params.exists():
-            logger.info("Motion correction already completed - using cached results")
-            logger.info(f"  Cached output: {mcflirt_out}")
-        else:
-            logger.info("Running motion correction...")
-            mcflirt_cmd = [
-                'mcflirt',
-                '-in', str(func_input),
-                '-out', str(mcflirt_dir / f'{subject}_mcf.nii'),
-                '-plots',
-                '-mats',
-                '-rmsrel',
-                '-rmsabs'
-            ]
-            subprocess.run(mcflirt_cmd, check=True, capture_output=True)
-
-        results['motion_params'] = motion_params
-        logger.info(f"  Motion-corrected: {mcflirt_out}")
-        logger.info(f"  Motion parameters: {motion_params}")
-        logger.info("")
-
-        # Step 1b: Create brain mask
-        mask_file = derivatives_dir / 'func_mask.nii.gz'
-        if not mask_file.exists():
-            logger.info("Creating brain mask...")
-            bet_frac = config.get('bet', {}).get('frac', 0.3)
-            bet_cmd = [
-                'bet',
-                str(mcflirt_out),
-                str(derivatives_dir / 'func_brain'),
-                '-f', str(bet_frac),
-                '-m',
-                '-R'
-            ]
-            subprocess.run(bet_cmd, check=True, capture_output=True)
-
-            mask_output = derivatives_dir / 'func_brain_mask.nii.gz'
-            if mask_output.exists():
-                mask_output.rename(mask_file)
-            logger.info(f"  Brain mask: {mask_file}")
-        else:
-            logger.info(f"Brain mask already exists: {mask_file}")
-        logger.info("")
-
-        # Step 1c: Compute functional mean for registration
+        # Compute mean from raw functional data (before motion correction)
         logger.info("Computing functional mean for registration...")
-        func_mean_file = mcflirt_dir / 'func_mean.nii.gz'
+        func_mean_file = work_dir / 'func_mean_raw.nii.gz'
         if not func_mean_file.exists():
-            compute_func_mean(mcflirt_out, func_mean_file)
+            compute_func_mean(func_input, func_mean_file)
         else:
             logger.info(f"  Using cached func mean: {func_mean_file}")
         logger.info("")
 
-        # Step 1d: Register functional → T1w → MNI (ANTs-based)
+        # Step 2: Register functional → T1w → MNI (ANTs-based)
         if anat_derivatives:
             registration_dir = derivatives_dir / 'registration'
             registration_dir.mkdir(parents=True, exist_ok=True)
@@ -1089,7 +1191,7 @@ def run_func_preprocessing(
                         output_dir=registration_dir
                     )
 
-                    # Store registration results
+                    # Store registration results (needed for ACompCor mask transformation)
                     results['func_to_t1w_transform'] = registration_results['func_to_t1w']
                     results['func_to_mni_transform'] = registration_results['func_to_mni']
                     results['func_warped_to_t1w'] = registration_results['func_warped_to_t1w']
@@ -1101,7 +1203,6 @@ def run_func_preprocessing(
                     if config.get('run_qc', True):
                         logger.info("Generating registration QC visualizations...")
                         # QC goes in study-wide QC directory
-                        study_root = output_dir.parent if output_dir.name == subject else output_dir.parent.parent
                         qc_dir = study_root / 'qc' / subject / 'func' / 'registration'
                         try:
                             qc_results = generate_registration_qc_report(
@@ -1132,8 +1233,8 @@ def run_func_preprocessing(
             logger.warning("No anatomical derivatives provided - skipping functional registration")
             logger.warning("")
 
-        # Update func_input to use motion-corrected data
-        func_input = mcflirt_out
+        logger.info("Motion correction, brain extraction, and AROMA will be handled by Nipype workflow")
+        logger.info("")
 
     # Step 2: Locate tissue masks from anatomical preprocessing for ACompCor
     acompcor_enabled = config.get('acompcor', {}).get('enabled', True)
@@ -1243,39 +1344,38 @@ def run_func_preprocessing(
     logger.info("=" * 70)
     logger.info("")
 
-    # Get outputs from work directory
-    # DataSink has saved final outputs to derivatives_dir
-    # Intermediate outputs remain in work_dir for ACompCor
-    bandpass_dir = work_dir / 'func_preproc' / 'bandpass_filter'
-    smooth_dir = work_dir / 'func_preproc' / 'spatial_smooth'
+    # Get denoised output from work directory
+    # This is motion-corrected + AROMA-denoised (if applicable), BEFORE filtering
+    denoised_dir = work_dir / 'func_preproc' / 'denoised'
+    denoised_files = list(denoised_dir.glob('*.nii.gz'))
 
-    bandpass_files = list(bandpass_dir.glob('*_bp.nii.gz'))
-    smooth_files = list(smooth_dir.glob('*_smooth.nii.gz'))
+    if not denoised_files:
+        # Try alternative location for AROMA output
+        aroma_dir = work_dir / 'func_preproc' / 'ica_aroma' / 'aroma_output'
+        if aroma_dir.exists():
+            denoise_type = config.get('aroma', {}).get('denoise_type', 'nonaggr')
+            denoised_files = list(aroma_dir.glob(f'denoised_func_data_{denoise_type}.nii.gz'))
 
-    if not bandpass_files:
-        raise FileNotFoundError(f"Bandpass output not found in {bandpass_dir}")
-    if not smooth_files:
-        raise FileNotFoundError(f"Smoothed output not found in {smooth_dir}")
+        if not denoised_files:
+            # Try BET masked output (if AROMA disabled)
+            bet_dir = work_dir / 'func_preproc' / 'brain_extraction_4d' / 'apply_mask'
+            denoised_files = list(bet_dir.glob('*.nii.gz'))
 
-    bandpass_output = bandpass_files[0]
-    smooth_output = smooth_files[0]
+    if not denoised_files:
+        raise FileNotFoundError(f"Denoised output not found in work directory: {work_dir / 'func_preproc'}")
 
-    logger.info(f"Bandpass filtered (work): {bandpass_output}")
-    logger.info(f"Smoothed (work): {smooth_output}")
-    logger.info("")
-
-    # Find DataSink outputs in derivatives
-    preprocessed_files = list(derivatives_dir.glob('*_preprocessed.nii.gz'))
-    if preprocessed_files:
-        logger.info(f"Final output (derivatives): {preprocessed_files[0]}")
-        results['preprocessed'] = preprocessed_files[0]
+    denoised_output = denoised_files[0]
+    logger.info(f"Denoised output (motion-corrected + AROMA): {denoised_output}")
     logger.info("")
 
     # Step 4: Apply ACompCor (if enabled)
+    # CRITICAL: ACompCor is applied to denoised data (post-AROMA/TEDANA, pre-filtering)
+    # This is the correct HCP-compliant order
     if acompcor_enabled and csf_mask and wm_mask and brain_file:
         logger.info("=" * 70)
-        logger.info("ACompCor Nuisance Regression")
+        logger.info("STEP 4: ACompCor Nuisance Regression")
         logger.info("=" * 70)
+        logger.info("Applying to denoised data (post-AROMA/TEDANA, pre-filtering)")
         logger.info("")
 
         # ACompCor intermediates go to work_dir (temporary)
@@ -1283,7 +1383,7 @@ def run_func_preprocessing(
         acompcor_dir.mkdir(parents=True, exist_ok=True)
 
         # Step 4a: Transform tissue masks to functional space using ANTs
-        logger.info("Step 1: Transforming tissue masks to functional space...")
+        logger.info("Step 4a: Transforming tissue masks to functional space...")
 
         # Check if we have the ANTs registration transforms
         if 'func_to_t1w_transform' in results:
@@ -1369,7 +1469,7 @@ def run_func_preprocessing(
             logger.info("")
 
         # Step 4b: Prepare masks (threshold and erode)
-        logger.info("Step 2: Preparing ACompCor masks...")
+        logger.info("Step 4b: Preparing ACompCor masks...")
         csf_eroded, wm_eroded = prepare_acompcor_masks(
             csf_mask=csf_func,
             wm_mask=wm_func,
@@ -1381,10 +1481,10 @@ def run_func_preprocessing(
         results['wm_acompcor_mask'] = wm_eroded
         logger.info("")
 
-        # Step 4c: Extract ACompCor components
-        logger.info("Step 3: Extracting ACompCor components...")
+        # Step 4c: Extract ACompCor components from denoised data
+        logger.info("Step 4c: Extracting ACompCor components from denoised data...")
         acompcor_result = extract_acompcor_components(
-            func_file=bandpass_output,
+            func_file=denoised_output,  # Use denoised, not bandpass!
             csf_mask=csf_eroded,
             wm_mask=wm_eroded,
             output_dir=acompcor_dir,
@@ -1395,40 +1495,71 @@ def run_func_preprocessing(
         results['acompcor_variance'] = acompcor_result['variance_explained']
         logger.info("")
 
-        # Step 4d: Regress out components
-        logger.info("Step 4: Regressing out ACompCor components...")
-        acompcor_cleaned = derivatives_dir / f'{subject}_bold_acompcor_cleaned.nii.gz'
+        # Step 4d: Regress out components from denoised data
+        logger.info("Step 4d: Regressing out ACompCor components...")
+        acompcor_cleaned = acompcor_dir / f'{subject}_bold_acompcor_cleaned.nii.gz'
         regress_out_components(
-            func_file=bandpass_output,
+            func_file=denoised_output,  # Use denoised, not bandpass!
             components_file=acompcor_result['components_file'],
             output_file=acompcor_cleaned
         )
+        logger.info(f"  ACompCor-cleaned output: {acompcor_cleaned}")
         logger.info("")
 
-        # Use ACompCor-cleaned data for smoothing
-        smooth_input = acompcor_cleaned
+        # Use ACompCor-cleaned data for filtering
+        filtering_input = acompcor_cleaned
     else:
-        # No ACompCor - use bandpass output directly
-        smooth_input = bandpass_output
+        logger.info("ACompCor disabled - using denoised data directly for filtering")
+        # No ACompCor - use denoised output directly
+        filtering_input = denoised_output
 
-    # Step 5: Apply spatial smoothing to ACompCor-cleaned (or bandpass-filtered) data
-    logger.info("Applying spatial smoothing...")
+    # Step 5: Apply bandpass filtering (HCP-compliant order: AFTER ACompCor)
+    logger.info("=" * 70)
+    logger.info("STEP 5: Bandpass Filtering")
+    logger.info("=" * 70)
+    logger.info("Applying to ACompCor-cleaned data (or denoised if ACompCor disabled)")
+    logger.info("")
+
+    bandpass_output = derivatives_dir / f'{subject}_bold_bandpass_filtered.nii.gz'
+    highpass = config.get('highpass', 0.001)
+    lowpass = config.get('lowpass', 0.08)
+    tr = config.get('tr', 1.029)
+
+    logger.info(f"Bandpass parameters: {highpass} - {lowpass} Hz, TR={tr}s")
+    bandpass_cmd = [
+        '3dBandpass',
+        '-prefix', str(bandpass_output),
+        '-input', str(filtering_input),
+        str(highpass), str(lowpass), str(filtering_input)
+    ]
+    subprocess.run(bandpass_cmd, check=True, capture_output=True)
+    logger.info(f"  Bandpass output: {bandpass_output}")
+    logger.info("")
+
+    # Step 6: Apply spatial smoothing (HCP-compliant order: AFTER bandpass)
+    logger.info("=" * 70)
+    logger.info("STEP 6: Spatial Smoothing")
+    logger.info("=" * 70)
+    logger.info("Applying to bandpass-filtered data")
+    logger.info("")
+
     fwhm = config.get('fwhm', 6)
     smoothed_file = derivatives_dir / f'{subject}_bold_preprocessed.nii.gz'
 
+    logger.info(f"Smoothing kernel: {fwhm}mm FWHM")
     smooth_cmd = [
         'fslmaths',
-        str(smooth_input),
+        str(bandpass_output),
         '-s', str(fwhm / 2.355),  # Convert FWHM to sigma
         str(smoothed_file)
     ]
     subprocess.run(smooth_cmd, check=True, capture_output=True)
 
     results['preprocessed'] = smoothed_file
-    logger.info(f"Smoothed ({fwhm}mm FWHM): {smoothed_file}")
+    logger.info(f"  Final preprocessed output: {smoothed_file}")
     logger.info("")
 
-    # Step 6: Get motion parameters and mask based on workflow type
+    # Step 7: Get motion parameters and mask based on workflow type
     if is_multiecho:
         # Motion params already extracted during multi-echo preprocessing
         # Mask already created before TEDANA
@@ -1447,10 +1578,10 @@ def run_func_preprocessing(
             # If no BET in workflow, use functional mask from TEDANA
             func_mask = derivatives_dir / 'func_mask.nii.gz'
 
-    # Step 7: Quality Control
+    # Step 8: Quality Control
     if config.get('run_qc', True):
         logger.info("=" * 70)
-        logger.info("Running Quality Control")
+        logger.info("STEP 8: Quality Control")
         logger.info("=" * 70)
         logger.info("")
 
@@ -1471,6 +1602,40 @@ def run_func_preprocessing(
         else:
             logger.warning("Motion parameters not found - skipping motion QC")
             motion_metrics = None
+
+        # Brain mask QC
+        logger.info("Computing brain mask QC...")
+        # Find or compute functional mean image
+        func_mean_file = None
+
+        # Check work directory for pre-computed mean
+        if is_multiecho:
+            phase1_work_dir = work_dir.parent / 'func_phase1_motion'
+            potential_mean = phase1_work_dir / 'mcflirt_echo2' / 'func_mean.nii.gz'
+        else:
+            potential_mean = work_dir / 'motion_correction' / 'func_mean.nii.gz'
+
+        if potential_mean.exists():
+            func_mean_file = potential_mean
+            logger.info(f"  Using pre-computed mean: {func_mean_file}")
+        else:
+            # Compute mean from preprocessed data
+            func_mean_file = qc_dir / 'func_mean.nii.gz'
+            logger.info(f"  Computing mean from preprocessed data...")
+            subprocess.run([
+                'fslmaths', str(results['preprocessed']), '-Tmean', str(func_mean_file)
+            ], check=True, capture_output=True)
+            logger.info(f"  Saved: {func_mean_file}")
+
+        # Run brain mask QC
+        skull_strip_metrics = compute_skull_strip_qc(
+            func_mean_file=func_mean_file,
+            mask_file=func_mask,
+            output_dir=qc_dir,
+            subject=subject
+        )
+        results['skull_strip_qc'] = skull_strip_metrics
+        logger.info("")
 
         # tSNR calculation
         logger.info("Computing temporal SNR...")
@@ -1514,6 +1679,7 @@ def run_func_preprocessing(
                 tsnr_metrics=tsnr_metrics,
                 dvars_metrics=dvars_metrics,
                 carpet_metrics=carpet_metrics,
+                skull_strip_metrics=skull_strip_metrics,
                 tedana_report=results.get('tedana_report'),
                 output_file=qc_dir / f'{subject}_func_qc_report.html'
             )
@@ -1522,11 +1688,11 @@ def run_func_preprocessing(
         else:
             logger.warning("Skipping QC report generation (no motion metrics)")
 
-    # Step 8: Spatial normalization to MNI152 (optional, reuses anatomical transforms)
+    # Step 9: Spatial normalization to MNI152 (optional, reuses anatomical transforms)
     if config.get('normalize_to_mni', False):
         logger.info("")
         logger.info("=" * 70)
-        logger.info("Step 8: Normalizing functional data to MNI152")
+        logger.info("STEP 9: Normalizing functional data to MNI152")
         logger.info("=" * 70)
         logger.info("")
 

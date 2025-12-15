@@ -713,7 +713,7 @@ def compute_skull_strip_qc(
         'n_voxels': n_voxels,
         'brain_volume_mm3': float(brain_volume_mm3),
         'brain_volume_cm3': float(brain_volume_cm3),
-        'voxel_size_mm': list(voxel_size),
+        'voxel_size_mm': [float(v) for v in voxel_size],  # Convert numpy float32 to Python float
         'bbox': bbox,
         'bbox_size': bbox_size,
         'brain_mean_intensity': float(brain_mean),
@@ -787,6 +787,7 @@ def generate_func_qc_report(
     tsnr_metrics: Optional[Dict[str, Any]],
     dvars_metrics: Optional[Dict[str, Any]],
     carpet_metrics: Optional[Dict[str, Any]],
+    skull_strip_metrics: Optional[Dict[str, Any]],
     tedana_report: Optional[Path],
     output_file: Path
 ) -> Path:
@@ -805,6 +806,8 @@ def generate_func_qc_report(
         DVARS metrics from compute_dvars()
     carpet_metrics : dict, optional
         Carpet plot metrics from create_carpet_plot()
+    skull_strip_metrics : dict, optional
+        Skull stripping QC metrics from compute_skull_strip_qc()
     tedana_report : Path, optional
         Path to TEDANA HTML report
     output_file : Path
@@ -958,6 +961,42 @@ def generate_func_qc_report(
         <img src="{motion_metrics['fd_plot'].name}" alt="Framewise Displacement">
 """
 
+    # Add brain mask QC section if available
+    if skull_strip_metrics:
+        quality_status = 'PASS' if skull_strip_metrics['quality_pass'] else 'WARNING'
+        status_class = 'status-good' if skull_strip_metrics['quality_pass'] else 'status-warning'
+
+        html += f"""
+        <h2>Brain Mask Quality</h2>
+        <div class="metric-grid">
+            <div class="metric-card">
+                <div class="metric-label">Brain Volume</div>
+                <div class="metric-value">{skull_strip_metrics['brain_volume_cm3']:.1f} cm³</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Brain Voxels</div>
+                <div class="metric-value">{skull_strip_metrics['n_voxels']:,}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Contrast Ratio</div>
+                <div class="metric-value">{skull_strip_metrics['contrast_ratio']:.2f}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Quality Status</div>
+                <div class="metric-value"><span class="{status_class}">{quality_status}</span></div>
+            </div>
+        </div>
+
+        <p><strong>Brain Mask Quality: </strong>
+        <span class="{status_class}">
+            {quality_status}
+        </span>
+        {f" - Flags: {', '.join(skull_strip_metrics['quality_flags'])}" if skull_strip_metrics['quality_flags'] else ""}
+        </p>
+
+        <img src="skull_strip_overlay.png" alt="Brain Mask Overlay">
+"""
+
     # Add tSNR section if available
     if tsnr_metrics:
         html += f"""
@@ -1037,6 +1076,8 @@ def generate_func_qc_report(
         <ul>
             <li><strong>Mean FD:</strong> <span class="status-good">&lt;0.2mm = Good</span>, <span class="status-warning">0.2-0.5mm = Acceptable</span>, <span class="status-bad">&gt;0.5mm = Poor</span></li>
             <li><strong>Outlier Volumes:</strong> <span class="status-good">&lt;5% = Good</span>, <span class="status-warning">5-20% = Acceptable</span>, <span class="status-bad">&gt;20% = Poor</span></li>
+            <li><strong>Brain Volume:</strong> <span class="status-good">800-1800 cm³ = Normal</span>, <span class="status-warning">&lt;500 or &gt;2500 cm³ = Unusual</span></li>
+            <li><strong>Contrast Ratio:</strong> <span class="status-good">&gt;1.5 = Good</span>, <span class="status-warning">&lt;1.5 = Low Contrast</span></li>
             <li><strong>Mean tSNR:</strong> <span class="status-good">&gt;100 = Excellent</span>, <span class="status-warning">50-100 = Good</span>, <span class="status-bad">&lt;50 = Poor</span></li>
             <li><strong>DVARS Outliers:</strong> <span class="status-good">&lt;5% = Good</span>, <span class="status-warning">5-15% = Acceptable</span>, <span class="status-bad">&gt;15% = Poor</span></li>
         </ul>
