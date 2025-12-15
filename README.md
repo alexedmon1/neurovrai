@@ -65,6 +65,32 @@ neurovrai/
 # Ensure $FSLDIR is set in your environment
 ```
 
+**Install ICA-AROMA** (required for single-echo fMRI preprocessing):
+```bash
+# Clone ICA-AROMA to ~/bin
+mkdir -p ~/bin
+cd ~/bin
+git clone https://github.com/maartenmennes/ICA-AROMA.git
+
+# Make executable
+chmod +x ~/bin/ICA-AROMA/ICA_AROMA.py
+
+# Update shebang to use neurovrai venv Python
+cd /path/to/neurovrai  # Replace with your neurovrai path
+VENV_PYTHON=$(pwd)/.venv/bin/python
+sed -i "1s|.*|#!$VENV_PYTHON|" ~/bin/ICA-AROMA/ICA_AROMA.py
+
+# Add to PATH (if not already added)
+echo 'export PATH="$HOME/bin/ICA-AROMA:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+# Install required Python package
+uv pip install future
+
+# Verify installation
+ICA_AROMA.py -h
+```
+
 ### Install neurovrai
 
 ```bash
