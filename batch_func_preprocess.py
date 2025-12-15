@@ -45,11 +45,16 @@ def check_if_preprocessed(derivatives_dir: Path, subject: str):
     """Check if subject has already been preprocessed."""
     subject_func_dir = derivatives_dir / subject / 'func'
 
-    # Check for key output files
-    preprocessed_file = subject_func_dir / 'preprocessed_bold.nii.gz'
-    func_mask = subject_func_dir / 'func_mask.nii.gz'
+    # Check for key output files (match current pipeline output names)
+    preprocessed_file = subject_func_dir / f'{subject}_bold_preprocessed.nii.gz'
 
-    if preprocessed_file.exists() and func_mask.exists():
+    # Also check for any preprocessed file as fallback
+    if not preprocessed_file.exists():
+        preprocessed_files = list(subject_func_dir.glob('*_bold_preprocessed.nii.gz'))
+        if preprocessed_files:
+            return True
+
+    if preprocessed_file.exists():
         return True
     return False
 
@@ -75,13 +80,18 @@ def preprocess_subject(subject: str, config_path: Path):
     logger.info("=" * 80)
 
     # Construct command
+    # run_simple_pipeline.py requires --nifti-dir and uses skip flags for modality selection
+    nifti_dir = Path('/mnt/bytopia/IRC805/bids') / subject
+
     cmd = [
         'uv', 'run', 'python',
         'run_simple_pipeline.py',
         '--subject', subject,
-        '--modality', 'func',
         '--config', str(config_path),
-        '--study-root', '/mnt/bytopia/IRC805'
+        '--nifti-dir', str(nifti_dir),
+        '--skip-anat',  # Anatomical already preprocessed
+        '--skip-dwi',   # Only run functional
+        '--skip-asl'    # Only run functional
     ]
 
     logger.info(f"Command: {' '.join(cmd)}")

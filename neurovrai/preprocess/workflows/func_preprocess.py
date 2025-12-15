@@ -698,6 +698,9 @@ def create_func_preprocessing_workflow(
     logger.info(f"  Output directory: {output_dir}")
     logger.info(f"  Multi-echo mode: {is_multiecho}")
 
+    # Extract functional config subsection (consistent with main function)
+    func_config = config.get('functional', {})
+
     # INPUT NODE - Define all workflow inputs
     inputnode = Node(
         niu.IdentityInterface(fields=[
@@ -713,14 +716,14 @@ def create_func_preprocessing_workflow(
     # Only create MCFLIRT and BET for single-echo
     # Multi-echo: Phase 1 already did motion correction and brain extraction
     if not is_multiecho:
-        mcflirt = create_mcflirt_node(config, name='motion_correction')
-        bet_4d = create_bet_4d_workflow(config, name='brain_extraction_4d')
+        mcflirt = create_mcflirt_node(func_config, name='motion_correction')
+        bet_4d = create_bet_4d_workflow(func_config, name='brain_extraction_4d')
 
         # ICA-AROMA for single-echo (auto-enabled unless explicitly disabled)
-        aroma_config = config.get('aroma', {}).get('enabled', 'auto')
+        aroma_config = func_config.get('aroma', {}).get('enabled', 'auto')
         use_aroma = (aroma_config == 'auto') or (aroma_config is True)
         if use_aroma:
-            aroma = create_aroma_node(config, name='ica_aroma')
+            aroma = create_aroma_node(func_config, name='ica_aroma')
         else:
             aroma = None
     else:
@@ -767,7 +770,7 @@ def create_func_preprocessing_workflow(
         # Add ICA-AROMA if enabled (motion artifact removal)
         if aroma is not None:
             logger.info("  Including ICA-AROMA for motion artifact removal")
-            denoise_type = config.get('aroma', {}).get('denoise_type', 'nonaggr')
+            denoise_type = func_config.get('aroma', {}).get('denoise_type', 'nonaggr')
             aroma_output_field = 'nonaggr_denoised_file' if denoise_type == 'nonaggr' else 'aggr_denoised_file'
 
             connections.extend([
@@ -833,18 +836,24 @@ def run_func_preprocessing(
     Parameters
     ----------
     config : dict
-        Configuration dictionary with preprocessing parameters:
-        - tr: Repetition time in seconds
-        - te: List of echo times in milliseconds (for multi-echo)
-        - highpass: Highpass filter frequency (Hz)
-        - lowpass: Lowpass filter frequency (Hz)
-        - fwhm: Smoothing kernel FWHM (mm)
-        - n_procs: Number of parallel processes (default: 4)
-        - tedana: dict with 'enabled', 'tedpca', 'tree'
-        - aroma: dict with 'enabled' (default: False - redundant with TEDANA), 'denoise_type'
-        - acompcor: dict with 'enabled', 'num_components'
-        - run_qc: Run quality control (default: True)
-        - fd_threshold: Framewise displacement threshold in mm (default: 0.5)
+        Full configuration dictionary (same as DWI preprocessing).
+        The function will access the 'functional' subsection internally.
+
+        Required config structure:
+        - functional: dict with preprocessing parameters
+          - tr: Repetition time in seconds
+          - te: List of echo times in milliseconds (for multi-echo)
+          - highpass: Highpass filter frequency (Hz)
+          - lowpass: Lowpass filter frequency (Hz)
+          - fwhm: Smoothing kernel FWHM (mm)
+          - tedana: dict with 'enabled', 'tedpca', 'tree'
+          - aroma: dict with 'enabled' (default: auto), 'denoise_type'
+          - acompcor: dict with 'enabled', 'num_components'
+          - run_qc: Run quality control (default: True)
+          - fd_threshold: Framewise displacement threshold in mm (default: 0.5)
+        - templates: dict with MNI template paths
+        - paths: dict with 'transforms' directory (for TransformRegistry)
+        - execution: dict with 'n_procs', 'plugin' (optional)
     subject : str
         Subject identifier
     func_file : Path or list of Path
@@ -914,6 +923,10 @@ def run_func_preprocessing(
     logger.info(f"Anatomical derivatives: {anat_derivatives}")
     logger.info("")
 
+    # Extract functional config subsection (consistent with DWI preprocessing pattern)
+    func_config = config.get('functional', {})
+    logger.info(f"Config structure: {'functional' in config and 'full config' or 'functional subsection only (legacy)'}")
+
     # Setup directory structure
     # output_dir is the derivatives base (e.g., /mnt/bytopia/IRC805/derivatives)
     # Use standardized hierarchy: {outdir}/{subject}/{modality}/
@@ -949,13 +962,13 @@ def run_func_preprocessing(
     # Detect multi-echo vs single-echo
     is_multiecho = isinstance(func_file, list) and len(func_file) > 1
 
-    # Extract BET parameters from config
-    bet_frac = config.get('bet', {}).get('frac', 0.3)  # Default: 0.3 for functional
+    # Extract BET parameters from functional config
+    bet_frac = func_config.get('bet', {}).get('frac', 0.3)  # Default: 0.3 for functional
 
     # Step 1: Multi-echo motion correction and TEDANA
-    if is_multiecho and config.get('tedana', {}).get('enabled', True):
+    if is_multiecho and func_config.get('tedana', {}).get('enabled', True):
         echo_files = [Path(f) for f in func_file]
-        echo_times = config.get('te', [10.0, 30.0, 50.0])  # milliseconds
+        echo_times = func_config.get('te', [10.0, 30.0, 50.0])  # milliseconds
         n_echoes = len(echo_files)
 
         logger.info("=" * 70)
@@ -1079,7 +1092,7 @@ def run_func_preprocessing(
                     logger.info("")
 
                     # Generate registration QC visualizations
-                    if config.get('run_qc', True):
+                    if func_config.get('run_qc', True):
                         logger.info("Generating registration QC visualizations...")
                         # QC goes in study-wide QC directory
                         study_root = output_dir.parent if output_dir.name == subject else output_dir.parent.parent
@@ -1118,8 +1131,8 @@ def run_func_preprocessing(
         tedana_dir = work_dir / 'tedana'
         # Extract TEDANA config (with defaults)
         # Check both functional.tedana and top-level tedana for backwards compatibility
-        func_config = config.get('functional', {})
-        tedana_config = func_config.get('tedana', config.get('tedana', {}))
+        # func_config already extracted at top of function
+        tedana_config = func_config.get('tedana', {})
         tedpca = tedana_config.get('tedpca', 0.95)  # Default: 95% variance (auto)
         tree = tedana_config.get('tree', 'kundu')   # Default: kundu decision tree
 
@@ -1152,19 +1165,20 @@ def run_func_preprocessing(
         logger.info("Single-Echo Preprocessing")
         logger.info("=" * 70)
 
-        # Compute mean from raw functional data (before motion correction)
-        logger.info("Computing functional mean for registration...")
-        func_mean_file = work_dir / 'func_mean_raw.nii.gz'
-        if not func_mean_file.exists():
-            compute_func_mean(func_input, func_mean_file)
-        else:
-            logger.info(f"  Using cached func mean: {func_mean_file}")
-        logger.info("")
-
         # Step 2: Register functional → T1w → MNI (ANTs-based)
         if anat_derivatives:
             registration_dir = derivatives_dir / 'registration'
             registration_dir.mkdir(parents=True, exist_ok=True)
+
+            # Compute mean from raw functional data (before motion correction)
+            # Save to registration directory for consistency with multi-echo
+            logger.info("Computing functional mean for registration...")
+            func_mean_file = registration_dir / 'func_mean.nii.gz'
+            if not func_mean_file.exists():
+                compute_func_mean(func_input, func_mean_file)
+            else:
+                logger.info(f"  Using cached func mean: {func_mean_file}")
+            logger.info("")
 
             # Locate anatomical preprocessing outputs
             anat_dir = Path(anat_derivatives)
@@ -1180,6 +1194,7 @@ def run_func_preprocessing(
                 logger.info(f"  Functional mean: {func_mean_file.name}")
                 logger.info(f"  T1w brain: {brain_file.name}")
                 logger.info(f"  T1w→MNI transform: {t1w_to_mni_transform.name}")
+                logger.info("  Note: ANTs registration typically takes 2-5 minutes...")
                 logger.info("")
 
                 try:
@@ -1200,7 +1215,7 @@ def run_func_preprocessing(
                     logger.info("")
 
                     # Generate registration QC visualizations
-                    if config.get('run_qc', True):
+                    if func_config.get('run_qc', True):
                         logger.info("Generating registration QC visualizations...")
                         # QC goes in study-wide QC directory
                         qc_dir = study_root / 'qc' / subject / 'func' / 'registration'
@@ -1237,7 +1252,7 @@ def run_func_preprocessing(
         logger.info("")
 
     # Step 2: Locate tissue masks from anatomical preprocessing for ACompCor
-    acompcor_enabled = config.get('acompcor', {}).get('enabled', True)
+    acompcor_enabled = func_config.get('acompcor', {}).get('enabled', True)
     csf_mask = None
     wm_mask = None
     brain_file = None
@@ -1284,7 +1299,7 @@ def run_func_preprocessing(
     # Determine if AROMA should be used
     # Auto-enable for single-echo (primary denoising method)
     # Disabled for multi-echo (TEDANA handles denoising)
-    aroma_config = config.get('aroma', {}).get('enabled', 'auto')
+    aroma_config = func_config.get('aroma', {}).get('enabled', 'auto')
 
     if aroma_config == 'auto':
         # Auto: Use AROMA for single-echo, skip for multi-echo
@@ -1350,19 +1365,32 @@ def run_func_preprocessing(
     denoised_files = list(denoised_dir.glob('*.nii.gz'))
 
     if not denoised_files:
-        # Try alternative location for AROMA output
+        # Try derivatives directory (where DataSink saves it)
+        derivatives_denoised_dir = derivatives_dir / 'denoised'
+        if derivatives_denoised_dir.exists():
+            denoised_files = list(derivatives_denoised_dir.glob('*.nii.gz'))
+
+    if not denoised_files:
+        # Try alternative location for AROMA output in work dir
         aroma_dir = work_dir / 'func_preproc' / 'ica_aroma' / 'aroma_output'
         if aroma_dir.exists():
-            denoise_type = config.get('aroma', {}).get('denoise_type', 'nonaggr')
+            denoise_type = func_config.get('aroma', {}).get('denoise_type', 'nonaggr')
             denoised_files = list(aroma_dir.glob(f'denoised_func_data_{denoise_type}.nii.gz'))
 
-        if not denoised_files:
-            # Try BET masked output (if AROMA disabled)
-            bet_dir = work_dir / 'func_preproc' / 'brain_extraction_4d' / 'apply_mask'
+    if not denoised_files:
+        # Try BET masked output (if AROMA disabled)
+        bet_dir = work_dir / 'func_preproc' / 'brain_extraction_4d' / 'apply_mask'
+        if bet_dir.exists():
             denoised_files = list(bet_dir.glob('*.nii.gz'))
 
     if not denoised_files:
-        raise FileNotFoundError(f"Denoised output not found in work directory: {work_dir / 'func_preproc'}")
+        raise FileNotFoundError(
+            f"Denoised output not found. Searched:\n"
+            f"  1. {denoised_dir}\n"
+            f"  2. {derivatives_dir / 'denoised'}\n"
+            f"  3. {work_dir / 'func_preproc' / 'ica_aroma' / 'aroma_output'}\n"
+            f"  4. {work_dir / 'func_preproc' / 'brain_extraction_4d' / 'apply_mask'}"
+        )
 
     denoised_output = denoised_files[0]
     logger.info(f"Denoised output (motion-corrected + AROMA): {denoised_output}")
@@ -1388,11 +1416,22 @@ def run_func_preprocessing(
         # Check if we have the ANTs registration transforms
         if 'func_to_t1w_transform' in results:
             # Use ANTs inverse transform to bring masks to functional space
-            # Look for func_mean in work_dir now
-            func_mean_file = work_dir / 'motion_correction_manual' / 'func_mean.nii.gz'
+            # Look for func_mean in registration directory (consistent location for both pipelines)
+            func_mean_file = derivatives_dir / 'registration' / 'func_mean.nii.gz'
+
+            # Fallback locations for backward compatibility
             if not func_mean_file.exists():
-                # Try multi-echo location in work_dir
-                func_mean_file = work_dir / 'mcflirt_echo' / 'func_mean.nii.gz'
+                func_mean_file = work_dir / 'func_mean_raw.nii.gz'  # Old single-echo
+            if not func_mean_file.exists():
+                func_mean_file = work_dir / 'mcflirt_echo2' / 'func_mean.nii.gz'  # Old multi-echo
+
+            if not func_mean_file.exists():
+                raise FileNotFoundError(
+                    f"func_mean not found. Searched:\n"
+                    f"  1. {derivatives_dir / 'registration' / 'func_mean.nii.gz'} (standard location)\n"
+                    f"  2. {work_dir / 'func_mean_raw.nii.gz'} (old single-echo)\n"
+                    f"  3. {work_dir / 'mcflirt_echo2' / 'func_mean.nii.gz'} (old multi-echo)"
+                )
 
             csf_func, wm_func = apply_inverse_transform_to_masks(
                 csf_mask=csf_mask,
@@ -1474,8 +1513,8 @@ def run_func_preprocessing(
             csf_mask=csf_func,
             wm_mask=wm_func,
             output_dir=acompcor_dir,
-            csf_threshold=config.get('acompcor', {}).get('csf_threshold', 0.9),
-            wm_threshold=config.get('acompcor', {}).get('wm_threshold', 0.9)
+            csf_threshold=func_config.get('acompcor', {}).get('csf_threshold', 0.9),
+            wm_threshold=func_config.get('acompcor', {}).get('wm_threshold', 0.9)
         )
         results['csf_acompcor_mask'] = csf_eroded
         results['wm_acompcor_mask'] = wm_eroded
@@ -1488,8 +1527,8 @@ def run_func_preprocessing(
             csf_mask=csf_eroded,
             wm_mask=wm_eroded,
             output_dir=acompcor_dir,
-            num_components=config.get('acompcor', {}).get('num_components', 5),
-            variance_threshold=config.get('acompcor', {}).get('variance_threshold', 0.5)
+            num_components=func_config.get('acompcor', {}).get('num_components', 5),
+            variance_threshold=func_config.get('acompcor', {}).get('variance_threshold', 0.5)
         )
         results['acompcor_components'] = acompcor_result['components_file']
         results['acompcor_variance'] = acompcor_result['variance_explained']
@@ -1521,9 +1560,9 @@ def run_func_preprocessing(
     logger.info("")
 
     bandpass_output = derivatives_dir / f'{subject}_bold_bandpass_filtered.nii.gz'
-    highpass = config.get('highpass', 0.001)
-    lowpass = config.get('lowpass', 0.08)
-    tr = config.get('tr', 1.029)
+    highpass = func_config.get('highpass', 0.001)
+    lowpass = func_config.get('lowpass', 0.08)
+    tr = func_config.get('tr', 1.029)
 
     logger.info(f"Bandpass parameters: {highpass} - {lowpass} Hz, TR={tr}s")
     bandpass_cmd = [
@@ -1543,7 +1582,7 @@ def run_func_preprocessing(
     logger.info("Applying to bandpass-filtered data")
     logger.info("")
 
-    fwhm = config.get('fwhm', 6)
+    fwhm = func_config.get('fwhm', 6)
     smoothed_file = derivatives_dir / f'{subject}_bold_preprocessed.nii.gz'
 
     logger.info(f"Smoothing kernel: {fwhm}mm FWHM")
@@ -1559,27 +1598,34 @@ def run_func_preprocessing(
     logger.info(f"  Final preprocessed output: {smoothed_file}")
     logger.info("")
 
-    # Step 7: Get motion parameters and mask based on workflow type
+    # Step 7: Get motion parameters and mask from derivatives (saved by DataSink)
     if is_multiecho:
         # Motion params already extracted during multi-echo preprocessing
         # Mask already created before TEDANA
         func_mask = derivatives_dir / 'func_mask.nii.gz'
     else:
-        # Single-echo: get from workflow nodes
-        mcflirt_node = wf.get_node('motion_correction')
-        if hasattr(mcflirt_node, 'result') and mcflirt_node.result:
-            results['motion_params'] = Path(mcflirt_node.result.outputs.par_file)
-            results['motion_rms'] = Path(mcflirt_node.result.outputs.rms_files)
+        # Single-echo: get from derivatives directory where DataSink saved them
+        motion_dir = derivatives_dir / 'motion_correction'
+        brain_dir = derivatives_dir / 'brain'
 
-        bet_node = wf.get_node('brain_extraction')
-        if hasattr(bet_node, 'result') and bet_node.result:
-            func_mask = Path(bet_node.result.outputs.mask_file)
+        # Find motion parameters
+        par_files = list(motion_dir.glob('*.par'))
+        if par_files:
+            results['motion_params'] = par_files[0]
+            logger.info(f"Found motion parameters: {results['motion_params']}")
+
+        # Find brain mask
+        mask_files = list(brain_dir.glob('*mask.nii.gz'))
+        if mask_files:
+            func_mask = mask_files[0]
+            logger.info(f"Found brain mask: {func_mask}")
         else:
-            # If no BET in workflow, use functional mask from TEDANA
+            # Fallback to denoised directory
             func_mask = derivatives_dir / 'func_mask.nii.gz'
+            logger.warning(f"Using fallback mask location: {func_mask}")
 
     # Step 8: Quality Control
-    if config.get('run_qc', True):
+    if func_config.get('run_qc', True):
         logger.info("=" * 70)
         logger.info("STEP 8: Quality Control")
         logger.info("=" * 70)
@@ -1593,9 +1639,9 @@ def run_func_preprocessing(
             logger.info("Computing motion QC metrics...")
             motion_metrics = compute_motion_qc(
                 motion_file=results['motion_params'],
-                tr=config.get('tr', 1.029),
+                tr=func_config.get('tr', 1.029),
                 output_dir=qc_dir,
-                fd_threshold=config.get('fd_threshold', 0.5)
+                fd_threshold=func_config.get('fd_threshold', 0.5)
             )
             results['motion_qc'] = motion_metrics
             logger.info("")
@@ -1653,7 +1699,7 @@ def run_func_preprocessing(
             func_file=results['preprocessed'],
             mask_file=func_mask,
             output_dir=qc_dir,
-            dvars_threshold=config.get('dvars_threshold', 1.5)
+            dvars_threshold=func_config.get('dvars_threshold', 1.5)
         )
         results['dvars_qc'] = dvars_metrics
         logger.info("")
@@ -1665,7 +1711,7 @@ def run_func_preprocessing(
             mask_file=func_mask,
             motion_file=results.get('motion_params'),
             output_dir=qc_dir,
-            tr=config.get('tr', 1.029)
+            tr=func_config.get('tr', 1.029)
         )
         results['carpet_qc'] = carpet_metrics
         logger.info("")
@@ -1689,7 +1735,7 @@ def run_func_preprocessing(
             logger.warning("Skipping QC report generation (no motion metrics)")
 
     # Step 9: Spatial normalization to MNI152 (optional, reuses anatomical transforms)
-    if config.get('normalize_to_mni', False):
+    if func_config.get('normalize_to_mni', False):
         logger.info("")
         logger.info("=" * 70)
         logger.info("STEP 9: Normalizing functional data to MNI152")
@@ -1743,10 +1789,8 @@ def run_func_preprocessing(
             logger.warning("Required transforms not found - skipping normalization")
             if not bbr_transform or not bbr_transform.exists():
                 logger.warning(f"  Missing BBR transform: {bbr_transform}")
-            if not t1w_to_mni_affine.exists():
-                logger.warning(f"  Missing anatomical affine: {t1w_to_mni_affine}")
-            if not t1w_to_mni_warp.exists():
-                logger.warning(f"  Missing anatomical warp: {t1w_to_mni_warp}")
+            if not anat_transforms:
+                logger.warning("  Missing anatomical transforms (T1w→MNI)")
             logger.warning("  Tip: Run anatomical preprocessing first to generate transforms")
             logger.info("")
 
@@ -1764,11 +1808,5 @@ def run_func_preprocessing(
     return results
 
 
-def get_execution_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Get Nipype execution configuration."""
-    return {
-        'plugin': 'MultiProc',
-        'plugin_args': {
-            'n_procs': config.get('n_procs', 4)
-        }
-    }
+# get_execution_config is imported from neurovrai.utils.workflow
+# It properly accesses config['execution']['n_procs']
