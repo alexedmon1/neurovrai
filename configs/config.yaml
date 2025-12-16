@@ -178,3 +178,29 @@ structural_connectivity:
     save_streamlines: false          # Save full streamline data (large files)
 
   run_qc: true
+
+# Functional Connectivity (Correlation-based)
+# Requires: Preprocessed functional data
+functional_connectivity:
+  # Correlation method
+  method: pearson                    # 'pearson' or 'spearman'
+  fisher_z: true                     # Apply Fisher z-transformation for group stats
+
+  # Atlas settings
+  atlas:
+    default: schaefer_200            # Default atlas for connectivity
+    available:                       # Additional atlases to compute
+      - schaefer_200
+      - harvardoxford_cort
+      - desikan_killiany             # Requires FreeSurfer
+
+  # ROI extraction settings
+  min_voxels: 10                     # Minimum voxels per ROI (skip smaller)
+  statistic: mean                    # 'mean', 'median', or 'pca'
+
+  # Output settings
+  output:
+    compute_graph_metrics: true      # Compute graph-theoretic network measures
+    threshold: null                  # Optional threshold for weak connections
+
+  run_qc: true

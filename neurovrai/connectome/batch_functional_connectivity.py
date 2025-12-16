@@ -17,46 +17,95 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import nibabel as nib
 import numpy as np
 
 from neurovrai.connectome.roi_extraction import extract_roi_timeseries, load_atlas
 from neurovrai.connectome.functional_connectivity import compute_functional_connectivity
+from neurovrai.connectome.atlas_func_transform import (
+    FuncAtlasTransformer,
+    FUNC_ATLAS_CONFIGS,
+    prepare_atlas_for_fc
+)
 
 
 # Atlas definitions (MNI space, 2mm resolution for functional data)
+# Also includes FreeSurfer atlases that require transformation
 ATLAS_DEFINITIONS = {
+    # FSL MNI atlases (simple resampling)
     'harvardoxford_cort': {
         'file': '/usr/local/fsl/data/atlases/HarvardOxford/HarvardOxford-cort-maxprob-thr25-2mm.nii.gz',
-        'labels': None,  # XML format not supported by roi_extraction
+        'labels': None,
         'description': 'Harvard-Oxford Cortical (48 regions)',
-        'type': 'discrete'
+        'type': 'discrete',
+        'space': 'MNI152'
     },
     'harvardoxford_sub': {
         'file': '/usr/local/fsl/data/atlases/HarvardOxford/HarvardOxford-sub-maxprob-thr25-2mm.nii.gz',
-        'labels': None,  # XML format not supported by roi_extraction
+        'labels': None,
         'description': 'Harvard-Oxford Subcortical (21 regions)',
-        'type': 'discrete'
+        'type': 'discrete',
+        'space': 'MNI152'
     },
     'juelich': {
         'file': '/usr/local/fsl/data/atlases/Juelich/Juelich-maxprob-thr25-2mm.nii.gz',
         'labels': None,
         'description': 'Juelich Histological Atlas',
-        'type': 'discrete'
+        'type': 'discrete',
+        'space': 'MNI152'
     },
     'talairach': {
         'file': '/usr/local/fsl/data/atlases/Talairach/Talairach-labels-2mm.nii.gz',
         'labels': None,
         'description': 'Talairach Atlas',
-        'type': 'discrete'
+        'type': 'discrete',
+        'space': 'MNI152'
     },
     'cerebellum_mniflirt': {
         'file': '/usr/local/fsl/data/atlases/Cerebellum/Cerebellum-MNIflirt-maxprob-thr25-2mm.nii.gz',
         'labels': None,
         'description': 'Cerebellum MNI FLIRT',
-        'type': 'discrete'
+        'type': 'discrete',
+        'space': 'MNI152'
+    },
+    # Schaefer parcellations (MNI space)
+    'schaefer_100': {
+        'file': '/usr/local/fsl/data/atlases/Schaefer/Schaefer2018_100Parcels_7Networks_order_FSLMNI152_2mm.nii.gz',
+        'labels': '/usr/local/fsl/data/atlases/Schaefer/Schaefer2018_100Parcels_7Networks_order.txt',
+        'description': 'Schaefer 100 parcels (7 Networks)',
+        'type': 'discrete',
+        'space': 'MNI152'
+    },
+    'schaefer_200': {
+        'file': '/usr/local/fsl/data/atlases/Schaefer/Schaefer2018_200Parcels_7Networks_order_FSLMNI152_2mm.nii.gz',
+        'labels': '/usr/local/fsl/data/atlases/Schaefer/Schaefer2018_200Parcels_7Networks_order.txt',
+        'description': 'Schaefer 200 parcels (7 Networks)',
+        'type': 'discrete',
+        'space': 'MNI152'
+    },
+    'schaefer_400': {
+        'file': '/usr/local/fsl/data/atlases/Schaefer/Schaefer2018_400Parcels_7Networks_order_FSLMNI152_2mm.nii.gz',
+        'labels': '/usr/local/fsl/data/atlases/Schaefer/Schaefer2018_400Parcels_7Networks_order.txt',
+        'description': 'Schaefer 400 parcels (7 Networks)',
+        'type': 'discrete',
+        'space': 'MNI152'
+    },
+    # FreeSurfer atlases (require transformation from FS space)
+    'desikan_killiany': {
+        'source': 'freesurfer',
+        'atlas_type': 'aparc+aseg',
+        'description': 'Desikan-Killiany cortical (68) + subcortical',
+        'type': 'discrete',
+        'space': 'freesurfer'
+    },
+    'destrieux': {
+        'source': 'freesurfer',
+        'atlas_type': 'aparc.a2009s+aseg',
+        'description': 'Destrieux cortical (148) + subcortical',
+        'type': 'discrete',
+        'space': 'freesurfer'
     }
 }
 
@@ -137,12 +186,26 @@ def process_subject_atlas(
     atlas_name: str,
     atlas_config: Dict,
     output_dir: Path,
+    derivatives_dir: Path,
+    fs_subjects_dir: Optional[Path] = None,
     method: str = 'pearson',
     fisher_z: bool = True,
     logger: logging.Logger = None
 ) -> Dict:
     """
     Process one subject with one atlas
+
+    Args:
+        subject: Subject ID
+        files: Dictionary with 'func', 'mask', 'brain' paths
+        atlas_name: Name of atlas
+        atlas_config: Atlas configuration dictionary
+        output_dir: Output directory for results
+        derivatives_dir: Path to derivatives directory (for transforms)
+        fs_subjects_dir: FreeSurfer subjects directory (for FS atlases)
+        method: Correlation method ('pearson' or 'spearman')
+        fisher_z: Apply Fisher z-transformation
+        logger: Logger instance
 
     Returns:
         Dictionary with results and status
@@ -164,41 +227,91 @@ def process_subject_atlas(
         func_shape = func_img.shape[:3]
         logger.info(f"Functional data shape: {func_shape}")
 
-        # Load and resample atlas to match functional data
-        atlas_file = Path(atlas_config['file'])
-        logger.info(f"Loading atlas: {atlas_file.name}")
+        # Check if this is a FreeSurfer atlas
+        is_freesurfer = atlas_config.get('space') == 'freesurfer' or atlas_config.get('source') == 'freesurfer'
 
-        atlas_img = nib.load(atlas_file)
-        atlas_shape = atlas_img.shape[:3]
-        logger.info(f"Atlas original shape: {atlas_shape}")
+        if is_freesurfer:
+            # FreeSurfer atlas - requires transformation
+            if fs_subjects_dir is None:
+                raise ValueError(
+                    f"Atlas '{atlas_name}' requires FreeSurfer. "
+                    f"Provide --fs-subjects-dir argument."
+                )
 
-        # Resample atlas to functional space
-        if atlas_shape != func_shape:
-            logger.info(f"Resampling atlas from {atlas_shape} to {func_shape}")
-            from nilearn.image import resample_to_img
+            logger.info(f"FreeSurfer atlas: transforming from FS space to functional space")
 
-            # Resample atlas to match functional data (nearest neighbor for discrete labels)
-            atlas_resampled = resample_to_img(
-                atlas_img,
-                func_img,
-                interpolation='nearest'
+            # Use FuncAtlasTransformer for proper transformation
+            transformer = FuncAtlasTransformer(
+                subject=subject,
+                derivatives_dir=derivatives_dir,
+                fs_subjects_dir=fs_subjects_dir
             )
 
-            # Save resampled atlas for reference
-            resampled_file = subject_atlas_dir / f"atlas_{atlas_name}_resampled.nii.gz"
-            nib.save(atlas_resampled, resampled_file)
-            logger.info(f"Saved resampled atlas: {resampled_file.name}")
+            # Check if transforms are available
+            available = transformer.get_available_transforms()
+            if not available['fs_to_func']:
+                raise RuntimeError(
+                    f"FreeSurfer→Func transform not available for {subject}. "
+                    "Missing FreeSurfer outputs or functional registration transforms."
+                )
 
-            # Load atlas from resampled version
+            # Transform atlas to functional space
+            resampled_file = subject_atlas_dir / f"atlas_{atlas_name}_in_func.nii.gz"
+            intermediate_dir = subject_atlas_dir / 'intermediate'
+
+            atlas_func, roi_names = transformer.transform_atlas_to_func(
+                atlas_name=atlas_name,
+                output_file=resampled_file,
+                intermediate_dir=intermediate_dir
+            )
+
+            logger.info(f"Transformed atlas: {resampled_file.name}")
+            logger.info(f"ROIs from FreeSurfer: {len(roi_names)}")
+
+            # Load atlas using the transformed file
             atlas = load_atlas(
                 atlas_file=resampled_file,
-                labels_file=atlas_config.get('labels')
+                labels_file=None  # ROI names from FreeSurfer labels
             )
+
         else:
-            atlas = load_atlas(
-                atlas_file=atlas_file,
-                labels_file=atlas_config.get('labels')
-            )
+            # MNI atlas - simple resampling
+            atlas_file = Path(atlas_config['file'])
+            logger.info(f"Loading atlas: {atlas_file.name}")
+
+            atlas_img = nib.load(atlas_file)
+            atlas_shape = atlas_img.shape[:3]
+            logger.info(f"Atlas original shape: {atlas_shape}")
+
+            # Resample atlas to functional space
+            if atlas_shape != func_shape:
+                logger.info(f"Resampling atlas from {atlas_shape} to {func_shape}")
+                from nilearn.image import resample_to_img
+
+                # Resample atlas to match functional data (nearest neighbor for discrete labels)
+                atlas_resampled = resample_to_img(
+                    atlas_img,
+                    func_img,
+                    interpolation='nearest'
+                )
+
+                # Save resampled atlas for reference
+                resampled_file = subject_atlas_dir / f"atlas_{atlas_name}_resampled.nii.gz"
+                nib.save(atlas_resampled, resampled_file)
+                logger.info(f"Saved resampled atlas: {resampled_file.name}")
+
+                # Load atlas from resampled version
+                atlas = load_atlas(
+                    atlas_file=resampled_file,
+                    labels_file=atlas_config.get('labels')
+                )
+            else:
+                atlas = load_atlas(
+                    atlas_file=atlas_file,
+                    labels_file=atlas_config.get('labels')
+                )
+
+            roi_names = None  # Will be extracted from atlas
 
         logger.info(f"Atlas: {atlas_config['description']}")
         logger.info(f"Number of ROIs: {atlas.n_rois}")
@@ -322,6 +435,12 @@ def main():
     )
 
     parser.add_argument(
+        '--fs-subjects-dir',
+        type=Path,
+        help='FreeSurfer subjects directory (required for FreeSurfer atlases like desikan_killiany)'
+    )
+
+    parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose logging'
@@ -335,6 +454,9 @@ def main():
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Derivatives directory
+    derivatives_dir = args.study_root / "derivatives"
+
     # Setup logging
     logger = setup_logging(args.output_dir, verbose=args.verbose)
 
@@ -343,6 +465,8 @@ def main():
     logger.info("="*80)
     logger.info(f"Study root: {args.study_root}")
     logger.info(f"Output directory: {args.output_dir}")
+    if args.fs_subjects_dir:
+        logger.info(f"FreeSurfer directory: {args.fs_subjects_dir}")
 
     # Find subjects
     if args.subjects:
@@ -360,9 +484,21 @@ def main():
     else:
         atlases = args.atlases
 
+    # Filter out FreeSurfer atlases if fs_subjects_dir not provided
+    freesurfer_atlases = [a for a in atlases if ATLAS_DEFINITIONS[a].get('space') == 'freesurfer']
+    if freesurfer_atlases and not args.fs_subjects_dir:
+        logger.warning(f"FreeSurfer atlases requested but --fs-subjects-dir not provided.")
+        logger.warning(f"Skipping: {freesurfer_atlases}")
+        atlases = [a for a in atlases if a not in freesurfer_atlases]
+
+    if not atlases:
+        logger.error("No valid atlases to process!")
+        sys.exit(1)
+
     logger.info(f"\nProcessing {len(atlases)} atlases:")
     for atlas_name in atlases:
-        logger.info(f"  - {atlas_name}: {ATLAS_DEFINITIONS[atlas_name]['description']}")
+        atlas_type = "FreeSurfer" if ATLAS_DEFINITIONS[atlas_name].get('space') == 'freesurfer' else "MNI"
+        logger.info(f"  - {atlas_name}: {ATLAS_DEFINITIONS[atlas_name]['description']} [{atlas_type}]")
 
     # Process all combinations
     total = len(subjects) * len(atlases)
@@ -391,6 +527,8 @@ def main():
                     atlas_name=atlas_name,
                     atlas_config=ATLAS_DEFINITIONS[atlas_name],
                     output_dir=args.output_dir,
+                    derivatives_dir=derivatives_dir,
+                    fs_subjects_dir=args.fs_subjects_dir,
                     method=args.method,
                     fisher_z=not args.no_fisher_z,
                     logger=logger

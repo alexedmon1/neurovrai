@@ -42,12 +42,22 @@ Instead, atlases are simply **resampled** (like zooming/shrinking an image) to m
 
 ### Quick Start
 
-Process all subjects with all atlases:
+Process all subjects with MNI atlases:
 
 ```bash
 uv run python -m neurovrai.connectome.batch_functional_connectivity \
     --study-root /mnt/bytopia/IRC805 \
-    --atlases all \
+    --atlases schaefer_200 harvardoxford_cort \
+    --output-dir /mnt/bytopia/IRC805/analysis/func/connectivity
+```
+
+Process with FreeSurfer atlases (requires FreeSurfer outputs):
+
+```bash
+uv run python -m neurovrai.connectome.batch_functional_connectivity \
+    --study-root /mnt/bytopia/IRC805 \
+    --atlases desikan_killiany schaefer_200 \
+    --fs-subjects-dir /mnt/bytopia/IRC805/freesurfer \
     --output-dir /mnt/bytopia/IRC805/analysis/func/connectivity
 ```
 
@@ -66,7 +76,9 @@ uv run python -m neurovrai.connectome.batch_functional_connectivity \
 
 ### Available Atlases
 
-The pipeline includes 5 FSL atlases in MNI 2mm space:
+The pipeline includes FSL atlases and FreeSurfer subject-specific parcellations:
+
+**MNI Space Atlases** (simple resampling to functional space):
 
 | Atlas Name | Description | Regions |
 |------------|-------------|---------|
@@ -75,6 +87,18 @@ The pipeline includes 5 FSL atlases in MNI 2mm space:
 | `juelich` | Juelich Histological Atlas | Variable |
 | `talairach` | Talairach Atlas | Variable |
 | `cerebellum_mniflirt` | Cerebellum MNI FLIRT | Variable |
+| `schaefer_100` | Schaefer 100 parcels (7 Networks) | 100 regions |
+| `schaefer_200` | Schaefer 200 parcels (7 Networks) | 200 regions |
+| `schaefer_400` | Schaefer 400 parcels (7 Networks) | 400 regions |
+
+**FreeSurfer Atlases** (require `--fs-subjects-dir`):
+
+| Atlas Name | Description | Regions |
+|------------|-------------|---------|
+| `desikan_killiany` | Desikan-Killiany cortical + subcortical | ~85 regions |
+| `destrieux` | Destrieux cortical + subcortical | ~165 regions |
+
+FreeSurfer atlases are transformed from FreeSurfer space → T1w space → Functional space using the registration transforms from functional preprocessing.
 
 ### Output Structure
 
