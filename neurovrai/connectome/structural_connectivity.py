@@ -1196,7 +1196,9 @@ def run_probtrackx2_network(
 
     # Build probtrackx2 command
     # Note: GPU version requires = syntax and different option names
-    # GPU version limitation: --omatrix1 and --omatrix3 cannot be run simultaneously
+    # GPU version limitations:
+    #   - --omatrix1 and --omatrix3 cannot be run simultaneously
+    #   - --omatrix2 requires --target2 parameter
     cmd = [
         probtrackx_cmd,
         f'--samples={str(bedpostx_outputs["merged"])}',
@@ -1212,8 +1214,8 @@ def run_probtrackx2_network(
         '--forcedir',  # Overwrite output directory
         '--os2t',  # Output seeds to targets
         '--omatrix1',  # Output connectivity matrix (fdt_network_matrix)
-        '--omatrix2',  # Output mean path length matrix (fdt_matrix2)
-        # Note: --omatrix3 removed due to GPU incompatibility with --omatrix1
+        # Note: --omatrix2 removed - GPU requires --target2 which we don't need
+        # Note: --omatrix3 removed - GPU incompatible with --omatrix1
         '--ompl',  # Output mean path length from each seed (for distance correction)
     ]
 
