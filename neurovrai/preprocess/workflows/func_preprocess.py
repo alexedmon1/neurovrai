@@ -1607,14 +1607,22 @@ def run_func_preprocessing(
     logger.info("")
 
     # Step 7: Get motion parameters and mask from derivatives (saved by DataSink)
+    brain_dir = derivatives_dir / 'brain'
+
     if is_multiecho:
         # Motion params already extracted during multi-echo preprocessing
-        # Mask already created before TEDANA
-        func_mask = derivatives_dir / 'func_mask.nii.gz'
+        # Find brain mask in brain/ subdirectory
+        mask_files = list(brain_dir.glob('*mask.nii.gz'))
+        if mask_files:
+            func_mask = mask_files[0]
+            logger.info(f"Found brain mask: {func_mask}")
+        else:
+            # Fallback location
+            func_mask = derivatives_dir / 'func_mask.nii.gz'
+            logger.warning(f"Using fallback mask location: {func_mask}")
     else:
         # Single-echo: get from derivatives directory where DataSink saved them
         motion_dir = derivatives_dir / 'motion_correction'
-        brain_dir = derivatives_dir / 'brain'
 
         # Find motion parameters
         par_files = list(motion_dir.glob('*.par'))
@@ -1628,7 +1636,7 @@ def run_func_preprocessing(
             func_mask = mask_files[0]
             logger.info(f"Found brain mask: {func_mask}")
         else:
-            # Fallback to denoised directory
+            # Fallback location
             func_mask = derivatives_dir / 'func_mask.nii.gz'
             logger.warning(f"Using fallback mask location: {func_mask}")
 
