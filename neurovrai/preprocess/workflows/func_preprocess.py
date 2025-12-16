@@ -940,12 +940,12 @@ def run_func_preprocessing(
     # output_dir is derivatives, so study_root is one level up
     study_root = outdir.parent
 
-    # Work directory: {study_root}/work/{subject}/
-    # Nipype will add workflow name as subdirectory
+    # Work directory: {study_root}/work/{subject}/func_preprocess/
+    # Nipype will add workflow name as subdirectory (e.g., func_phase1_motion)
     if work_dir is None:
-        work_dir = study_root / 'work' / subject
+        work_dir = study_root / 'work' / subject / 'func_preprocess'
     else:
-        work_dir = Path(work_dir)
+        work_dir = Path(work_dir) / 'func_preprocess'  # Append workflow name to provided work_dir
 
     work_dir.mkdir(parents=True, exist_ok=True)
 
