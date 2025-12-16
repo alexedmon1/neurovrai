@@ -152,6 +152,15 @@ def migrate_bedpostx(
             if copied:
                 logger.info(f"  ✓ Copied input files: {', '.join(copied)}")
 
+            # Create merged symlink if it doesn't exist (legacy BEDPOSTX runs)
+            merged_link = dest_dir / 'merged'
+            if not merged_link.exists():
+                try:
+                    merged_link.symlink_to('.')
+                    logger.info(f"  ✓ Created merged symlink")
+                except Exception as e:
+                    logger.warning(f"  ⚠ Failed to create merged symlink: {e}")
+
             # Verify critical files are present
             critical_files = ['merged', 'nodif_brain_mask.nii.gz']
             missing = []

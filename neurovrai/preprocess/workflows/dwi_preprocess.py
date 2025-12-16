@@ -758,6 +758,15 @@ def run_dwi_multishell_topup_preprocessing(
                 else:
                     logger.warning(f"  ⚠ bedpostx_input directory not found at {bedpostx_input_dir}")
 
+                # Create merged symlink if it doesn't exist (for probtrackx2)
+                merged_link = bedpostx_dest_dir / 'merged'
+                if not merged_link.exists():
+                    try:
+                        merged_link.symlink_to('.')
+                        logger.info(f"  ✓ Created merged symlink")
+                    except Exception as e:
+                        logger.warning(f"  ⚠ Failed to create merged symlink: {e}")
+
             except Exception as e:
                 logger.warning(f"  ⚠ Failed to copy BEDPOSTX output: {e}")
                 logger.warning("  BEDPOSTX outputs remain in work directory only")
