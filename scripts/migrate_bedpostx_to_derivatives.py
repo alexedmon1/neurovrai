@@ -152,25 +152,17 @@ def migrate_bedpostx(
             if copied:
                 logger.info(f"  ✓ Copied input files: {', '.join(copied)}")
 
-            # Create merged symlink if it doesn't exist (legacy BEDPOSTX runs)
-            merged_link = dest_dir / 'merged'
-            if not merged_link.exists():
-                try:
-                    merged_link.symlink_to('.')
-                    logger.info(f"  ✓ Created merged symlink")
-                except Exception as e:
-                    logger.warning(f"  ⚠ Failed to create merged symlink: {e}")
-
             # Verify critical files are present
-            critical_files = ['merged', 'nodif_brain_mask.nii.gz']
-            missing = []
-            for fname in critical_files:
-                file_path = dest_dir / fname
-                if not file_path.exists() and not (file_path.is_symlink()):
-                    missing.append(fname)
+            # Check for nodif_brain_mask.nii.gz
+            if not (dest_dir / 'nodif_brain_mask.nii.gz').exists():
+                logger.warning(f"  ⚠ Missing nodif_brain_mask.nii.gz")
+                logger.warning(f"  ⚠ Probtrackx2 may not work correctly")
+                return False
 
-            if missing:
-                logger.warning(f"  ⚠ Missing critical files: {missing}")
+            # Check for BEDPOSTX sample files (merged_*samples.nii.gz)
+            sample_files = list(dest_dir.glob('merged_*samples.nii.gz'))
+            if not sample_files:
+                logger.warning(f"  ⚠ Missing BEDPOSTX sample files (merged_*samples.nii.gz)")
                 logger.warning(f"  ⚠ Probtrackx2 may not work correctly")
                 return False
 
