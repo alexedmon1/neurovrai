@@ -1210,7 +1210,7 @@ def run_probtrackx2_network(
         f'--nsamples={str(n_samples)}',
         f'--steplength={str(step_length)}',
         f'--cthr={str(curvature_threshold)}',  # GPU uses --cthr not --curvthresh
-        '--opd',  # Output path distribution
+        # Note: --opd removed - causes GPU memory issues with large atlases
         '--forcedir',  # Overwrite output directory
         '--os2t',  # Output seeds to targets
         '--omatrix1',  # Output connectivity matrix (fdt_network_matrix)
