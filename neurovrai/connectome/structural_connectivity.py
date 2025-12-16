@@ -1212,7 +1212,7 @@ def run_probtrackx2_network(
         f'--cthr={str(curvature_threshold)}',  # GPU uses --cthr not --curvthresh
         # Note: --opd removed - causes GPU memory issues with large atlases
         '--forcedir',  # Overwrite output directory
-        '--os2t',  # Output seeds to targets
+        # Note: --os2t removed - causes GPU memory issues with large atlases
         '--omatrix1',  # Output connectivity matrix (fdt_network_matrix)
         # Note: --omatrix2 removed - GPU requires --target2 which we don't need
         # Note: --omatrix3 removed - GPU incompatible with --omatrix1
