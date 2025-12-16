@@ -1199,6 +1199,7 @@ def run_probtrackx2_network(
     # GPU version limitations:
     #   - --omatrix1 and --omatrix3 cannot be run simultaneously
     #   - --omatrix2 requires --target2 parameter
+    #   - --ompl causes GPU memory issues with large atlases
     cmd = [
         probtrackx_cmd,
         f'--samples={str(bedpostx_outputs["merged"])}',
@@ -1210,14 +1211,17 @@ def run_probtrackx2_network(
         f'--nsamples={str(n_samples)}',
         f'--steplength={str(step_length)}',
         f'--cthr={str(curvature_threshold)}',  # GPU uses --cthr not --curvthresh
-        # Note: --opd removed - causes GPU memory issues with large atlases
+        # Note: --opd removed - causes memory issues with large atlases
         '--forcedir',  # Overwrite output directory
-        # Note: --os2t removed - causes GPU memory issues with large atlases
+        # Note: --os2t removed - causes memory issues with large atlases
         '--omatrix1',  # Output connectivity matrix (fdt_network_matrix)
         # Note: --omatrix2 removed - GPU requires --target2 which we don't need
         # Note: --omatrix3 removed - GPU incompatible with --omatrix1
-        # Note: --ompl removed - causes GPU memory issues with large atlases
     ]
+
+    # Add --ompl for CPU mode (causes GPU OOM with large atlases)
+    if probtrackx_cmd == 'probtrackx2':
+        cmd.append('--ompl')  # Output mean path length (CPU only)
 
     # Optional parameters
     if loop_check:
