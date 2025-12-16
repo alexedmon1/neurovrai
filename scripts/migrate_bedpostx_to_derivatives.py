@@ -74,6 +74,7 @@ def migrate_bedpostx(
         True if successful, False otherwise
     """
     dest_dir = derivatives_dir / subject / 'dwi' / 'bedpostx'
+    bedpostx_input_dir = derivatives_dir / subject / 'dwi' / 'bedpostx_input'
 
     logger.info(f"  Subject: {subject}")
     logger.info(f"  Source: {bedpostx_work_dir}")
@@ -84,32 +85,57 @@ def migrate_bedpostx(
         logger.error(f"  ✗ Source directory not found")
         return False
 
-    # Check for key BEDPOSTX files
-    required_files = ['merged', 'nodif_brain_mask.nii.gz', 'bvals', 'bvecs']
-    missing_files = []
-    for fname in required_files:
-        if not (bedpostx_work_dir / fname).exists():
-            missing_files.append(fname)
-
-    if missing_files:
-        logger.warning(f"  ⚠ Missing expected files: {missing_files}")
-        logger.warning(f"  ⚠ BEDPOSTX output may be incomplete")
-
     # Check if destination already exists
     if dest_dir.exists():
         logger.info(f"  Destination already exists, will overwrite")
         if not dry_run:
             shutil.rmtree(dest_dir)
 
-    # Copy directory
+    # Copy directory (preserve symlinks)
     if dry_run:
-        logger.info(f"  [DRY RUN] Would copy directory")
+        logger.info(f"  [DRY RUN] Would copy BEDPOSTX output directory")
+        if bedpostx_input_dir.exists():
+            logger.info(f"  [DRY RUN] Would copy input files from bedpostx_input/")
         return True
     else:
         try:
-            shutil.copytree(bedpostx_work_dir, dest_dir)
-            logger.info(f"  ✓ Successfully copied BEDPOSTX output")
+            # Copy BEDPOSTX output, preserving symlinks (like merged -> .)
+            shutil.copytree(bedpostx_work_dir, dest_dir, symlinks=True)
+            logger.info(f"  ✓ Copied BEDPOSTX output directory")
+
+            # Copy essential input files from bedpostx_input if it exists
+            if bedpostx_input_dir.exists():
+                input_files = ['nodif_brain_mask.nii.gz', 'bvals', 'bvecs']
+                copied = []
+                for fname in input_files:
+                    src_file = bedpostx_input_dir / fname
+                    if src_file.exists():
+                        dest_file = dest_dir / fname
+                        if not dest_file.exists():  # Don't overwrite if already present
+                            shutil.copy2(src_file, dest_file)
+                            copied.append(fname)
+
+                if copied:
+                    logger.info(f"  ✓ Copied input files: {', '.join(copied)}")
+            else:
+                logger.warning(f"  ⚠ bedpostx_input directory not found, skipping input files")
+
+            # Verify critical files are present
+            critical_files = ['merged', 'nodif_brain_mask.nii.gz']
+            missing = []
+            for fname in critical_files:
+                file_path = dest_dir / fname
+                if not file_path.exists() and not (file_path.is_symlink()):
+                    missing.append(fname)
+
+            if missing:
+                logger.warning(f"  ⚠ Missing critical files: {missing}")
+                logger.warning(f"  ⚠ Probtrackx2 may not work correctly")
+                return False
+
+            logger.info(f"  ✓ Migration successful")
             return True
+
         except Exception as e:
             logger.error(f"  ✗ Failed to copy: {e}")
             return False

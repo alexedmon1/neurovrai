@@ -727,6 +727,7 @@ def run_dwi_multishell_topup_preprocessing(
         if bedpostx_work_dirs:
             bedpostx_work_dir = bedpostx_work_dirs[0]
             bedpostx_dest_dir = derivatives_dir / 'bedpostx'
+            bedpostx_input_dir = derivatives_dir / 'bedpostx_input'
 
             try:
                 import shutil
@@ -736,8 +737,27 @@ def run_dwi_multishell_topup_preprocessing(
 
                 logger.info(f"  Copying: {bedpostx_work_dir}")
                 logger.info(f"  To: {bedpostx_dest_dir}")
-                shutil.copytree(bedpostx_work_dir, bedpostx_dest_dir)
+                # Preserve symlinks (like merged -> .)
+                shutil.copytree(bedpostx_work_dir, bedpostx_dest_dir, symlinks=True)
                 logger.info("  ✓ BEDPOSTX output copied to derivatives")
+
+                # Copy essential input files from bedpostx_input if it exists
+                if bedpostx_input_dir.exists():
+                    input_files = ['nodif_brain_mask.nii.gz', 'bvals', 'bvecs']
+                    copied = []
+                    for fname in input_files:
+                        src_file = bedpostx_input_dir / fname
+                        if src_file.exists():
+                            dest_file = bedpostx_dest_dir / fname
+                            if not dest_file.exists():  # Don't overwrite if already present
+                                shutil.copy2(src_file, dest_file)
+                                copied.append(fname)
+
+                    if copied:
+                        logger.info(f"  ✓ Copied input files: {', '.join(copied)}")
+                else:
+                    logger.warning(f"  ⚠ bedpostx_input directory not found at {bedpostx_input_dir}")
+
             except Exception as e:
                 logger.warning(f"  ⚠ Failed to copy BEDPOSTX output: {e}")
                 logger.warning("  BEDPOSTX outputs remain in work directory only")
