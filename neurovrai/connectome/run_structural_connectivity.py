@@ -377,6 +377,7 @@ def run_structural_connectivity_analysis(
         # Check for existing BEDPOSTX output
         dwi_dir = derivatives_dir / subject / 'dwi'
         possible_bedpostx_dirs = [
+            dwi_dir / 'bedpostx',  # Standard location after migration
             derivatives_dir / subject / 'dwi.bedpostX',
             derivatives_dir / subject / f'{subject}_dwi.bedpostX',
             dwi_dir / 'bedpostx_input.bedpostX',
