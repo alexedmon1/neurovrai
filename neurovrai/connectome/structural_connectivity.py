@@ -1195,16 +1195,18 @@ def run_probtrackx2_network(
     logger.info(f"GPU acceleration: {use_gpu and probtrackx_gpu_available}")
 
     # Build probtrackx2 command
+    # Note: GPU version requires = syntax and different option names
     cmd = [
         probtrackx_cmd,
-        '--samples', str(bedpostx_outputs['merged']),
-        '--mask', str(bedpostx_outputs['nodif_brain_mask']),
-        '--seed', str(seeds_list),
+        f'--samples={str(bedpostx_outputs["merged"])}',
+        f'--mask={str(bedpostx_outputs["nodif_brain_mask"])}',
+        f'--seed={str(seeds_list)}',
         '--network',  # Enable network mode
-        '--dir', str(output_dir),
-        '--nsamples', str(n_samples),
-        '--steplength', str(step_length),
-        '--curvthresh', str(curvature_threshold),
+        f'--targetmasks={str(seeds_list)}',  # GPU requires explicit targets (same as seeds for network mode)
+        f'--dir={str(output_dir)}',
+        f'--nsamples={str(n_samples)}',
+        f'--steplength={str(step_length)}',
+        f'--cthr={str(curvature_threshold)}',  # GPU uses --cthr not --curvthresh
         '--opd',  # Output path distribution
         '--forcedir',  # Overwrite output directory
         '--os2t',  # Output seeds to targets
@@ -1220,17 +1222,17 @@ def run_probtrackx2_network(
     if waypoint_mask is not None:
         if not Path(waypoint_mask).exists():
             raise StructuralConnectivityError(f"Waypoint mask not found: {waypoint_mask}")
-        cmd.extend(['--waypoints', str(waypoint_mask)])
+        cmd.append(f'--waypoints={str(waypoint_mask)}')
 
     if exclusion_mask is not None:
         if not Path(exclusion_mask).exists():
             raise StructuralConnectivityError(f"Exclusion mask not found: {exclusion_mask}")
-        cmd.extend(['--avoid', str(exclusion_mask)])
+        cmd.append(f'--avoid={str(exclusion_mask)}')
 
     if termination_mask is not None:
         if not Path(termination_mask).exists():
             raise StructuralConnectivityError(f"Termination mask not found: {termination_mask}")
-        cmd.extend(['--stop', str(termination_mask)])
+        cmd.append(f'--stop={str(termination_mask)}')
 
     # Execute probtrackx2
     start_time = time.time()

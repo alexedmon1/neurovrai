@@ -411,35 +411,63 @@ class DWIAtlasTransformer:
         t1w_brain = self.transforms['t1w_brain']
         dwi_ref = self._get_dwi_reference()
 
-        logger.info(f"Transforming FreeSurfer {atlas_type} to DWI space")
+        logger.info(f"Transforming FreeSurfer {atlas_type} to DWI space (using mri_vol2vol)")
 
-        # Extract atlas from FreeSurfer
-        atlas_fs = intermediate_dir / f'{atlas_type}_fs.nii.gz'
-        extract_freesurfer_atlas(
-            fs_subject_dir=fs_subject_dir,
-            atlas_type=atlas_type,
-            output_file=atlas_fs
-        )
+        # Get FreeSurfer atlas file
+        aparc_file = fs_subject_dir / 'mri' / f'{atlas_type}.mgz'
+        if not aparc_file.exists():
+            raise FileNotFoundError(f"FreeSurfer atlas not found: {aparc_file}")
 
-        # Compute FS → DWI transform chain
+        # Step 1: FS → T1w using mri_vol2vol (fast!)
+        atlas_in_t1w = intermediate_dir / f'{atlas_type}_in_t1w.nii.gz'
+        logger.info(f"  Step 1: FS → T1w (mri_vol2vol)")
+
+        cmd_fs_to_t1w = [
+            'mri_vol2vol',
+            '--mov', str(aparc_file),
+            '--targ', str(t1w_brain),
+            '--o', str(atlas_in_t1w),
+            '--regheader',  # Fast header-based registration
+            '--nearest'  # Nearest neighbor for label preservation
+        ]
+
+        result = subprocess.run(cmd_fs_to_t1w, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"mri_vol2vol FS→T1w failed: {result.stderr}")
+
+        logger.info(f"    Atlas in T1w space: {atlas_in_t1w.name}")
+
+        # Step 2: T1w → DWI using FLIRT
+        logger.info(f"  Step 2: T1w → DWI (FLIRT)")
+
+        # Compute T1w→DWI transform if needed
+        from neurovrai.preprocess.utils.freesurfer_transforms import compute_t1w_to_dwi_transform
+
         transforms_dir = intermediate_dir / 'transforms'
-        transform_results = compute_all_transforms(
-            subject=self.subject,
-            fs_subject_dir=fs_subject_dir,
-            t1w_brain=t1w_brain,
-            dwi_b0_brain=dwi_ref,
-            output_dir=transforms_dir,
-            run_qc=False
-        )
+        transforms_dir.mkdir(parents=True, exist_ok=True)
 
-        # Apply composite transform
-        fs_to_dwi_mat = transform_results['fs_to_dwi']
-        transform_atlas_to_dwi(
-            atlas_file=atlas_fs,
-            dwi_reference=dwi_ref,
-            transform_mat=fs_to_dwi_mat,
-            output_file=output_file
-        )
+        t1w_to_dwi_mat = transforms_dir / 't1w_to_dwi.mat'
+        if not t1w_to_dwi_mat.exists():
+            t1w_to_dwi_mat, _ = compute_t1w_to_dwi_transform(
+                t1w_brain=t1w_brain,
+                dwi_b0_brain=dwi_ref,
+                output_dir=transforms_dir
+            )
+
+        # Apply T1w→DWI transform
+        cmd_t1w_to_dwi = [
+            'flirt',
+            '-in', str(atlas_in_t1w),
+            '-ref', str(dwi_ref),
+            '-applyxfm',
+            '-init', str(t1w_to_dwi_mat),
+            '-out', str(output_file),
+            '-interp', 'nearestneighbour'
+        ]
+
+        result = subprocess.run(cmd_t1w_to_dwi, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"FLIRT T1w→DWI failed: {result.stderr}")
 
         logger.info(f"  Output: {output_file}")
         return output_file
