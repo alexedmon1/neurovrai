@@ -715,6 +715,35 @@ def run_dwi_multishell_topup_preprocessing(
     logger.info("  Running Nipype workflow (eddy, brain extraction, DTI fitting)...")
     wf.run(**exec_config)
 
+    # Step 7.0: Copy BEDPOSTX output to derivatives if it was run
+    if run_bedpostx:
+        logger.info("")
+        logger.info("Step 7.0: Copying BEDPOSTX output to derivatives")
+
+        # Find bedpostx.bedpostX folder in work directory
+        bedpostx_work_pattern = work_dir / '**' / 'bedpostx.bedpostX'
+        bedpostx_work_dirs = list(work_dir.glob('**/bedpostx.bedpostX'))
+
+        if bedpostx_work_dirs:
+            bedpostx_work_dir = bedpostx_work_dirs[0]
+            bedpostx_dest_dir = derivatives_dir / 'bedpostx'
+
+            try:
+                import shutil
+                if bedpostx_dest_dir.exists():
+                    logger.info(f"  Removing existing bedpostx directory: {bedpostx_dest_dir}")
+                    shutil.rmtree(bedpostx_dest_dir)
+
+                logger.info(f"  Copying: {bedpostx_work_dir}")
+                logger.info(f"  To: {bedpostx_dest_dir}")
+                shutil.copytree(bedpostx_work_dir, bedpostx_dest_dir)
+                logger.info("  ✓ BEDPOSTX output copied to derivatives")
+            except Exception as e:
+                logger.warning(f"  ⚠ Failed to copy BEDPOSTX output: {e}")
+                logger.warning("  BEDPOSTX outputs remain in work directory only")
+        else:
+            logger.warning(f"  ⚠ BEDPOSTX output not found in work directory: {work_dir}")
+
     # Step 7.1: Calculate AD and RD from eigenvalues
     logger.info("")
     logger.info("Step 7.1: Calculating AD and RD from eigenvalues")
