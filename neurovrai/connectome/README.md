@@ -173,7 +173,7 @@ roi_names = sc_results['roi_names']
 ```yaml
 structural_connectivity:
   tractography:
-    use_gpu: true
+    use_gpu: false  # Default: CPU for stability. Set true for speed with small atlases (<50 ROIs)
     n_samples: 5000
     step_length: 0.5
     curvature_threshold: 0.2

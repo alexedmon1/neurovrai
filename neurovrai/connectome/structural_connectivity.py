@@ -739,7 +739,7 @@ def get_tractography_config(config: Optional[Dict] = None) -> Dict:
     """
     defaults = {
         'tractography': {
-            'use_gpu': True,
+            'use_gpu': False,  # Default to CPU for stability with large atlases
             'n_samples': 5000,
             'step_length': 0.5,
             'curvature_threshold': 0.2,
@@ -1122,7 +1122,7 @@ def run_probtrackx2_network(
     waypoint_mask: Optional[Path] = None,
     exclusion_mask: Optional[Path] = None,
     termination_mask: Optional[Path] = None,
-    use_gpu: bool = True
+    use_gpu: bool = False  # Default to CPU for stability with large atlases
 ) -> Dict[str, Path]:
     """
     Run probtrackx2 in network mode for ROI-to-ROI tractography
@@ -1139,7 +1139,7 @@ def run_probtrackx2_network(
         waypoint_mask: Optional waypoint mask (e.g., white matter)
         exclusion_mask: Optional exclusion mask (e.g., CSF)
         termination_mask: Optional termination mask (e.g., grey matter)
-        use_gpu: Use probtrackx2_gpu if available (default: True)
+        use_gpu: Use probtrackx2_gpu if available (default: False, set via config)
 
     Returns:
         Dictionary with paths to output files
@@ -1407,7 +1407,7 @@ def compute_structural_connectivity(
     subject: Optional[str] = None,
     derivatives_dir: Optional[Path] = None,
     fs_subjects_dir: Optional[Path] = None,
-    use_gpu: bool = True,
+    use_gpu: bool = False,  # Default to CPU for stability with large atlases
     use_wm_mask: bool = True,
     wm_mask: Optional[Path] = None,
     terminate_at_gm: bool = False,
@@ -1439,7 +1439,7 @@ def compute_structural_connectivity(
         subject: Subject ID (for auto-finding ventricle source)
         derivatives_dir: Derivatives directory (for auto-finding ventricle source)
         fs_subjects_dir: FreeSurfer subjects directory (for masks from aparc+aseg)
-        use_gpu: Use probtrackx2_gpu if available (default: True)
+        use_gpu: Use probtrackx2_gpu if available (default: False, set via config)
         use_wm_mask: Constrain tractography to white matter - ACT style (default: True)
         wm_mask: Pre-computed WM mask (auto-generated if None)
         terminate_at_gm: Stop streamlines when entering gray matter (default: False)
