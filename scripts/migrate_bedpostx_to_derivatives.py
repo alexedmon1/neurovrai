@@ -104,21 +104,53 @@ def migrate_bedpostx(
             logger.info(f"  ✓ Copied BEDPOSTX output directory")
 
             # Copy essential input files from bedpostx_input if it exists
+            # For older preprocessing runs, reconstruct from other derivatives locations
+            copied = []
+
             if bedpostx_input_dir.exists():
+                # New workflow: copy from bedpostx_input
                 input_files = ['nodif_brain_mask.nii.gz', 'bvals', 'bvecs']
-                copied = []
                 for fname in input_files:
                     src_file = bedpostx_input_dir / fname
                     if src_file.exists():
                         dest_file = dest_dir / fname
-                        if not dest_file.exists():  # Don't overwrite if already present
+                        if not dest_file.exists():
+                            shutil.copy2(src_file, dest_file)
+                            copied.append(fname)
+            else:
+                # Legacy workflow: reconstruct from other derivatives directories
+                dwi_dir = derivatives_dir / subject / 'dwi'
+
+                # Copy brain mask from mask directory
+                mask_files = list((dwi_dir / 'mask').glob('*brain_mask.nii.gz')) if (dwi_dir / 'mask').exists() else []
+                if mask_files:
+                    dest_mask = dest_dir / 'nodif_brain_mask.nii.gz'
+                    if not dest_mask.exists():
+                        shutil.copy2(mask_files[0], dest_mask)
+                        copied.append('nodif_brain_mask.nii.gz')
+
+                # Copy bvals and bvecs from rotated_bvec or eddy_corrected directory
+                for fname in ['bvals', 'bvecs']:
+                    src_file = None
+                    # Try rotated_bvec first
+                    if (dwi_dir / 'rotated_bvec').exists():
+                        candidates = list((dwi_dir / 'rotated_bvec').glob(f'*{fname}'))
+                        if candidates:
+                            src_file = candidates[0]
+                    # Try eddy_corrected if not found
+                    if src_file is None and (dwi_dir / 'eddy_corrected').exists():
+                        candidates = list((dwi_dir / 'eddy_corrected').glob(f'*{fname}'))
+                        if candidates:
+                            src_file = candidates[0]
+
+                    if src_file:
+                        dest_file = dest_dir / fname
+                        if not dest_file.exists():
                             shutil.copy2(src_file, dest_file)
                             copied.append(fname)
 
-                if copied:
-                    logger.info(f"  ✓ Copied input files: {', '.join(copied)}")
-            else:
-                logger.warning(f"  ⚠ bedpostx_input directory not found, skipping input files")
+            if copied:
+                logger.info(f"  ✓ Copied input files: {', '.join(copied)}")
 
             # Verify critical files are present
             critical_files = ['merged', 'nodif_brain_mask.nii.gz']
