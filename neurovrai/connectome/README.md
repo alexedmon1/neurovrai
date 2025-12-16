@@ -1,6 +1,8 @@
-# Functional Connectivity (Connectome) Module
+# Connectome Module
 
-Compute functional connectivity matrices (connectomes) from preprocessed resting-state fMRI data.
+Compute connectivity matrices from neuroimaging data:
+- **Functional Connectivity**: Correlation-based matrices from resting-state fMRI
+- **Structural Connectivity**: Tractography-based matrices from diffusion MRI
 
 ## Analysis Approach: Native-Space Connectomes
 
@@ -273,8 +275,178 @@ Batch processing 17 subjects × 5 atlases (85 analyses): ~45-75 minutes
 
 ---
 
+## Structural Connectivity
+
+Compute tractography-based structural connectivity matrices from diffusion MRI using FSL's probtrackx2.
+
+### Quick Start
+
+```bash
+# Single subject
+uv run python -m neurovrai.connectome.run_structural_connectivity \
+    --subject IRC805-0580101 \
+    --derivatives-dir /mnt/bytopia/IRC805/derivatives \
+    --atlas schaefer_200 \
+    --config /mnt/bytopia/IRC805/config.yaml \
+    --output-dir /mnt/bytopia/IRC805/connectome/structural
+
+# Batch processing
+uv run python -m neurovrai.connectome.batch_structural_connectivity \
+    --study-root /mnt/bytopia/IRC805 \
+    --atlases schaefer_200 schaefer_400 \
+    --config /mnt/bytopia/IRC805/config.yaml \
+    --output-dir /mnt/bytopia/IRC805/connectome/structural
+```
+
+### Pipeline Steps
+
+1. **BEDPOSTX**: Fiber orientation modeling (GPU-accelerated if available)
+2. **Atlas Transformation**: Transform atlas from MNI/FreeSurfer to DWI native space
+3. **Anatomical Constraints**: Create avoidance/waypoint masks from tissue segmentation
+4. **Probtrackx2**: Probabilistic tractography in network mode
+5. **Matrix Construction**: Build normalized connectivity matrix
+6. **Graph Metrics**: Compute network topology metrics (optional)
+
+### Anatomical Constraints
+
+The pipeline supports multiple anatomical constraints for biologically plausible tractography:
+
+| Constraint | Description | Source |
+|------------|-------------|--------|
+| `avoid_ventricles` | Exclude CSF/ventricles from tractography | FreeSurfer (labels 4,5,14,15,43,44,72) |
+| `use_wm_mask` | Constrain tractography to white matter | FreeSurfer or FSL FAST |
+| `terminate_at_gm` | Stop streamlines at gray matter boundary | FreeSurfer |
+| `use_gmwmi_seeding` | Seed from gray-white matter interface | FreeSurfer surfaces or volume |
+| `use_subcortical_waypoints` | Use thalamus/basal ganglia as waypoints | FreeSurfer |
+
+### Configuration
+
+Add to your `config.yaml`:
+
+```yaml
+structural_connectivity:
+  tractography:
+    use_gpu: true              # Use probtrackx2_gpu (5-10x faster)
+    n_samples: 5000            # Samples per seed voxel
+    step_length: 0.5           # Step length in mm
+    curvature_threshold: 0.2   # Curvature threshold (0-1)
+    loop_check: true           # Discard looping streamlines
+
+  anatomical_constraints:
+    avoid_ventricles: true     # Exclude CSF from tractography (recommended)
+    use_wm_mask: true          # Constrain to white matter (ACT-style)
+    terminate_at_gm: false     # Stop at gray matter
+    wm_source: auto            # 'freesurfer', 'fsl', or 'auto'
+
+  freesurfer_options:
+    use_gmwmi_seeding: true    # Seed from gray-white interface (more anatomically precise)
+    gmwmi_method: surface      # 'surface' (lh/rh.white) or 'volume' (aparc+aseg)
+    use_subcortical_waypoints: false
+    subcortical_structures:
+      - Left-Thalamus
+      - Right-Thalamus
+
+  atlas:
+    default: schaefer_200
+    available:
+      - schaefer_100
+      - schaefer_200
+      - schaefer_400
+      - desikan_killiany       # Requires FreeSurfer
+
+  output:
+    normalize: true            # Normalize by waytotal
+    threshold: null            # Optional threshold (0-1)
+    compute_graph_metrics: true
+    save_streamlines: false
+
+  run_qc: true
+```
+
+### Available Atlases
+
+| Atlas | Space | Regions | Requirements |
+|-------|-------|---------|--------------|
+| `schaefer_100` | MNI152 | 100 cortical | None |
+| `schaefer_200` | MNI152 | 200 cortical | None |
+| `schaefer_400` | MNI152 | 400 cortical | None |
+| `desikan_killiany` | FreeSurfer | 68 cortical + subcortical | FreeSurfer recon-all |
+
+### Output Structure
+
+```
+connectome/structural/{subject}/
+├── sc_matrix.npy                # Connectivity matrix (NumPy)
+├── sc_matrix.csv                # Connectivity matrix (CSV)
+├── sc_roi_names.txt             # ROI labels
+├── sc_summary.json              # Summary statistics
+├── graph_metrics.json           # Network topology metrics
+├── analysis_metadata.json       # Processing metadata
+├── atlas/
+│   └── {atlas}_dwi.nii.gz       # Atlas in DWI space
+└── probtrackx_output/
+    ├── fdt_network_matrix       # Raw tractography output
+    └── waytotal                 # Normalization factors
+```
+
+### Python API
+
+```python
+from neurovrai.connectome.structural_connectivity import compute_structural_connectivity
+from neurovrai.connectome.graph_metrics import compute_graph_metrics
+from pathlib import Path
+
+# Compute structural connectivity
+sc_results = compute_structural_connectivity(
+    bedpostx_dir=Path('derivatives/sub-001/dwi.bedpostX'),
+    atlas_file=Path('schaefer_200_dwi.nii.gz'),
+    output_dir=Path('connectome/structural/sub-001'),
+    n_samples=5000,
+    avoid_ventricles=True,
+    config=config  # Uses tractography settings from config
+)
+
+# Access results
+sc_matrix = sc_results['connectivity_matrix']
+roi_names = sc_results['roi_names']
+metadata = sc_results['metadata']
+
+print(f"ROIs: {metadata['n_rois']}")
+print(f"Connections: {metadata['n_connections']}")
+print(f"Density: {metadata['connection_density']:.3f}")
+
+# Compute graph metrics
+graph_metrics = compute_graph_metrics(
+    connectivity_matrix=sc_matrix,
+    roi_names=roi_names
+)
+
+print(f"Global efficiency: {graph_metrics['global']['global_efficiency']:.4f}")
+print(f"Clustering: {graph_metrics['global']['clustering_coefficient']:.4f}")
+```
+
+### Performance
+
+**BEDPOSTX** (fiber orientation modeling):
+- CPU: 4-8 hours per subject
+- GPU: 20-60 minutes per subject (bedpostx_gpu)
+
+**Probtrackx2** (tractography):
+- CPU: 2-6 hours per subject (5000 samples, 200 ROIs)
+- GPU: 20-60 minutes per subject (probtrackx2_gpu)
+
+### Requirements
+
+- **FSL 6.0+**: BEDPOSTX, probtrackx2 (probtrackx2_gpu optional)
+- **CUDA** (optional): For GPU acceleration
+- **FreeSurfer** (optional): For Desikan-Killiany atlas and GMWMI seeding
+
+---
+
 ## References
 
 - **Native-space connectivity**: Power et al. (2014) NeuroImage
 - **Fisher z-transformation**: Fisher (1915) Biometrika
 - **Graph theory**: Rubinov & Sporns (2010) NeuroImage
+- **Probabilistic tractography**: Behrens et al. (2007) NeuroImage
+- **ACT tractography**: Smith et al. (2012) NeuroImage

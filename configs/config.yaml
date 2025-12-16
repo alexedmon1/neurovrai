@@ -133,3 +133,48 @@ freesurfer:
   enabled: false
   subjects_dir: /mnt/bytopia/IRC805/freesurfer
   use_for_masks: false
+
+# Structural Connectivity (Tractography-based)
+# Requires: BEDPOSTX outputs, atlas parcellation
+structural_connectivity:
+  # Tractography engine settings
+  tractography:
+    use_gpu: true                    # Use probtrackx2_gpu if available (much faster)
+    n_samples: 5000                  # Samples per seed voxel (higher = more accurate, slower)
+    step_length: 0.5                 # Step length in mm
+    curvature_threshold: 0.2         # Curvature threshold (0-1, lower = straighter paths)
+    loop_check: true                 # Discard looping streamlines
+
+  # Anatomical constraints (improves biological plausibility)
+  anatomical_constraints:
+    avoid_ventricles: true           # Exclude CSF/ventricles from tractography (recommended)
+    use_wm_mask: true                # Constrain tractography to white matter (ACT-style)
+    terminate_at_gm: false           # Stop streamlines when entering gray matter
+    wm_source: auto                  # 'freesurfer' (aparc+aseg WM), 'fsl' (FAST pve_2), or 'auto'
+
+  # FreeSurfer-enhanced tractography (requires freesurfer.enabled: true)
+  freesurfer_options:
+    use_gmwmi_seeding: false         # Seed from gray-white matter interface (more anatomically precise)
+    gmwmi_method: surface            # 'surface' (lh/rh.white) or 'volume' (aparc+aseg boundary)
+    use_subcortical_waypoints: false # Use thalamus/basal ganglia as waypoint constraints
+    subcortical_structures:          # Structures to use as waypoints (FreeSurfer label names)
+      - Left-Thalamus
+      - Right-Thalamus
+
+  # Atlas settings
+  atlas:
+    default: schaefer_200            # Default atlas for connectivity
+    available:                       # Additional atlases to compute
+      - schaefer_100
+      - schaefer_200
+      - schaefer_400
+      - desikan_killiany             # Requires FreeSurfer
+
+  # Output settings
+  output:
+    normalize: true                  # Normalize by waytotal
+    threshold: null                  # Optional threshold for weak connections (0-1)
+    compute_graph_metrics: true      # Compute graph-theoretic network measures
+    save_streamlines: false          # Save full streamline data (large files)
+
+  run_qc: true

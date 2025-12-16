@@ -870,6 +870,114 @@ print(f"Transitivity: {global_metrics['transitivity']:.4f}")
 
 ---
 
+### Structural Connectivity
+
+Compute tractography-based structural connectivity matrices from diffusion MRI data using FSL's probtrackx2.
+
+**Pipeline**:
+1. BEDPOSTX fiber orientation modeling (GPU-accelerated)
+2. Atlas transformation to DWI native space
+3. Probabilistic tractography with anatomical constraints
+4. Connectivity matrix construction
+5. Graph metrics computation
+
+**Key Features**:
+- **GPU Acceleration**: probtrackx2_gpu for 5-10x speedup
+- **Anatomical Constraints**: Ventricle avoidance, white matter masks
+- **FreeSurfer Integration**: GMWMI seeding, ACT-style constraints
+- **Multiple Atlases**: Schaefer, Desikan-Killiany, JHU
+
+**CLI Usage**:
+```bash
+# Basic structural connectivity
+uv run python -m neurovrai.connectome.run_structural_connectivity \
+    --subject sub-001 \
+    --derivatives-dir /data/derivatives \
+    --atlas schaefer_200 \
+    --config config.yaml \
+    --output-dir /data/connectome/structural
+
+# With FreeSurfer atlas
+uv run python -m neurovrai.connectome.run_structural_connectivity \
+    --subject sub-001 \
+    --derivatives-dir /data/derivatives \
+    --atlas desikan_killiany \
+    --fs-subjects-dir /data/freesurfer \
+    --config config.yaml \
+    --output-dir /data/connectome/structural
+
+# Batch processing
+uv run python -m neurovrai.connectome.batch_structural_connectivity \
+    --study-root /data \
+    --atlases schaefer_200 schaefer_400 \
+    --config config.yaml \
+    --output-dir /data/connectome/structural
+```
+
+**Python API**:
+```python
+from neurovrai.connectome.structural_connectivity import compute_structural_connectivity
+from pathlib import Path
+
+sc_results = compute_structural_connectivity(
+    bedpostx_dir=Path('dwi.bedpostX'),
+    atlas_file=Path('schaefer_200_dwi.nii.gz'),
+    output_dir=Path('sc_output'),
+    n_samples=5000,
+    avoid_ventricles=True,
+    config=config  # Uses tractography settings from config.yaml
+)
+
+# Access results
+sc_matrix = sc_results['connectivity_matrix']
+roi_names = sc_results['roi_names']
+```
+
+**Configuration Options**:
+```yaml
+structural_connectivity:
+  tractography:
+    use_gpu: true              # Use probtrackx2_gpu (5-10x faster)
+    n_samples: 5000            # Samples per seed voxel
+    step_length: 0.5           # Step length in mm
+    curvature_threshold: 0.2   # Curvature threshold (0-1)
+    loop_check: true           # Discard looping streamlines
+
+  anatomical_constraints:
+    avoid_ventricles: true     # Exclude CSF from tractography
+    use_wm_mask: true          # Constrain to white matter
+    terminate_at_gm: false     # Stop at gray matter
+    wm_source: auto            # 'freesurfer', 'fsl', or 'auto'
+
+  freesurfer_options:
+    use_gmwmi_seeding: true    # Seed from gray-white interface
+    gmwmi_method: surface      # 'surface' or 'volume'
+    use_subcortical_waypoints: false
+
+  atlas:
+    default: schaefer_200
+    available:
+      - schaefer_100
+      - schaefer_200
+      - schaefer_400
+      - desikan_killiany       # Requires FreeSurfer
+```
+
+**Outputs**:
+```
+connectome/structural/{subject}/
+├── sc_matrix.npy                # Connectivity matrix (NumPy)
+├── sc_matrix.csv                # Connectivity matrix (CSV)
+├── sc_roi_names.txt             # ROI labels
+├── sc_summary.json              # Summary statistics
+├── graph_metrics.json           # Network topology metrics
+├── analysis_metadata.json       # Processing metadata
+└── probtrackx_output/           # Raw tractography outputs
+    └── waytotal                 # Normalization factors
+```
+
+---
+
 ### Network-Based Statistic
 
 Permutation-based network-level inference for group comparisons.

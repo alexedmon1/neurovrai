@@ -62,12 +62,154 @@ class StructuralConnectivityError(Exception):
     pass
 
 
-def check_fsl_installation() -> Tuple[bool, bool]:
+# FreeSurfer ventricle labels (aparc+aseg)
+VENTRICLE_LABELS = [
+    4,   # Left-Lateral-Ventricle
+    5,   # Left-Inf-Lat-Vent
+    14,  # 3rd-Ventricle
+    15,  # 4th-Ventricle
+    43,  # Right-Lateral-Ventricle
+    44,  # Right-Inf-Lat-Vent
+    72,  # 5th-Ventricle (if present)
+]
+
+
+def create_ventricle_mask(
+    source: Path,
+    output_file: Path,
+    source_type: str = 'auto',
+    reference: Optional[Path] = None
+) -> Path:
+    """
+    Create a ventricle exclusion mask for tractography
+
+    Args:
+        source: Either FreeSurfer aparc+aseg or CSF probability map
+        output_file: Output mask file path
+        source_type: 'freesurfer', 'csf_pve', or 'auto' (detect from file)
+        reference: Reference image for resampling (e.g., DWI)
+
+    Returns:
+        Path to ventricle mask
+    """
+    source = Path(source)
+    output_file = Path(output_file)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if not source.exists():
+        raise StructuralConnectivityError(f"Source file not found: {source}")
+
+    # Load source image
+    src_img = nib.load(source)
+    src_data = src_img.get_fdata()
+
+    # Auto-detect source type
+    if source_type == 'auto':
+        unique_vals = np.unique(src_data[src_data > 0])
+        if len(unique_vals) > 50:  # Likely segmentation with many labels
+            source_type = 'freesurfer'
+        elif np.max(src_data) <= 1.0:  # Probability map
+            source_type = 'csf_pve'
+        else:
+            source_type = 'freesurfer'
+
+    logger.info(f"Creating ventricle mask from {source_type} source")
+
+    if source_type == 'freesurfer':
+        # Extract ventricle labels from aparc+aseg
+        mask_data = np.zeros_like(src_data, dtype=np.uint8)
+        for label in VENTRICLE_LABELS:
+            mask_data[src_data == label] = 1
+
+        n_voxels = np.sum(mask_data)
+        logger.info(f"  Ventricle mask: {n_voxels} voxels from {len(VENTRICLE_LABELS)} labels")
+
+    elif source_type == 'csf_pve':
+        # Threshold CSF probability map
+        mask_data = (src_data > 0.5).astype(np.uint8)
+        n_voxels = np.sum(mask_data)
+        logger.info(f"  CSF mask: {n_voxels} voxels (threshold > 0.5)")
+
+    else:
+        raise StructuralConnectivityError(f"Unknown source type: {source_type}")
+
+    # Save mask
+    mask_img = nib.Nifti1Image(mask_data, src_img.affine, src_img.header)
+    nib.save(mask_img, output_file)
+
+    # Resample to reference if provided
+    if reference is not None:
+        reference = Path(reference)
+        if reference.exists():
+            resampled_file = output_file.parent / f"{output_file.stem}_resampled.nii.gz"
+
+            # Use FLIRT to resample (nearest neighbor for mask)
+            cmd = [
+                'flirt',
+                '-in', str(output_file),
+                '-ref', str(reference),
+                '-out', str(resampled_file),
+                '-applyxfm',
+                '-usesqform',
+                '-interp', 'nearestneighbour'
+            ]
+
+            try:
+                subprocess.run(cmd, check=True, capture_output=True)
+                logger.info(f"  Resampled to reference: {resampled_file.name}")
+                return resampled_file
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"  Resampling failed, using original: {e}")
+
+    return output_file
+
+
+def find_ventricle_mask_source(
+    subject: str,
+    derivatives_dir: Path,
+    fs_subjects_dir: Optional[Path] = None
+) -> Tuple[Optional[Path], str]:
+    """
+    Find best available source for ventricle mask
+
+    Priority:
+    1. FreeSurfer aparc+aseg (most accurate)
+    2. CSF segmentation from anatomical preprocessing
+
+    Args:
+        subject: Subject ID
+        derivatives_dir: Path to derivatives directory
+        fs_subjects_dir: FreeSurfer subjects directory
+
+    Returns:
+        Tuple of (source_path, source_type) or (None, None) if not found
+    """
+    # Try FreeSurfer aparc+aseg first
+    if fs_subjects_dir is not None:
+        aparc_aseg = fs_subjects_dir / subject / 'mri' / 'aparc+aseg.mgz'
+        if aparc_aseg.exists():
+            return aparc_aseg, 'freesurfer'
+
+    # Try CSF from anatomical preprocessing
+    csf_paths = [
+        derivatives_dir / subject / 'anat' / 'segmentation' / 'pve_0.nii.gz',
+        derivatives_dir / subject / 'anat' / 'tissue_pve_0.nii.gz',
+        derivatives_dir / subject / 'anat' / 'csf_pve.nii.gz',
+    ]
+
+    for csf_path in csf_paths:
+        if csf_path.exists():
+            return csf_path, 'csf_pve'
+
+    return None, None
+
+
+def check_fsl_installation() -> Tuple[bool, bool, bool]:
     """
     Check if FSL tools are available
 
     Returns:
-        Tuple of (bedpostx_available, probtrackx2_available)
+        Tuple of (bedpostx_available, probtrackx2_available, probtrackx2_gpu_available)
     """
     try:
         bedpostx_result = subprocess.run(
@@ -89,7 +231,552 @@ def check_fsl_installation() -> Tuple[bool, bool]:
     except Exception:
         probtrackx_available = False
 
-    return bedpostx_available, probtrackx_available
+    try:
+        probtrackx_gpu_result = subprocess.run(
+            ['which', 'probtrackx2_gpu'],
+            capture_output=True,
+            text=True
+        )
+        probtrackx_gpu_available = probtrackx_gpu_result.returncode == 0
+    except Exception:
+        probtrackx_gpu_available = False
+
+    return bedpostx_available, probtrackx_available, probtrackx_gpu_available
+
+
+# FreeSurfer white matter labels (for ACT-style WM constraint)
+WM_LABELS = [
+    2,    # Left-Cerebral-White-Matter
+    41,   # Right-Cerebral-White-Matter
+    77,   # WM-hypointensities
+    251,  # CC_Posterior
+    252,  # CC_Mid_Posterior
+    253,  # CC_Central
+    254,  # CC_Mid_Anterior
+    255,  # CC_Anterior
+]
+
+# FreeSurfer subcortical gray matter labels
+SUBCORTICAL_GM_LABELS = {
+    'Left-Thalamus': 10,
+    'Right-Thalamus': 49,
+    'Left-Caudate': 11,
+    'Right-Caudate': 50,
+    'Left-Putamen': 12,
+    'Right-Putamen': 51,
+    'Left-Pallidum': 13,
+    'Right-Pallidum': 52,
+    'Left-Hippocampus': 17,
+    'Right-Hippocampus': 53,
+    'Left-Amygdala': 18,
+    'Right-Amygdala': 54,
+    'Left-Accumbens': 26,
+    'Right-Accumbens': 58,
+    'Brain-Stem': 16,
+}
+
+
+def create_wm_mask(
+    source: Path,
+    output_file: Path,
+    source_type: str = 'auto',
+    reference: Optional[Path] = None,
+    include_cc: bool = True
+) -> Path:
+    """
+    Create a white matter inclusion mask for ACT-style tractography
+
+    Args:
+        source: Either FreeSurfer aparc+aseg or WM probability map (pve_2)
+        output_file: Output mask file path
+        source_type: 'freesurfer', 'fsl_pve', or 'auto' (detect from file)
+        reference: Reference image for resampling (e.g., DWI)
+        include_cc: Include corpus callosum in WM mask (default: True)
+
+    Returns:
+        Path to white matter mask
+    """
+    source = Path(source)
+    output_file = Path(output_file)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if not source.exists():
+        raise StructuralConnectivityError(f"Source file not found: {source}")
+
+    src_img = nib.load(source)
+    src_data = src_img.get_fdata()
+
+    # Auto-detect source type
+    if source_type == 'auto':
+        unique_vals = np.unique(src_data[src_data > 0])
+        if len(unique_vals) > 50:
+            source_type = 'freesurfer'
+        elif np.max(src_data) <= 1.0:
+            source_type = 'fsl_pve'
+        else:
+            source_type = 'freesurfer'
+
+    logger.info(f"Creating WM mask from {source_type} source")
+
+    if source_type == 'freesurfer':
+        mask_data = np.zeros_like(src_data, dtype=np.uint8)
+
+        # Add cerebral white matter
+        for label in WM_LABELS[:2]:  # Left and Right WM
+            mask_data[src_data == label] = 1
+
+        # Optionally add corpus callosum
+        if include_cc:
+            for label in WM_LABELS[3:]:  # CC labels
+                mask_data[src_data == label] = 1
+
+        n_voxels = np.sum(mask_data)
+        logger.info(f"  WM mask: {n_voxels} voxels from FreeSurfer labels")
+
+    elif source_type == 'fsl_pve':
+        # Threshold WM probability map
+        mask_data = (src_data > 0.5).astype(np.uint8)
+        n_voxels = np.sum(mask_data)
+        logger.info(f"  WM mask: {n_voxels} voxels (threshold > 0.5)")
+
+    else:
+        raise StructuralConnectivityError(f"Unknown source type: {source_type}")
+
+    # Save mask
+    mask_img = nib.Nifti1Image(mask_data, src_img.affine, src_img.header)
+    nib.save(mask_img, output_file)
+
+    # Resample to reference if provided
+    if reference is not None:
+        reference = Path(reference)
+        if reference.exists():
+            resampled_file = output_file.parent / f"{output_file.stem}_resampled.nii.gz"
+            cmd = [
+                'flirt',
+                '-in', str(output_file),
+                '-ref', str(reference),
+                '-out', str(resampled_file),
+                '-applyxfm', '-usesqform',
+                '-interp', 'nearestneighbour'
+            ]
+            subprocess.run(cmd, check=True, capture_output=True)
+            logger.info(f"  Resampled to reference: {resampled_file}")
+            return resampled_file
+
+    return output_file
+
+
+def find_wm_mask_source(
+    subject: str,
+    derivatives_dir: Path,
+    fs_subjects_dir: Optional[Path] = None,
+    prefer_freesurfer: bool = True
+) -> Tuple[Optional[Path], str]:
+    """
+    Find best available source for white matter mask
+
+    Args:
+        subject: Subject ID
+        derivatives_dir: Path to derivatives directory
+        fs_subjects_dir: Optional FreeSurfer subjects directory
+        prefer_freesurfer: Prefer FreeSurfer if available (default: True)
+
+    Returns:
+        Tuple of (source_path, source_type) or (None, None) if not found
+    """
+    derivatives_dir = Path(derivatives_dir)
+
+    # FreeSurfer sources (preferred for precise boundaries)
+    if prefer_freesurfer and fs_subjects_dir is not None:
+        fs_subjects_dir = Path(fs_subjects_dir)
+        aparc_paths = [
+            fs_subjects_dir / subject / 'mri' / 'aparc+aseg.mgz',
+            fs_subjects_dir / subject / 'mri' / 'aparc+aseg.nii.gz',
+        ]
+        for aparc_path in aparc_paths:
+            if aparc_path.exists():
+                return aparc_path, 'freesurfer'
+
+    # FSL FAST WM probability map
+    wm_paths = [
+        derivatives_dir / subject / 'anat' / 'segmentation' / 'pve_2.nii.gz',
+        derivatives_dir / subject / 'anat' / 'tissue_pve_2.nii.gz',
+        derivatives_dir / subject / 'anat' / 'wm_pve.nii.gz',
+    ]
+
+    for wm_path in wm_paths:
+        if wm_path.exists():
+            return wm_path, 'fsl_pve'
+
+    return None, None
+
+
+def create_gmwmi_mask(
+    fs_subject_dir: Path,
+    output_file: Path,
+    method: str = 'volume',
+    reference: Optional[Path] = None
+) -> Path:
+    """
+    Create gray-white matter interface (GMWMI) mask for seeding tractography
+
+    The GMWMI is the boundary between cortical gray matter and white matter,
+    providing anatomically precise seed locations for cortical connectivity.
+
+    Args:
+        fs_subject_dir: FreeSurfer subject directory
+        output_file: Output mask file path
+        method: 'volume' (from aparc+aseg) or 'surface' (from lh/rh.white)
+        reference: Reference image for resampling (e.g., DWI)
+
+    Returns:
+        Path to GMWMI mask
+    """
+    fs_subject_dir = Path(fs_subject_dir)
+    output_file = Path(output_file)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if method == 'volume':
+        # Create GMWMI from aparc+aseg (boundary detection)
+        aparc_file = fs_subject_dir / 'mri' / 'aparc+aseg.mgz'
+        if not aparc_file.exists():
+            aparc_file = fs_subject_dir / 'mri' / 'aparc+aseg.nii.gz'
+
+        if not aparc_file.exists():
+            raise StructuralConnectivityError(f"aparc+aseg not found in {fs_subject_dir}")
+
+        logger.info(f"Creating GMWMI mask from aparc+aseg (volume method)")
+
+        # Load aparc+aseg
+        aparc_img = nib.load(aparc_file)
+        aparc_data = aparc_img.get_fdata().astype(int)
+
+        # Create WM mask (labels 2 and 41)
+        wm_mask = np.isin(aparc_data, [2, 41])
+
+        # Create cortical GM mask (labels 1000-2035 for aparc)
+        # These are the cortical parcellation labels
+        gm_mask = (aparc_data >= 1000) & (aparc_data <= 2035)
+
+        # Also include subcortical GM for subcortical connectivity
+        subcortical_labels = list(SUBCORTICAL_GM_LABELS.values())
+        subcortical_mask = np.isin(aparc_data, subcortical_labels)
+        gm_mask = gm_mask | subcortical_mask
+
+        # Find boundary: GM voxels adjacent to WM voxels
+        from scipy import ndimage
+
+        # Dilate WM mask by 1 voxel
+        wm_dilated = ndimage.binary_dilation(wm_mask, iterations=1)
+
+        # GMWMI = GM voxels that are in dilated WM region
+        gmwmi_data = (gm_mask & wm_dilated).astype(np.uint8)
+
+        n_voxels = np.sum(gmwmi_data)
+        logger.info(f"  GMWMI mask: {n_voxels} voxels at GM-WM boundary")
+
+        # Save mask
+        gmwmi_img = nib.Nifti1Image(gmwmi_data, aparc_img.affine, aparc_img.header)
+        nib.save(gmwmi_img, output_file)
+
+    elif method == 'surface':
+        # Create GMWMI from FreeSurfer surfaces
+        # This requires mri_surf2vol from FreeSurfer
+        logger.info(f"Creating GMWMI mask from surfaces (surface method)")
+
+        lh_white = fs_subject_dir / 'surf' / 'lh.white'
+        rh_white = fs_subject_dir / 'surf' / 'rh.white'
+        orig_mgz = fs_subject_dir / 'mri' / 'orig.mgz'
+
+        if not all(p.exists() for p in [lh_white, rh_white, orig_mgz]):
+            raise StructuralConnectivityError(
+                f"FreeSurfer surface files not found in {fs_subject_dir}"
+            )
+
+        # Create temporary volume for each hemisphere
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lh_vol = Path(tmpdir) / 'lh_white.nii.gz'
+            rh_vol = Path(tmpdir) / 'rh_white.nii.gz'
+
+            # Convert left hemisphere surface to volume
+            cmd_lh = [
+                'mri_surf2vol',
+                '--hemi', 'lh',
+                '--surf', 'white',
+                '--o', str(lh_vol),
+                '--template', str(orig_mgz),
+                '--sd', str(fs_subject_dir.parent),
+                '--identity', fs_subject_dir.name
+            ]
+
+            # Convert right hemisphere surface to volume
+            cmd_rh = [
+                'mri_surf2vol',
+                '--hemi', 'rh',
+                '--surf', 'white',
+                '--o', str(rh_vol),
+                '--template', str(orig_mgz),
+                '--sd', str(fs_subject_dir.parent),
+                '--identity', fs_subject_dir.name
+            ]
+
+            try:
+                subprocess.run(cmd_lh, check=True, capture_output=True)
+                subprocess.run(cmd_rh, check=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"mri_surf2vol failed, falling back to volume method: {e}")
+                return create_gmwmi_mask(fs_subject_dir, output_file, method='volume', reference=reference)
+
+            # Combine hemispheres
+            lh_img = nib.load(lh_vol)
+            rh_img = nib.load(rh_vol)
+
+            gmwmi_data = ((lh_img.get_fdata() > 0) | (rh_img.get_fdata() > 0)).astype(np.uint8)
+
+            n_voxels = np.sum(gmwmi_data)
+            logger.info(f"  GMWMI mask: {n_voxels} voxels from surfaces")
+
+            gmwmi_img = nib.Nifti1Image(gmwmi_data, lh_img.affine, lh_img.header)
+            nib.save(gmwmi_img, output_file)
+
+    else:
+        raise StructuralConnectivityError(f"Unknown GMWMI method: {method}")
+
+    # Resample to reference if provided
+    if reference is not None:
+        reference = Path(reference)
+        if reference.exists():
+            resampled_file = output_file.parent / f"{output_file.stem}_resampled.nii.gz"
+            cmd = [
+                'flirt',
+                '-in', str(output_file),
+                '-ref', str(reference),
+                '-out', str(resampled_file),
+                '-applyxfm', '-usesqform',
+                '-interp', 'nearestneighbour'
+            ]
+            subprocess.run(cmd, check=True, capture_output=True)
+            logger.info(f"  Resampled to reference: {resampled_file}")
+            return resampled_file
+
+    return output_file
+
+
+def create_gm_termination_mask(
+    source: Path,
+    output_file: Path,
+    source_type: str = 'auto',
+    reference: Optional[Path] = None
+) -> Path:
+    """
+    Create gray matter termination mask for ACT-style tractography
+
+    Streamlines terminate when entering gray matter, preventing
+    anatomically implausible paths through cortex.
+
+    Args:
+        source: Either FreeSurfer aparc+aseg or GM probability map (pve_1)
+        output_file: Output mask file path
+        source_type: 'freesurfer', 'fsl_pve', or 'auto'
+        reference: Reference image for resampling
+
+    Returns:
+        Path to GM termination mask
+    """
+    source = Path(source)
+    output_file = Path(output_file)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if not source.exists():
+        raise StructuralConnectivityError(f"Source file not found: {source}")
+
+    src_img = nib.load(source)
+    src_data = src_img.get_fdata()
+
+    # Auto-detect source type
+    if source_type == 'auto':
+        unique_vals = np.unique(src_data[src_data > 0])
+        if len(unique_vals) > 50:
+            source_type = 'freesurfer'
+        elif np.max(src_data) <= 1.0:
+            source_type = 'fsl_pve'
+        else:
+            source_type = 'freesurfer'
+
+    logger.info(f"Creating GM termination mask from {source_type} source")
+
+    if source_type == 'freesurfer':
+        mask_data = np.zeros_like(src_data, dtype=np.uint8)
+
+        # Cortical GM (aparc labels 1000-2035)
+        cortical_gm = (src_data >= 1000) & (src_data <= 2035)
+        mask_data[cortical_gm] = 1
+
+        # Subcortical GM
+        for label in SUBCORTICAL_GM_LABELS.values():
+            mask_data[src_data == label] = 1
+
+        n_voxels = np.sum(mask_data)
+        logger.info(f"  GM mask: {n_voxels} voxels from FreeSurfer labels")
+
+    elif source_type == 'fsl_pve':
+        mask_data = (src_data > 0.5).astype(np.uint8)
+        n_voxels = np.sum(mask_data)
+        logger.info(f"  GM mask: {n_voxels} voxels (threshold > 0.5)")
+
+    else:
+        raise StructuralConnectivityError(f"Unknown source type: {source_type}")
+
+    mask_img = nib.Nifti1Image(mask_data, src_img.affine, src_img.header)
+    nib.save(mask_img, output_file)
+
+    if reference is not None:
+        reference = Path(reference)
+        if reference.exists():
+            resampled_file = output_file.parent / f"{output_file.stem}_resampled.nii.gz"
+            cmd = [
+                'flirt',
+                '-in', str(output_file),
+                '-ref', str(reference),
+                '-out', str(resampled_file),
+                '-applyxfm', '-usesqform',
+                '-interp', 'nearestneighbour'
+            ]
+            subprocess.run(cmd, check=True, capture_output=True)
+            return resampled_file
+
+    return output_file
+
+
+def create_subcortical_waypoint_mask(
+    fs_subject_dir: Path,
+    output_file: Path,
+    structures: Optional[List[str]] = None,
+    reference: Optional[Path] = None
+) -> Path:
+    """
+    Create subcortical waypoint mask from FreeSurfer parcellation
+
+    Useful for ensuring connectivity passes through key relay structures
+    like the thalamus.
+
+    Args:
+        fs_subject_dir: FreeSurfer subject directory
+        output_file: Output mask file path
+        structures: List of structure names (default: bilateral thalamus)
+        reference: Reference image for resampling
+
+    Returns:
+        Path to subcortical waypoint mask
+    """
+    fs_subject_dir = Path(fs_subject_dir)
+    output_file = Path(output_file)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if structures is None:
+        structures = ['Left-Thalamus', 'Right-Thalamus']
+
+    # Get labels for requested structures
+    labels = []
+    for struct in structures:
+        if struct in SUBCORTICAL_GM_LABELS:
+            labels.append(SUBCORTICAL_GM_LABELS[struct])
+        else:
+            logger.warning(f"Unknown subcortical structure: {struct}")
+
+    if not labels:
+        raise StructuralConnectivityError("No valid subcortical structures specified")
+
+    # Load aparc+aseg
+    aparc_file = fs_subject_dir / 'mri' / 'aparc+aseg.mgz'
+    if not aparc_file.exists():
+        aparc_file = fs_subject_dir / 'mri' / 'aparc+aseg.nii.gz'
+
+    if not aparc_file.exists():
+        raise StructuralConnectivityError(f"aparc+aseg not found in {fs_subject_dir}")
+
+    logger.info(f"Creating subcortical waypoint mask for: {structures}")
+
+    aparc_img = nib.load(aparc_file)
+    aparc_data = aparc_img.get_fdata().astype(int)
+
+    mask_data = np.isin(aparc_data, labels).astype(np.uint8)
+
+    n_voxels = np.sum(mask_data)
+    logger.info(f"  Subcortical mask: {n_voxels} voxels")
+
+    mask_img = nib.Nifti1Image(mask_data, aparc_img.affine, aparc_img.header)
+    nib.save(mask_img, output_file)
+
+    if reference is not None:
+        reference = Path(reference)
+        if reference.exists():
+            resampled_file = output_file.parent / f"{output_file.stem}_resampled.nii.gz"
+            cmd = [
+                'flirt',
+                '-in', str(output_file),
+                '-ref', str(reference),
+                '-out', str(resampled_file),
+                '-applyxfm', '-usesqform',
+                '-interp', 'nearestneighbour'
+            ]
+            subprocess.run(cmd, check=True, capture_output=True)
+            return resampled_file
+
+    return output_file
+
+
+def get_tractography_config(config: Optional[Dict] = None) -> Dict:
+    """
+    Get tractography configuration with defaults
+
+    Args:
+        config: Optional config dictionary (from YAML)
+
+    Returns:
+        Dictionary with all tractography settings
+    """
+    defaults = {
+        'tractography': {
+            'use_gpu': True,
+            'n_samples': 5000,
+            'step_length': 0.5,
+            'curvature_threshold': 0.2,
+            'loop_check': True,
+        },
+        'anatomical_constraints': {
+            'avoid_ventricles': True,
+            'use_wm_mask': True,
+            'terminate_at_gm': False,
+            'wm_source': 'auto',
+        },
+        'freesurfer_options': {
+            'use_gmwmi_seeding': False,
+            'gmwmi_method': 'volume',
+            'use_subcortical_waypoints': False,
+            'subcortical_structures': ['Left-Thalamus', 'Right-Thalamus'],
+        },
+        'output': {
+            'normalize': True,
+            'threshold': None,
+            'compute_graph_metrics': True,
+        }
+    }
+
+    if config is None:
+        return defaults
+
+    # Get structural_connectivity section from config
+    sc_config = config.get('structural_connectivity', {})
+
+    # Merge with defaults
+    result = defaults.copy()
+    for section in ['tractography', 'anatomical_constraints', 'freesurfer_options', 'output']:
+        if section in sc_config:
+            result[section].update(sc_config[section])
+
+    return result
 
 
 def validate_bedpostx_inputs(
@@ -434,7 +1121,8 @@ def run_probtrackx2_network(
     distance_correct: bool = True,
     waypoint_mask: Optional[Path] = None,
     exclusion_mask: Optional[Path] = None,
-    termination_mask: Optional[Path] = None
+    termination_mask: Optional[Path] = None,
+    use_gpu: bool = True
 ) -> Dict[str, Path]:
     """
     Run probtrackx2 in network mode for ROI-to-ROI tractography
@@ -451,6 +1139,7 @@ def run_probtrackx2_network(
         waypoint_mask: Optional waypoint mask (e.g., white matter)
         exclusion_mask: Optional exclusion mask (e.g., CSF)
         termination_mask: Optional termination mask (e.g., grey matter)
+        use_gpu: Use probtrackx2_gpu if available (default: True)
 
     Returns:
         Dictionary with paths to output files
@@ -461,13 +1150,23 @@ def run_probtrackx2_network(
     Note:
         Network mode runs tractography from each seed ROI to all target ROIs,
         creating an NxN connectivity matrix. This can take several hours for
-        large atlases (e.g., Schaefer 400 parcellation).
+        large atlases (e.g., Schaefer 400 parcellation). GPU version is
+        significantly faster (10-100x speedup).
     """
-    _, probtrackx_available = check_fsl_installation()
+    _, probtrackx_available, probtrackx_gpu_available = check_fsl_installation()
     if not probtrackx_available:
         raise StructuralConnectivityError(
             "probtrackx2 not found. Ensure FSL is installed and $FSLDIR is set."
         )
+
+    # Determine which executable to use
+    if use_gpu and probtrackx_gpu_available:
+        probtrackx_cmd = 'probtrackx2_gpu'
+        logger.info("Using GPU-accelerated probtrackx2_gpu")
+    else:
+        probtrackx_cmd = 'probtrackx2'
+        if use_gpu and not probtrackx_gpu_available:
+            logger.warning("GPU requested but probtrackx2_gpu not available, falling back to CPU")
 
     bedpostx_dir = Path(bedpostx_dir)
     seeds_list = Path(seeds_list)
@@ -486,17 +1185,18 @@ def run_probtrackx2_network(
         n_rois = len([line for line in f if line.strip()])
 
     logger.info("=" * 80)
-    logger.info("Running Probtrackx2 (Network Mode)")
+    logger.info(f"Running {probtrackx_cmd} (Network Mode)")
     logger.info("=" * 80)
     logger.info(f"BEDPOSTX directory: {bedpostx_dir}")
     logger.info(f"Seeds list: {seeds_list}")
     logger.info(f"Number of ROIs: {n_rois}")
     logger.info(f"Samples per voxel: {n_samples}")
     logger.info(f"Output directory: {output_dir}")
+    logger.info(f"GPU acceleration: {use_gpu and probtrackx_gpu_available}")
 
     # Build probtrackx2 command
     cmd = [
-        'probtrackx2',
+        probtrackx_cmd,
         '--samples', str(bedpostx_outputs['merged']),
         '--mask', str(bedpostx_outputs['nodif_brain_mask']),
         '--seed', str(seeds_list),
@@ -692,13 +1392,26 @@ def compute_structural_connectivity(
     threshold: Optional[float] = None,
     min_voxels_per_roi: int = 10,
     waypoint_mask: Optional[Path] = None,
-    exclusion_mask: Optional[Path] = None
+    exclusion_mask: Optional[Path] = None,
+    avoid_ventricles: bool = True,
+    ventricle_mask: Optional[Path] = None,
+    subject: Optional[str] = None,
+    derivatives_dir: Optional[Path] = None,
+    fs_subjects_dir: Optional[Path] = None,
+    use_gpu: bool = True,
+    use_wm_mask: bool = True,
+    wm_mask: Optional[Path] = None,
+    terminate_at_gm: bool = False,
+    gm_mask: Optional[Path] = None,
+    use_gmwmi_seeding: bool = False,
+    gmwmi_method: str = 'volume',
+    config: Optional[Dict] = None
 ) -> Dict:
     """
     Complete workflow: Compute structural connectivity matrix using probtrackx2
 
     This is the main function that orchestrates the full structural connectivity
-    analysis pipeline.
+    analysis pipeline with support for anatomical constraints and GPU acceleration.
 
     Args:
         bedpostx_dir: Path to BEDPOSTX output directory
@@ -711,7 +1424,20 @@ def compute_structural_connectivity(
         threshold: Optional threshold for weak connections (default: None)
         min_voxels_per_roi: Minimum voxels per ROI (default: 10)
         waypoint_mask: Optional waypoint mask (e.g., white matter)
-        exclusion_mask: Optional exclusion mask (e.g., CSF)
+        exclusion_mask: Optional exclusion mask (e.g., CSF) - overrides ventricle mask
+        avoid_ventricles: Exclude streamlines through ventricles (default: True)
+        ventricle_mask: Pre-computed ventricle mask (auto-generated if None)
+        subject: Subject ID (for auto-finding ventricle source)
+        derivatives_dir: Derivatives directory (for auto-finding ventricle source)
+        fs_subjects_dir: FreeSurfer subjects directory (for masks from aparc+aseg)
+        use_gpu: Use probtrackx2_gpu if available (default: True)
+        use_wm_mask: Constrain tractography to white matter - ACT style (default: True)
+        wm_mask: Pre-computed WM mask (auto-generated if None)
+        terminate_at_gm: Stop streamlines when entering gray matter (default: False)
+        gm_mask: Pre-computed GM mask for termination (auto-generated if None)
+        use_gmwmi_seeding: Seed from gray-white matter interface (default: False)
+        gmwmi_method: GMWMI creation method - 'volume' or 'surface' (default: 'volume')
+        config: Optional config dictionary to override all settings
 
     Returns:
         Dictionary containing:
@@ -724,8 +1450,24 @@ def compute_structural_connectivity(
     Raises:
         StructuralConnectivityError: If any step fails
     """
+    # Apply config settings if provided
+    if config is not None:
+        sc_config = get_tractography_config(config)
+        # Override parameters from config
+        use_gpu = sc_config['tractography'].get('use_gpu', use_gpu)
+        n_samples = sc_config['tractography'].get('n_samples', n_samples)
+        step_length = sc_config['tractography'].get('step_length', step_length)
+        curvature_threshold = sc_config['tractography'].get('curvature_threshold', curvature_threshold)
+        avoid_ventricles = sc_config['anatomical_constraints'].get('avoid_ventricles', avoid_ventricles)
+        use_wm_mask = sc_config['anatomical_constraints'].get('use_wm_mask', use_wm_mask)
+        terminate_at_gm = sc_config['anatomical_constraints'].get('terminate_at_gm', terminate_at_gm)
+        use_gmwmi_seeding = sc_config['freesurfer_options'].get('use_gmwmi_seeding', use_gmwmi_seeding)
+        gmwmi_method = sc_config['freesurfer_options'].get('gmwmi_method', gmwmi_method)
+        normalize = sc_config['output'].get('normalize', normalize)
+        threshold = sc_config['output'].get('threshold', threshold)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    bedpostx_dir = Path(bedpostx_dir)
 
     logger.info("=" * 80)
     logger.info("STRUCTURAL CONNECTIVITY ANALYSIS")
@@ -733,11 +1475,179 @@ def compute_structural_connectivity(
     logger.info(f"BEDPOSTX directory: {bedpostx_dir}")
     logger.info(f"Atlas: {atlas_file}")
     logger.info(f"Output: {output_dir}")
+    logger.info(f"Avoid ventricles: {avoid_ventricles}")
 
     # Step 1: Validate BEDPOSTX outputs
     logger.info("\n[Step 1] Validating BEDPOSTX outputs...")
     bedpostx_outputs = validate_bedpostx_outputs(bedpostx_dir)
     logger.info("✓ BEDPOSTX outputs validated")
+
+    # Step 1b: Prepare ventricle exclusion mask if requested
+    final_exclusion_mask = exclusion_mask
+    ventricle_mask_used = None
+
+    if avoid_ventricles and exclusion_mask is None:
+        logger.info("\n[Step 1b] Preparing ventricle exclusion mask...")
+
+        # Get reference image (brain mask from BEDPOSTX)
+        dwi_reference = bedpostx_dir / 'nodif_brain_mask.nii.gz'
+
+        if ventricle_mask is not None:
+            # Use provided ventricle mask
+            ventricle_mask = Path(ventricle_mask)
+            if ventricle_mask.exists():
+                final_exclusion_mask = ventricle_mask
+                ventricle_mask_used = str(ventricle_mask)
+                logger.info(f"  Using provided ventricle mask: {ventricle_mask.name}")
+            else:
+                logger.warning(f"  Provided ventricle mask not found: {ventricle_mask}")
+
+        if final_exclusion_mask is None and subject is not None and derivatives_dir is not None:
+            # Try to auto-find ventricle source
+            source_path, source_type = find_ventricle_mask_source(
+                subject=subject,
+                derivatives_dir=Path(derivatives_dir),
+                fs_subjects_dir=Path(fs_subjects_dir) if fs_subjects_dir else None
+            )
+
+            if source_path is not None:
+                # Create ventricle mask in output directory
+                ventricle_output = output_dir / 'ventricle_mask.nii.gz'
+                final_exclusion_mask = create_ventricle_mask(
+                    source=source_path,
+                    output_file=ventricle_output,
+                    source_type=source_type,
+                    reference=dwi_reference
+                )
+                ventricle_mask_used = str(final_exclusion_mask)
+                logger.info(f"  Created ventricle mask from {source_type}: {final_exclusion_mask.name}")
+            else:
+                logger.warning("  Could not find source for ventricle mask")
+                logger.warning("  Tractography will run WITHOUT ventricle exclusion")
+
+        if final_exclusion_mask is None and avoid_ventricles:
+            logger.warning("  No ventricle mask available - continuing without exclusion")
+
+    elif exclusion_mask is not None:
+        logger.info(f"  Using provided exclusion mask: {exclusion_mask}")
+
+    # Step 1c: Prepare white matter waypoint mask (ACT-style constraint)
+    final_waypoint_mask = waypoint_mask
+    wm_mask_used = None
+
+    if use_wm_mask and waypoint_mask is None:
+        logger.info("\n[Step 1c] Preparing white matter waypoint mask (ACT-style)...")
+
+        # Get reference image
+        dwi_reference = bedpostx_dir / 'nodif_brain_mask.nii.gz'
+
+        if wm_mask is not None:
+            wm_mask = Path(wm_mask)
+            if wm_mask.exists():
+                final_waypoint_mask = wm_mask
+                wm_mask_used = str(wm_mask)
+                logger.info(f"  Using provided WM mask: {wm_mask.name}")
+
+        if final_waypoint_mask is None and subject is not None and derivatives_dir is not None:
+            source_path, source_type = find_wm_mask_source(
+                subject=subject,
+                derivatives_dir=Path(derivatives_dir),
+                fs_subjects_dir=Path(fs_subjects_dir) if fs_subjects_dir else None
+            )
+
+            if source_path is not None:
+                wm_output = output_dir / 'wm_mask.nii.gz'
+                final_waypoint_mask = create_wm_mask(
+                    source=source_path,
+                    output_file=wm_output,
+                    source_type=source_type,
+                    reference=dwi_reference
+                )
+                wm_mask_used = str(final_waypoint_mask)
+                logger.info(f"  Created WM mask from {source_type}: {final_waypoint_mask.name}")
+            else:
+                logger.warning("  Could not find source for WM mask")
+                logger.warning("  Tractography will run WITHOUT WM constraint")
+
+    # Step 1d: Prepare gray matter termination mask
+    final_termination_mask = None
+    gm_mask_used = None
+
+    if terminate_at_gm:
+        logger.info("\n[Step 1d] Preparing gray matter termination mask...")
+
+        dwi_reference = bedpostx_dir / 'nodif_brain_mask.nii.gz'
+
+        if gm_mask is not None:
+            gm_mask = Path(gm_mask)
+            if gm_mask.exists():
+                final_termination_mask = gm_mask
+                gm_mask_used = str(gm_mask)
+                logger.info(f"  Using provided GM mask: {gm_mask.name}")
+
+        if final_termination_mask is None and subject is not None and derivatives_dir is not None:
+            # Try FreeSurfer first, then FSL
+            if fs_subjects_dir is not None:
+                aparc_path = Path(fs_subjects_dir) / subject / 'mri' / 'aparc+aseg.mgz'
+                if aparc_path.exists():
+                    gm_output = output_dir / 'gm_termination_mask.nii.gz'
+                    final_termination_mask = create_gm_termination_mask(
+                        source=aparc_path,
+                        output_file=gm_output,
+                        source_type='freesurfer',
+                        reference=dwi_reference
+                    )
+                    gm_mask_used = str(final_termination_mask)
+
+            if final_termination_mask is None:
+                # Try FSL GM probability map
+                gm_paths = [
+                    Path(derivatives_dir) / subject / 'anat' / 'segmentation' / 'pve_1.nii.gz',
+                    Path(derivatives_dir) / subject / 'anat' / 'tissue_pve_1.nii.gz',
+                ]
+                for gm_path in gm_paths:
+                    if gm_path.exists():
+                        gm_output = output_dir / 'gm_termination_mask.nii.gz'
+                        final_termination_mask = create_gm_termination_mask(
+                            source=gm_path,
+                            output_file=gm_output,
+                            source_type='fsl_pve',
+                            reference=dwi_reference
+                        )
+                        gm_mask_used = str(final_termination_mask)
+                        break
+
+        if final_termination_mask is not None:
+            logger.info(f"  GM termination mask: {final_termination_mask}")
+        else:
+            logger.warning("  Could not create GM termination mask")
+
+    # Step 1e: Prepare GMWMI seeding mask (optional - for FreeSurfer-enhanced tractography)
+    gmwmi_mask_used = None
+
+    if use_gmwmi_seeding and fs_subjects_dir is not None and subject is not None:
+        logger.info("\n[Step 1e] Preparing GMWMI seeding mask...")
+
+        fs_subject_path = Path(fs_subjects_dir) / subject
+        dwi_reference = bedpostx_dir / 'nodif_brain_mask.nii.gz'
+
+        if fs_subject_path.exists():
+            gmwmi_output = output_dir / 'gmwmi_seed_mask.nii.gz'
+            try:
+                gmwmi_mask = create_gmwmi_mask(
+                    fs_subject_dir=fs_subject_path,
+                    output_file=gmwmi_output,
+                    method=gmwmi_method,
+                    reference=dwi_reference
+                )
+                gmwmi_mask_used = str(gmwmi_mask)
+                logger.info(f"  GMWMI mask created: {gmwmi_mask.name}")
+                logger.info("  Note: GMWMI mask will be used to constrain seeding to GM-WM interface")
+            except Exception as e:
+                logger.warning(f"  Could not create GMWMI mask: {e}")
+                logger.warning("  Continuing with standard seeding")
+        else:
+            logger.warning(f"  FreeSurfer subject not found: {fs_subject_path}")
 
     # Step 2: Prepare atlas for probtrackx2
     logger.info("\n[Step 2] Preparing atlas for probtrackx2...")
@@ -751,6 +1661,14 @@ def compute_structural_connectivity(
 
     # Step 3: Run probtrackx2 in network mode
     logger.info("\n[Step 3] Running probtrackx2 network mode...")
+    logger.info(f"  GPU acceleration: {use_gpu}")
+    if final_exclusion_mask:
+        logger.info(f"  Exclusion mask: {final_exclusion_mask}")
+    if final_waypoint_mask:
+        logger.info(f"  Waypoint mask (WM): {final_waypoint_mask}")
+    if final_termination_mask:
+        logger.info(f"  Termination mask (GM): {final_termination_mask}")
+
     probtrackx_dir = output_dir / 'probtrackx_output'
     probtrackx_outputs = run_probtrackx2_network(
         bedpostx_dir=bedpostx_dir,
@@ -759,8 +1677,10 @@ def compute_structural_connectivity(
         n_samples=n_samples,
         step_length=step_length,
         curvature_threshold=curvature_threshold,
-        waypoint_mask=waypoint_mask,
-        exclusion_mask=exclusion_mask
+        waypoint_mask=final_waypoint_mask,
+        exclusion_mask=final_exclusion_mask,
+        termination_mask=final_termination_mask,
+        use_gpu=use_gpu
     )
     logger.info("✓ Probtrackx2 completed")
 
@@ -801,6 +1721,19 @@ def compute_structural_connectivity(
         'curvature_threshold': curvature_threshold,
         'normalized': normalize,
         'threshold': threshold,
+        'use_gpu': use_gpu,
+        'avoid_ventricles': avoid_ventricles,
+        'ventricle_mask': ventricle_mask_used,
+        'exclusion_mask': str(final_exclusion_mask) if final_exclusion_mask else None,
+        'use_wm_mask': use_wm_mask,
+        'wm_mask': wm_mask_used,
+        'waypoint_mask': str(final_waypoint_mask) if final_waypoint_mask else None,
+        'terminate_at_gm': terminate_at_gm,
+        'gm_mask': gm_mask_used,
+        'termination_mask': str(final_termination_mask) if final_termination_mask else None,
+        'use_gmwmi_seeding': use_gmwmi_seeding,
+        'gmwmi_method': gmwmi_method if use_gmwmi_seeding else None,
+        'gmwmi_mask': gmwmi_mask_used,
         'n_connections': int(np.sum(sc_results['connectivity_matrix'] > 0)),
         'connection_density': float(np.sum(sc_results['connectivity_matrix'] > 0) / (len(roi_names) * (len(roi_names) - 1))),
         'roi_names': roi_names

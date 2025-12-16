@@ -996,7 +996,7 @@ def run_func_preprocessing(
         wf_phase1 = create_multiecho_motion_correction_workflow(
             name='func_phase1_motion',
             config=config,
-            work_dir=work_dir.parent,  # Nipype adds workflow name subdirectory
+            work_dir=work_dir,  # Subject-specific work directory
             output_dir=derivatives_dir
         )
 
@@ -1014,7 +1014,7 @@ def run_func_preprocessing(
         logger.info("")
 
         # Find motion-corrected echoes in work directory
-        phase1_work_dir = work_dir.parent / 'func_phase1_motion'
+        phase1_work_dir = work_dir / 'func_phase1_motion'
         mcflirt_echo2_dir = phase1_work_dir / 'mcflirt_echo2'
         applyxfm_echo1_dir = phase1_work_dir / 'applyxfm_echo1'
         applyxfm_echo3_dir = phase1_work_dir / 'applyxfm_echo3'
@@ -1087,6 +1087,14 @@ def run_func_preprocessing(
                     results['func_to_t1w_transform'] = registration_results['func_to_t1w']
                     results['func_to_mni_transform'] = registration_results['func_to_mni']
                     results['func_warped_to_t1w'] = registration_results['func_warped_to_t1w']
+
+                    # Copy func_mean to registration directory for ACompCor (CRITICAL!)
+                    # ACompCor needs this file in derivatives/registration/ to transform tissue masks
+                    func_mean_dest = registration_dir / 'func_mean.nii.gz'
+                    if not func_mean_dest.exists():
+                        import shutil
+                        shutil.copy2(func_mean_file, func_mean_dest)
+                        logger.info(f"  Copied func_mean to: {func_mean_dest}")
 
                     logger.info("Registration pipeline completed successfully")
                     logger.info("")
@@ -1326,7 +1334,7 @@ def run_func_preprocessing(
     wf = create_func_preprocessing_workflow(
         name='func_preproc',
         config=config,
-        work_dir=work_dir.parent,  # Nipype adds workflow name subdirectory
+        work_dir=work_dir,  # Subject-specific work directory
         output_dir=derivatives_dir,
         is_multiecho=is_multiecho
     )
@@ -1656,7 +1664,7 @@ def run_func_preprocessing(
 
         # Check work directory for pre-computed mean
         if is_multiecho:
-            phase1_work_dir = work_dir.parent / 'func_phase1_motion'
+            phase1_work_dir = work_dir / 'func_phase1_motion'
             potential_mean = phase1_work_dir / 'mcflirt_echo2' / 'func_mean.nii.gz'
         else:
             potential_mean = work_dir / 'motion_correction' / 'func_mean.nii.gz'

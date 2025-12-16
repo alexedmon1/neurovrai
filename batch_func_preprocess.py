@@ -103,8 +103,7 @@ def preprocess_subject(subject: str, config_path: Path):
             cmd,
             check=True,
             capture_output=True,
-            text=True,
-            timeout=7200  # 2 hour timeout per subject
+            text=True
         )
 
         logger.info("STDOUT:")
@@ -117,11 +116,6 @@ def preprocess_subject(subject: str, config_path: Path):
         logger.info(f"✅ {subject} completed successfully")
         logger.info("")
         return True
-
-    except subprocess.TimeoutExpired:
-        logger.error(f"❌ {subject} timed out after 2 hours")
-        logger.error("")
-        return False
 
     except subprocess.CalledProcessError as e:
         logger.error(f"❌ {subject} failed with exit code {e.returncode}")

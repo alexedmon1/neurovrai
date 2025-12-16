@@ -6,29 +6,40 @@ Complete pipeline for computing structural connectivity matrices from diffusion 
 
 This script orchestrates:
 1. BEDPOSTX fiber orientation modeling (if not already complete)
-2. Atlas preparation for probtrackx2
-3. Probabilistic tractography (probtrackx2 network mode)
-4. Connectivity matrix construction
-5. Graph metrics computation (optional)
+2. Atlas transformation to DWI space (MNI, FreeSurfer, or FMRIB58 atlases)
+3. Atlas preparation for probtrackx2
+4. Probabilistic tractography (probtrackx2 network mode)
+5. Connectivity matrix construction
+6. Graph metrics computation (optional)
 
 Usage:
+    # Using standard atlas (automatically transformed to DWI space)
     python -m neurovrai.connectome.run_structural_connectivity \\
         --subject sub-001 \\
         --derivatives-dir /study/derivatives \\
-        --atlas schaefer_400 \\
+        --atlas schaefer_200 \\
         --output-dir /study/connectome/structural
 
-    # With BEDPOSTX already completed
+    # Using FreeSurfer atlas (requires --fs-subjects-dir)
+    python -m neurovrai.connectome.run_structural_connectivity \\
+        --subject sub-001 \\
+        --derivatives-dir /study/derivatives \\
+        --atlas desikan_killiany \\
+        --fs-subjects-dir /study/freesurfer \\
+        --output-dir /study/connectome/structural
+
+    # With pre-computed atlas in DWI space
     python -m neurovrai.connectome.run_structural_connectivity \\
         --subject sub-001 \\
         --bedpostx-dir /study/derivatives/sub-001/dwi.bedpostX \\
-        --atlas /study/atlases/schaefer_400_dwi.nii.gz \\
+        --atlas-file /study/atlases/schaefer_400_dwi.nii.gz \\
         --output-dir /study/connectome/structural/sub-001
 
 Requirements:
     - Completed DWI preprocessing (eddy correction)
     - FSL installed (probtrackx2, bedpostx)
-    - Atlas parcellation in DWI space
+    - For MNI atlases: anatomical preprocessing with MNI registration
+    - For FreeSurfer atlases: completed FreeSurfer recon-all
 """
 
 import argparse
@@ -49,6 +60,10 @@ from neurovrai.connectome.structural_connectivity import (
     StructuralConnectivityError
 )
 from neurovrai.connectome.graph_metrics import compute_graph_metrics
+from neurovrai.connectome.atlas_dwi_transform import (
+    ATLAS_CONFIGS,
+    prepare_atlas_for_tractography,
+)
 
 
 def setup_logging(output_dir: Path) -> logging.Logger:
@@ -112,6 +127,69 @@ def find_atlas_in_dwi_space(
             return path
 
     return None
+
+
+def transform_atlas_to_dwi(
+    subject: str,
+    atlas_name: str,
+    derivatives_dir: Path,
+    output_dir: Path,
+    fs_subjects_dir: Optional[Path] = None,
+    logger: logging.Logger = None
+) -> tuple:
+    """
+    Transform atlas from MNI/FreeSurfer space to DWI space
+
+    Args:
+        subject: Subject ID
+        atlas_name: Atlas name from ATLAS_CONFIGS
+        derivatives_dir: Path to derivatives directory
+        output_dir: Output directory for transformed atlas
+        fs_subjects_dir: FreeSurfer subjects directory (for FS atlases)
+        logger: Logger instance
+
+    Returns:
+        Tuple of (atlas_dwi_path, roi_names, transform_info)
+
+    Raises:
+        StructuralConnectivityError: If transformation fails
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    if atlas_name not in ATLAS_CONFIGS:
+        available = list(ATLAS_CONFIGS.keys())
+        raise StructuralConnectivityError(
+            f"Unknown atlas: {atlas_name}. Available: {available}"
+        )
+
+    atlas_config = ATLAS_CONFIGS[atlas_name]
+    logger.info(f"Transforming atlas '{atlas_name}' to DWI space...")
+    logger.info(f"  Atlas type: {atlas_config.get('source', atlas_config.get('space', 'unknown'))}")
+
+    # Check if FreeSurfer atlas but no FS dir provided
+    if atlas_config.get('source') == 'freesurfer' and fs_subjects_dir is None:
+        raise StructuralConnectivityError(
+            f"Atlas '{atlas_name}' requires FreeSurfer. "
+            f"Provide --fs-subjects-dir argument."
+        )
+
+    try:
+        atlas_dwi_file, roi_names, transform_info = prepare_atlas_for_tractography(
+            subject=subject,
+            atlas_name=atlas_name,
+            derivatives_dir=derivatives_dir,
+            output_dir=output_dir,
+            fs_subjects_dir=fs_subjects_dir,
+        )
+
+        logger.info(f"  Atlas transformed: {atlas_dwi_file.name}")
+        logger.info(f"  ROIs: {len(roi_names)}")
+
+        return atlas_dwi_file, roi_names, transform_info
+
+    except Exception as e:
+        raise StructuralConnectivityError(f"Atlas transformation failed: {e}")
 
 
 def prepare_dwi_for_bedpostx(
@@ -230,13 +308,16 @@ def run_structural_connectivity_analysis(
     derivatives_dir: Optional[Path] = None,
     bedpostx_dir: Optional[Path] = None,
     atlas_file: Optional[Path] = None,
-    atlas_name: str = 'schaefer_400',
+    atlas_name: str = 'schaefer_200',
     output_dir: Optional[Path] = None,
+    fs_subjects_dir: Optional[Path] = None,
     n_samples: int = 5000,
     run_bedpostx_if_needed: bool = True,
     use_gpu: bool = False,
     compute_graph: bool = True,
-    threshold: Optional[float] = None
+    threshold: Optional[float] = None,
+    avoid_ventricles: bool = True,
+    config: Optional[Dict] = None
 ) -> Dict:
     """
     Complete structural connectivity analysis workflow
@@ -245,14 +326,17 @@ def run_structural_connectivity_analysis(
         subject: Subject ID
         derivatives_dir: Path to derivatives directory
         bedpostx_dir: Path to existing BEDPOSTX output (skip if provided)
-        atlas_file: Path to atlas in DWI space (auto-detected if None)
-        atlas_name: Atlas name for auto-detection (default: 'schaefer_400')
+        atlas_file: Path to atlas already in DWI space (skips transformation)
+        atlas_name: Atlas name from ATLAS_CONFIGS (default: 'schaefer_200')
         output_dir: Output directory for results
+        fs_subjects_dir: FreeSurfer subjects directory (required for FS atlases)
         n_samples: Number of tractography samples (default: 5000)
         run_bedpostx_if_needed: Run BEDPOSTX if not found (default: True)
         use_gpu: Use GPU for BEDPOSTX (default: False)
         compute_graph: Compute graph metrics (default: True)
         threshold: Optional threshold for weak connections
+        avoid_ventricles: Exclude ventricles from tractography (default: True)
+        config: Optional config dictionary for all tractography settings
 
     Returns:
         Dictionary with analysis results
@@ -338,45 +422,62 @@ def run_structural_connectivity_analysis(
         bedpostx_dir = Path(bedpostx_dir)
         logger.info(f"Using existing BEDPOSTX: {bedpostx_dir}")
 
-    # Step 2: Find atlas file
+    # Step 2: Find or transform atlas to DWI space
+    roi_names = None
     if atlas_file is None:
         if derivatives_dir is None:
             raise StructuralConnectivityError(
                 "atlas_file must be provided if derivatives_dir is None"
             )
 
+        # First check if atlas already exists in DWI space
         atlas_file = find_atlas_in_dwi_space(
             derivatives_dir=derivatives_dir,
             subject=subject,
             atlas_name=atlas_name
         )
 
-        if atlas_file is None:
-            raise StructuralConnectivityError(
-                f"Atlas '{atlas_name}' not found in DWI space for {subject}. "
-                f"Register atlas to DWI space first or provide --atlas-file."
+        if atlas_file is not None:
+            logger.info(f"Found existing atlas in DWI space: {atlas_file}")
+        else:
+            # Transform atlas from MNI/FreeSurfer space to DWI space
+            logger.info(f"\n[Step 2] Transforming atlas '{atlas_name}' to DWI space...")
+
+            atlas_file, roi_names, transform_info = transform_atlas_to_dwi(
+                subject=subject,
+                atlas_name=atlas_name,
+                derivatives_dir=derivatives_dir,
+                output_dir=output_dir / 'atlas',
+                fs_subjects_dir=fs_subjects_dir,
+                logger=logger
             )
 
-        logger.info(f"Found atlas: {atlas_file}")
+            logger.info(f"✓ Atlas transformed: {atlas_file}")
     else:
         atlas_file = Path(atlas_file)
         if not atlas_file.exists():
             raise StructuralConnectivityError(f"Atlas file not found: {atlas_file}")
+        logger.info(f"Using provided atlas file: {atlas_file}")
 
     # Step 3: Compute structural connectivity
-    logger.info("\n[Step 2] Computing structural connectivity...")
+    logger.info("\n[Step 3] Computing structural connectivity...")
 
     sc_results = compute_structural_connectivity(
         bedpostx_dir=bedpostx_dir,
         atlas_file=atlas_file,
         output_dir=output_dir,
         n_samples=n_samples,
-        threshold=threshold
+        threshold=threshold,
+        avoid_ventricles=avoid_ventricles,
+        subject=subject,
+        derivatives_dir=derivatives_dir,
+        fs_subjects_dir=fs_subjects_dir,
+        config=config
     )
 
     # Step 4: Compute graph metrics (optional)
     if compute_graph:
-        logger.info("\n[Step 3] Computing graph metrics...")
+        logger.info("\n[Step 4] Computing graph metrics...")
 
         try:
             graph_metrics = compute_graph_metrics(
@@ -418,35 +519,38 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Full analysis starting from derivatives
+  # Standard analysis with MNI atlas (auto-transformed to DWI space)
   python -m neurovrai.connectome.run_structural_connectivity \\
-      --subject sub-001 \\
+      --subject IRC805-0580101 \\
       --derivatives-dir /study/derivatives \\
-      --atlas schaefer_400 \\
-      --output-dir /study/connectome/structural/sub-001
+      --atlas schaefer_200 \\
+      --output-dir /study/connectome/structural
 
-  # Use existing BEDPOSTX output
+  # Using FreeSurfer atlas (requires FS subjects dir)
   python -m neurovrai.connectome.run_structural_connectivity \\
-      --subject sub-001 \\
-      --bedpostx-dir /study/derivatives/sub-001/dwi.bedpostX \\
-      --atlas /study/atlases/schaefer_400_dwi.nii.gz \\
-      --output-dir /study/connectome/structural/sub-001
+      --subject IRC805-0580101 \\
+      --derivatives-dir /study/derivatives \\
+      --atlas desikan_killiany \\
+      --fs-subjects-dir /study/freesurfer \\
+      --output-dir /study/connectome/structural
 
-  # With GPU acceleration for BEDPOSTX
+  # With pre-computed atlas in DWI space
   python -m neurovrai.connectome.run_structural_connectivity \\
-      --subject sub-001 \\
+      --subject IRC805-0580101 \\
+      --bedpostx-dir /study/derivatives/IRC805-0580101/dwi.bedpostX \\
+      --atlas-file /study/atlases/schaefer_200_dwi.nii.gz \\
+      --output-dir /study/connectome/structural
+
+  # High-resolution tractography with GPU
+  python -m neurovrai.connectome.run_structural_connectivity \\
+      --subject IRC805-0580101 \\
       --derivatives-dir /study/derivatives \\
       --atlas schaefer_400 \\
       --use-gpu \\
-      --output-dir /study/connectome/structural/sub-001
-
-  # High-resolution tractography
-  python -m neurovrai.connectome.run_structural_connectivity \\
-      --subject sub-001 \\
-      --bedpostx-dir /study/derivatives/sub-001/dwi.bedpostX \\
-      --atlas /study/atlases/schaefer_400_dwi.nii.gz \\
       --n-samples 10000 \\
-      --output-dir /study/connectome/structural/sub-001
+      --output-dir /study/connectome/structural
+
+Available atlases: """ + ', '.join(ATLAS_CONFIGS.keys()) + """
         """
     )
 
@@ -472,20 +576,27 @@ Examples:
     parser.add_argument(
         '--atlas-file',
         type=Path,
-        help='Path to atlas in DWI space (auto-detected if not provided)'
+        help='Path to atlas already in DWI space (skips transformation)'
     )
 
     parser.add_argument(
         '--atlas',
         type=str,
-        default='schaefer_400',
-        help='Atlas name for auto-detection (default: schaefer_400)'
+        choices=list(ATLAS_CONFIGS.keys()),
+        default='schaefer_200',
+        help='Atlas to use (default: schaefer_200)'
     )
 
     parser.add_argument(
         '--output-dir',
         type=Path,
         help='Output directory for results'
+    )
+
+    parser.add_argument(
+        '--fs-subjects-dir',
+        type=Path,
+        help='FreeSurfer subjects directory (required for FreeSurfer atlases)'
     )
 
     parser.add_argument(
@@ -519,11 +630,36 @@ Examples:
         help='Skip graph metrics computation'
     )
 
+    parser.add_argument(
+        '--no-avoid-ventricles',
+        action='store_true',
+        help='Disable ventricle avoidance (NOT recommended - ventricles contain CSF, not white matter)'
+    )
+
+    parser.add_argument(
+        '--config',
+        type=Path,
+        help='Path to config.yaml file for tractography settings'
+    )
+
     args = parser.parse_args()
 
     # Validation
     if args.bedpostx_dir is None and args.derivatives_dir is None:
         parser.error("Either --bedpostx-dir or --derivatives-dir must be provided")
+
+    # Load config if provided
+    config = None
+    if args.config:
+        if not args.config.exists():
+            parser.error(f"Config file not found: {args.config}")
+        try:
+            import yaml
+            with open(args.config) as f:
+                config = yaml.safe_load(f)
+            print(f"Loaded config from: {args.config}")
+        except Exception as e:
+            parser.error(f"Failed to load config: {e}")
 
     try:
         results = run_structural_connectivity_analysis(
@@ -533,11 +669,14 @@ Examples:
             atlas_file=args.atlas_file,
             atlas_name=args.atlas,
             output_dir=args.output_dir,
+            fs_subjects_dir=args.fs_subjects_dir,
             n_samples=args.n_samples,
             run_bedpostx_if_needed=not args.no_bedpostx,
             use_gpu=args.use_gpu,
             compute_graph=not args.no_graph_metrics,
-            threshold=args.threshold
+            threshold=args.threshold,
+            avoid_ventricles=not args.no_avoid_ventricles,
+            config=config
         )
 
         print("\n✓ Analysis complete!")

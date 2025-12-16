@@ -191,7 +191,95 @@ def identify_hubs(node_metrics, method='degree', percentile=90):
     metric_values = node_metrics[method] if method == 'degree' else node_metrics[f'{method}_centrality']
     threshold = np.percentile(metric_values, percentile)
     hubs = metric_values >= threshold
-    
+
     logger.info(f"Identified {np.sum(hubs)} hub nodes using {method}")
-    
+
     return hubs
+
+
+def compute_graph_metrics(
+    connectivity_matrix: np.ndarray,
+    roi_names: Optional[List[str]] = None,
+    threshold: Optional[float] = None,
+    weighted: bool = False
+) -> Dict:
+    """
+    Compute comprehensive graph metrics for a connectivity matrix.
+
+    Combines node-level and global network metrics into a single
+    JSON-serializable dictionary.
+
+    Args:
+        connectivity_matrix: NxN connectivity matrix
+        roi_names: List of ROI names (default: Node_000, Node_001, ...)
+        threshold: Optional threshold to apply before computing metrics
+        weighted: Use weighted metrics (default: False for binary)
+
+    Returns:
+        Dictionary with node_metrics, global_metrics, and summary
+    """
+    logger.info("Computing comprehensive graph metrics...")
+
+    n_nodes = connectivity_matrix.shape[0]
+
+    # Ensure symmetric matrix
+    matrix = (connectivity_matrix + connectivity_matrix.T) / 2
+    np.fill_diagonal(matrix, 0)
+
+    # Compute node-level metrics
+    node_metrics = compute_node_metrics(
+        matrix,
+        threshold=threshold,
+        weighted=weighted,
+        roi_names=roi_names
+    )
+
+    # Compute global metrics
+    global_metrics = compute_global_metrics(matrix, threshold=threshold)
+
+    # Identify hub nodes
+    hubs_by_degree = identify_hubs(node_metrics, method='degree', percentile=90)
+    hubs_by_between = identify_hubs(node_metrics, method='betweenness', percentile=90)
+
+    # Convert arrays to lists for JSON serialization
+    node_metrics_json = {
+        'roi_names': list(node_metrics['roi_names']),
+        'degree': node_metrics['degree'].tolist(),
+        'strength': node_metrics['strength'].tolist(),
+        'clustering_coefficient': node_metrics['clustering_coefficient'].tolist(),
+        'betweenness_centrality': node_metrics['betweenness_centrality'].tolist(),
+    }
+
+    # Summary statistics
+    summary = {
+        'n_nodes': n_nodes,
+        'n_edges': int(np.sum(matrix > 0) / 2),  # Undirected
+        'density': float(np.sum(matrix > 0) / (n_nodes * (n_nodes - 1))),
+        'mean_degree': float(np.mean(node_metrics['degree'])),
+        'mean_strength': float(np.mean(node_metrics['strength'])),
+        'mean_clustering': float(np.mean(node_metrics['clustering_coefficient'])),
+        'n_hubs_degree': int(np.sum(hubs_by_degree)),
+        'n_hubs_betweenness': int(np.sum(hubs_by_between)),
+    }
+
+    # Hub node names
+    hub_names_degree = [node_metrics['roi_names'][i] for i in np.where(hubs_by_degree)[0]]
+    hub_names_between = [node_metrics['roi_names'][i] for i in np.where(hubs_by_between)[0]]
+
+    results = {
+        'node_metrics': node_metrics_json,
+        'global_metrics': global_metrics,
+        'summary': summary,
+        'hubs': {
+            'by_degree': hub_names_degree,
+            'by_betweenness': hub_names_between
+        },
+        'parameters': {
+            'threshold': threshold,
+            'weighted': weighted
+        }
+    }
+
+    logger.info(f"✓ Graph metrics computed: {summary['n_edges']} edges, density={summary['density']:.3f}")
+
+    return results
