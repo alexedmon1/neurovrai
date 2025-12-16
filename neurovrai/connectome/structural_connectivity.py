@@ -1216,7 +1216,7 @@ def run_probtrackx2_network(
         '--omatrix1',  # Output connectivity matrix (fdt_network_matrix)
         # Note: --omatrix2 removed - GPU requires --target2 which we don't need
         # Note: --omatrix3 removed - GPU incompatible with --omatrix1
-        '--ompl',  # Output mean path length from each seed (for distance correction)
+        # Note: --ompl removed - causes GPU memory issues with large atlases
     ]
 
     # Optional parameters
