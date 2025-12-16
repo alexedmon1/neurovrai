@@ -1210,6 +1210,10 @@ def run_probtrackx2_network(
         '--opd',  # Output path distribution
         '--forcedir',  # Overwrite output directory
         '--os2t',  # Output seeds to targets
+        '--omatrix1',  # Output connectivity matrix (fdt_network_matrix)
+        '--omatrix2',  # Output mean path length matrix (fdt_matrix2)
+        '--omatrix3',  # Output seed-to-target connectivity matrix (fdt_matrix3)
+        '--ompl',  # Output mean path length from each seed (for distance correction)
     ]
 
     # Optional parameters
