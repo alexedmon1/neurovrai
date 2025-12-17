@@ -334,7 +334,7 @@ fc_results = compute_functional_connectivity(
 
 ### Structural Connectivity
 
-Tractography-based connectivity using FSL probtrackx2.
+Tractography-based connectivity using FSL probtrackx2 with GPU acceleration.
 
 ```python
 from neurovrai.connectome.structural_connectivity import compute_structural_connectivity
@@ -344,9 +344,13 @@ sc_results = compute_structural_connectivity(
     atlas_file=Path('atlas_in_dwi.nii.gz'),
     output_dir=Path('/connectome'),
     n_samples=5000,
-    avoid_ventricles=True
+    avoid_ventricles=True,
+    batch_mode=True,   # Process one ROI at a time (GPU-friendly)
+    use_gpu=True       # Use probtrackx2_gpu for acceleration
 )
 ```
+
+**Batch Mode**: When `batch_mode=True`, tractography processes one seed ROI at a time instead of all ROIs simultaneously. This dramatically reduces memory usage (~3GB vs ~18GB+ for network mode) and enables reliable GPU acceleration. Recommended for large atlases (>50 regions).
 
 ### Graph Metrics
 

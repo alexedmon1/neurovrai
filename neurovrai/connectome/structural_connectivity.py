@@ -48,7 +48,7 @@ import logging
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import nibabel as nib
 import numpy as np
@@ -60,6 +60,166 @@ logger = logging.getLogger(__name__)
 class StructuralConnectivityError(Exception):
     """Raised when structural connectivity analysis fails"""
     pass
+
+
+def compute_t1w_to_dwi_transform(
+    t1w_brain: Path,
+    dwi_reference: Path,
+    output_dir: Path,
+    cost: str = 'mutualinfo',
+    dof: int = 6
+) -> Path:
+    """
+    Compute T1w to DWI transform using FLIRT.
+
+    Strategy: Register DWI → T1w (low-res to high-res), then invert.
+
+    Args:
+        t1w_brain: T1w brain (skull-stripped)
+        dwi_reference: DWI reference (b0 brain or mask)
+        output_dir: Directory to save transform
+        cost: FLIRT cost function (default: mutualinfo for cross-modality)
+        dof: Degrees of freedom (default: 6 for rigid body)
+
+    Returns:
+        Path to T1w→DWI transform matrix
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    t1w_to_dwi_mat = output_dir / 't1w_to_dwi.mat'
+    dwi_to_t1w_mat = output_dir / 'dwi_to_t1w.mat'
+
+    # Check if already computed
+    if t1w_to_dwi_mat.exists():
+        logger.debug(f"Using existing T1w→DWI transform: {t1w_to_dwi_mat}")
+        return t1w_to_dwi_mat
+
+    logger.info("Computing T1w → DWI transform")
+    logger.info(f"  T1w brain: {t1w_brain}")
+    logger.info(f"  DWI reference: {dwi_reference}")
+
+    # Register DWI → T1w (better: low-res to high-res)
+    cmd = [
+        'flirt',
+        '-in', str(dwi_reference),
+        '-ref', str(t1w_brain),
+        '-omat', str(dwi_to_t1w_mat),
+        '-cost', cost,
+        '-dof', str(dof),
+        '-searchrx', '-10', '10',
+        '-searchry', '-10', '10',
+        '-searchrz', '-10', '10'
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise StructuralConnectivityError(f"FLIRT DWI→T1w failed: {result.stderr}")
+
+    # Invert to get T1w→DWI
+    cmd_inv = [
+        'convert_xfm',
+        '-omat', str(t1w_to_dwi_mat),
+        '-inverse', str(dwi_to_t1w_mat)
+    ]
+
+    result = subprocess.run(cmd_inv, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise StructuralConnectivityError(f"convert_xfm inverse failed: {result.stderr}")
+
+    logger.info(f"  T1w→DWI transform: {t1w_to_dwi_mat}")
+    return t1w_to_dwi_mat
+
+
+def transform_freesurfer_to_dwi(
+    fs_volume: Path,
+    t1w_brain: Path,
+    dwi_reference: Path,
+    output_file: Path,
+    transforms_dir: Path,
+    interp: str = 'nearest'
+) -> Path:
+    """
+    Transform FreeSurfer volume to DWI space via T1w.
+
+    Transform chain: FreeSurfer (conformed) → T1w (native) → DWI
+
+    Uses mri_vol2vol for FS→T1w (header-based, fast and accurate for same subject)
+    and FLIRT for T1w→DWI (cross-modality registration).
+
+    Args:
+        fs_volume: FreeSurfer volume (.mgz or .nii.gz)
+        t1w_brain: T1w brain in native space
+        dwi_reference: DWI reference image
+        output_file: Output file in DWI space
+        transforms_dir: Directory to store/cache transforms
+        interp: Interpolation method ('nearest' for labels, 'trilinear' for continuous)
+
+    Returns:
+        Path to transformed volume in DWI space
+    """
+    fs_volume = Path(fs_volume)
+    t1w_brain = Path(t1w_brain)
+    dwi_reference = Path(dwi_reference)
+    output_file = Path(output_file)
+    transforms_dir = Path(transforms_dir)
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    transforms_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Transforming FreeSurfer volume to DWI space: {fs_volume.name}")
+
+    # Step 1: FS → T1w using mri_vol2vol (fast, header-based)
+    intermediate_t1w = transforms_dir / f"{fs_volume.stem}_in_t1w.nii.gz"
+
+    if not intermediate_t1w.exists():
+        logger.info("  Step 1: FS → T1w (mri_vol2vol --regheader)")
+
+        mri_interp = 'nearest' if interp == 'nearest' else 'trilinear'
+        cmd_fs_to_t1w = [
+            'mri_vol2vol',
+            '--mov', str(fs_volume),
+            '--targ', str(t1w_brain),
+            '--o', str(intermediate_t1w),
+            '--regheader',
+            f'--interp', mri_interp,
+            '--no-save-reg'
+        ]
+
+        result = subprocess.run(cmd_fs_to_t1w, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise StructuralConnectivityError(f"mri_vol2vol FS→T1w failed: {result.stderr}")
+    else:
+        logger.info(f"  Step 1: Using cached FS→T1w: {intermediate_t1w.name}")
+
+    # Step 2: T1w → DWI using FLIRT
+    logger.info("  Step 2: T1w → DWI (FLIRT)")
+
+    # Get or compute T1w→DWI transform
+    t1w_to_dwi_mat = compute_t1w_to_dwi_transform(
+        t1w_brain=t1w_brain,
+        dwi_reference=dwi_reference,
+        output_dir=transforms_dir
+    )
+
+    # Apply transform
+    flirt_interp = 'nearestneighbour' if interp == 'nearest' else 'trilinear'
+    cmd_t1w_to_dwi = [
+        'flirt',
+        '-in', str(intermediate_t1w),
+        '-ref', str(dwi_reference),
+        '-applyxfm',
+        '-init', str(t1w_to_dwi_mat),
+        '-out', str(output_file),
+        '-interp', flirt_interp
+    ]
+
+    result = subprocess.run(cmd_t1w_to_dwi, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise StructuralConnectivityError(f"FLIRT T1w→DWI failed: {result.stderr}")
+
+    logger.info(f"  Output: {output_file}")
+    return output_file
 
 
 # FreeSurfer ventricle labels (aparc+aseg)
@@ -78,7 +238,9 @@ def create_ventricle_mask(
     source: Path,
     output_file: Path,
     source_type: str = 'auto',
-    reference: Optional[Path] = None
+    reference: Optional[Path] = None,
+    t1w_brain: Optional[Path] = None,
+    transforms_dir: Optional[Path] = None
 ) -> Path:
     """
     Create a ventricle exclusion mask for tractography
@@ -88,6 +250,8 @@ def create_ventricle_mask(
         output_file: Output mask file path
         source_type: 'freesurfer', 'csf_pve', or 'auto' (detect from file)
         reference: Reference image for resampling (e.g., DWI)
+        t1w_brain: T1w brain for FS→T1w→DWI transform chain (required for FreeSurfer)
+        transforms_dir: Directory to cache transforms
 
     Returns:
         Path to ventricle mask
@@ -99,24 +263,65 @@ def create_ventricle_mask(
     if not source.exists():
         raise StructuralConnectivityError(f"Source file not found: {source}")
 
-    # Load source image
-    src_img = nib.load(source)
-    src_data = src_img.get_fdata()
-
-    # Auto-detect source type
+    # Auto-detect source type from file extension/path
     if source_type == 'auto':
-        unique_vals = np.unique(src_data[src_data > 0])
-        if len(unique_vals) > 50:  # Likely segmentation with many labels
+        if str(source).endswith('.mgz') or 'aparc' in str(source).lower():
             source_type = 'freesurfer'
-        elif np.max(src_data) <= 1.0:  # Probability map
-            source_type = 'csf_pve'
         else:
-            source_type = 'freesurfer'
+            # Load and check data
+            src_img = nib.load(source)
+            src_data = src_img.get_fdata()
+            unique_vals = np.unique(src_data[src_data > 0])
+            if len(unique_vals) > 50:
+                source_type = 'freesurfer'
+            elif np.max(src_data) <= 1.0:
+                source_type = 'csf_pve'
+            else:
+                source_type = 'freesurfer'
 
     logger.info(f"Creating ventricle mask from {source_type} source")
 
+    # For FreeSurfer sources, use proper transform chain
+    if source_type == 'freesurfer' and reference is not None and t1w_brain is not None:
+        # Transform aparc+aseg to DWI space first, then extract labels
+        if transforms_dir is None:
+            transforms_dir = output_file.parent / 'transforms'
+
+        aparc_in_dwi = transforms_dir / 'aparc_aseg_in_dwi.nii.gz'
+
+        if not aparc_in_dwi.exists():
+            transform_freesurfer_to_dwi(
+                fs_volume=source,
+                t1w_brain=t1w_brain,
+                dwi_reference=reference,
+                output_file=aparc_in_dwi,
+                transforms_dir=transforms_dir,
+                interp='nearest'
+            )
+
+        # Extract ventricle labels from transformed aparc+aseg
+        aparc_img = nib.load(aparc_in_dwi)
+        aparc_data = aparc_img.get_fdata().astype(int)
+
+        mask_data = np.zeros_like(aparc_data, dtype=np.uint8)
+        for label in VENTRICLE_LABELS:
+            mask_data[aparc_data == label] = 1
+
+        n_voxels = np.sum(mask_data)
+        logger.info(f"  Ventricle mask: {n_voxels} voxels from {len(VENTRICLE_LABELS)} labels")
+        logger.info(f"  (Using proper FS→T1w→DWI transform chain)")
+
+        # Save mask
+        mask_img = nib.Nifti1Image(mask_data, aparc_img.affine, aparc_img.header)
+        nib.save(mask_img, output_file)
+        return output_file
+
+    # Load source image for non-transform cases
+    src_img = nib.load(source)
+    src_data = src_img.get_fdata()
+
     if source_type == 'freesurfer':
-        # Extract ventricle labels from aparc+aseg
+        # Extract ventricle labels from aparc+aseg (legacy path without proper transform)
         mask_data = np.zeros_like(src_data, dtype=np.uint8)
         for label in VENTRICLE_LABELS:
             mask_data[src_data == label] = 1
@@ -124,8 +329,12 @@ def create_ventricle_mask(
         n_voxels = np.sum(mask_data)
         logger.info(f"  Ventricle mask: {n_voxels} voxels from {len(VENTRICLE_LABELS)} labels")
 
+        if reference is not None and t1w_brain is None:
+            logger.warning("  WARNING: Using -usesqform resampling (t1w_brain not provided)")
+            logger.warning("  For accurate alignment, provide t1w_brain parameter")
+
     elif source_type == 'csf_pve':
-        # Threshold CSF probability map
+        # Threshold CSF probability map (already in T1w space)
         mask_data = (src_data > 0.5).astype(np.uint8)
         n_voxels = np.sum(mask_data)
         logger.info(f"  CSF mask: {n_voxels} voxels (threshold > 0.5)")
@@ -137,22 +346,43 @@ def create_ventricle_mask(
     mask_img = nib.Nifti1Image(mask_data, src_img.affine, src_img.header)
     nib.save(mask_img, output_file)
 
-    # Resample to reference if provided
+    # Resample to reference if provided (for non-FreeSurfer sources or legacy mode)
     if reference is not None:
         reference = Path(reference)
         if reference.exists():
             resampled_file = output_file.parent / f"{output_file.stem}_resampled.nii.gz"
 
-            # Use FLIRT to resample (nearest neighbor for mask)
-            cmd = [
-                'flirt',
-                '-in', str(output_file),
-                '-ref', str(reference),
-                '-out', str(resampled_file),
-                '-applyxfm',
-                '-usesqform',
-                '-interp', 'nearestneighbour'
-            ]
+            if t1w_brain is not None and source_type != 'freesurfer':
+                # Use proper T1w→DWI transform for FSL segmentations
+                if transforms_dir is None:
+                    transforms_dir = output_file.parent / 'transforms'
+
+                t1w_to_dwi_mat = compute_t1w_to_dwi_transform(
+                    t1w_brain=t1w_brain,
+                    dwi_reference=reference,
+                    output_dir=transforms_dir
+                )
+
+                cmd = [
+                    'flirt',
+                    '-in', str(output_file),
+                    '-ref', str(reference),
+                    '-applyxfm',
+                    '-init', str(t1w_to_dwi_mat),
+                    '-out', str(resampled_file),
+                    '-interp', 'nearestneighbour'
+                ]
+            else:
+                # Legacy: Use -usesqform (header-based)
+                cmd = [
+                    'flirt',
+                    '-in', str(output_file),
+                    '-ref', str(reference),
+                    '-out', str(resampled_file),
+                    '-applyxfm',
+                    '-usesqform',
+                    '-interp', 'nearestneighbour'
+                ]
 
             try:
                 subprocess.run(cmd, check=True, capture_output=True)
@@ -281,7 +511,9 @@ def create_wm_mask(
     output_file: Path,
     source_type: str = 'auto',
     reference: Optional[Path] = None,
-    include_cc: bool = True
+    include_cc: bool = True,
+    t1w_brain: Optional[Path] = None,
+    transforms_dir: Optional[Path] = None
 ) -> Path:
     """
     Create a white matter inclusion mask for ACT-style tractography
@@ -292,6 +524,8 @@ def create_wm_mask(
         source_type: 'freesurfer', 'fsl_pve', or 'auto' (detect from file)
         reference: Reference image for resampling (e.g., DWI)
         include_cc: Include corpus callosum in WM mask (default: True)
+        t1w_brain: T1w brain for FS→T1w→DWI transform chain (required for FreeSurfer)
+        transforms_dir: Directory to cache transforms
 
     Returns:
         Path to white matter mask
@@ -303,20 +537,66 @@ def create_wm_mask(
     if not source.exists():
         raise StructuralConnectivityError(f"Source file not found: {source}")
 
-    src_img = nib.load(source)
-    src_data = src_img.get_fdata()
-
-    # Auto-detect source type
+    # Auto-detect source type from file extension/path
     if source_type == 'auto':
-        unique_vals = np.unique(src_data[src_data > 0])
-        if len(unique_vals) > 50:
+        if str(source).endswith('.mgz') or 'aparc' in str(source).lower():
             source_type = 'freesurfer'
-        elif np.max(src_data) <= 1.0:
-            source_type = 'fsl_pve'
         else:
-            source_type = 'freesurfer'
+            src_img = nib.load(source)
+            src_data = src_img.get_fdata()
+            unique_vals = np.unique(src_data[src_data > 0])
+            if len(unique_vals) > 50:
+                source_type = 'freesurfer'
+            elif np.max(src_data) <= 1.0:
+                source_type = 'fsl_pve'
+            else:
+                source_type = 'freesurfer'
 
     logger.info(f"Creating WM mask from {source_type} source")
+
+    # For FreeSurfer sources, use proper transform chain
+    if source_type == 'freesurfer' and reference is not None and t1w_brain is not None:
+        if transforms_dir is None:
+            transforms_dir = output_file.parent / 'transforms'
+
+        aparc_in_dwi = transforms_dir / 'aparc_aseg_in_dwi.nii.gz'
+
+        if not aparc_in_dwi.exists():
+            transform_freesurfer_to_dwi(
+                fs_volume=source,
+                t1w_brain=t1w_brain,
+                dwi_reference=reference,
+                output_file=aparc_in_dwi,
+                transforms_dir=transforms_dir,
+                interp='nearest'
+            )
+
+        # Extract WM labels from transformed aparc+aseg
+        aparc_img = nib.load(aparc_in_dwi)
+        aparc_data = aparc_img.get_fdata().astype(int)
+
+        mask_data = np.zeros_like(aparc_data, dtype=np.uint8)
+
+        # Add cerebral white matter
+        for label in WM_LABELS[:2]:  # Left and Right WM
+            mask_data[aparc_data == label] = 1
+
+        # Optionally add corpus callosum
+        if include_cc:
+            for label in WM_LABELS[3:]:  # CC labels
+                mask_data[aparc_data == label] = 1
+
+        n_voxels = np.sum(mask_data)
+        logger.info(f"  WM mask: {n_voxels} voxels from FreeSurfer labels")
+        logger.info(f"  (Using proper FS→T1w→DWI transform chain)")
+
+        mask_img = nib.Nifti1Image(mask_data, aparc_img.affine, aparc_img.header)
+        nib.save(mask_img, output_file)
+        return output_file
+
+    # Load source for non-transform cases
+    src_img = nib.load(source)
+    src_data = src_img.get_fdata()
 
     if source_type == 'freesurfer':
         mask_data = np.zeros_like(src_data, dtype=np.uint8)
@@ -332,6 +612,10 @@ def create_wm_mask(
 
         n_voxels = np.sum(mask_data)
         logger.info(f"  WM mask: {n_voxels} voxels from FreeSurfer labels")
+
+        if reference is not None and t1w_brain is None:
+            logger.warning("  WARNING: Using -usesqform resampling (t1w_brain not provided)")
+            logger.warning("  For accurate alignment, provide t1w_brain parameter")
 
     elif source_type == 'fsl_pve':
         # Threshold WM probability map
@@ -351,14 +635,38 @@ def create_wm_mask(
         reference = Path(reference)
         if reference.exists():
             resampled_file = output_file.parent / f"{output_file.stem}_resampled.nii.gz"
-            cmd = [
-                'flirt',
-                '-in', str(output_file),
-                '-ref', str(reference),
-                '-out', str(resampled_file),
-                '-applyxfm', '-usesqform',
-                '-interp', 'nearestneighbour'
-            ]
+
+            if t1w_brain is not None and source_type != 'freesurfer':
+                # Use proper T1w→DWI transform for FSL segmentations
+                if transforms_dir is None:
+                    transforms_dir = output_file.parent / 'transforms'
+
+                t1w_to_dwi_mat = compute_t1w_to_dwi_transform(
+                    t1w_brain=t1w_brain,
+                    dwi_reference=reference,
+                    output_dir=transforms_dir
+                )
+
+                cmd = [
+                    'flirt',
+                    '-in', str(output_file),
+                    '-ref', str(reference),
+                    '-applyxfm',
+                    '-init', str(t1w_to_dwi_mat),
+                    '-out', str(resampled_file),
+                    '-interp', 'nearestneighbour'
+                ]
+            else:
+                # Legacy: Use -usesqform (header-based)
+                cmd = [
+                    'flirt',
+                    '-in', str(output_file),
+                    '-ref', str(reference),
+                    '-out', str(resampled_file),
+                    '-applyxfm', '-usesqform',
+                    '-interp', 'nearestneighbour'
+                ]
+
             subprocess.run(cmd, check=True, capture_output=True)
             logger.info(f"  Resampled to reference: {resampled_file}")
             return resampled_file
@@ -567,7 +875,9 @@ def create_gm_termination_mask(
     source: Path,
     output_file: Path,
     source_type: str = 'auto',
-    reference: Optional[Path] = None
+    reference: Optional[Path] = None,
+    t1w_brain: Optional[Path] = None,
+    transforms_dir: Optional[Path] = None
 ) -> Path:
     """
     Create gray matter termination mask for ACT-style tractography
@@ -579,7 +889,9 @@ def create_gm_termination_mask(
         source: Either FreeSurfer aparc+aseg or GM probability map (pve_1)
         output_file: Output mask file path
         source_type: 'freesurfer', 'fsl_pve', or 'auto'
-        reference: Reference image for resampling
+        reference: Reference image for resampling (DWI space)
+        t1w_brain: T1w brain for FS→T1w→DWI transform chain (required for FreeSurfer)
+        transforms_dir: Directory to cache transforms
 
     Returns:
         Path to GM termination mask
@@ -635,15 +947,35 @@ def create_gm_termination_mask(
         reference = Path(reference)
         if reference.exists():
             resampled_file = output_file.parent / f"{output_file.stem}_resampled.nii.gz"
-            cmd = [
-                'flirt',
-                '-in', str(output_file),
-                '-ref', str(reference),
-                '-out', str(resampled_file),
-                '-applyxfm', '-usesqform',
-                '-interp', 'nearestneighbour'
-            ]
-            subprocess.run(cmd, check=True, capture_output=True)
+
+            # Use proper transform chain for FreeSurfer data
+            if source_type == 'freesurfer' and t1w_brain is not None:
+                # FreeSurfer → T1w → DWI transform chain
+                if transforms_dir is None:
+                    transforms_dir = output_file.parent / 'transforms'
+                transforms_dir = Path(transforms_dir)
+                transforms_dir.mkdir(parents=True, exist_ok=True)
+
+                resampled_file = transform_freesurfer_to_dwi(
+                    fs_volume=output_file,
+                    t1w_brain=t1w_brain,
+                    dwi_reference=reference,
+                    output_file=resampled_file,
+                    transforms_dir=transforms_dir,
+                    interp='nearest'
+                )
+                logger.info(f"  Transformed GM mask via FS→T1w→DWI chain")
+            else:
+                # FSL data is already in T1w native space - use simple resampling
+                cmd = [
+                    'flirt',
+                    '-in', str(output_file),
+                    '-ref', str(reference),
+                    '-out', str(resampled_file),
+                    '-applyxfm', '-usesqform',
+                    '-interp', 'nearestneighbour'
+                ]
+                subprocess.run(cmd, check=True, capture_output=True)
             return resampled_file
 
     return output_file
@@ -1296,6 +1628,227 @@ def run_probtrackx2_network(
     return output_files
 
 
+def run_probtrackx2_batch(
+    bedpostx_dir: Path,
+    roi_masks_dir: Path,
+    seeds_list: Path,
+    output_dir: Path,
+    n_samples: int = 5000,
+    step_length: float = 0.5,
+    curvature_threshold: float = 0.2,
+    loop_check: bool = True,
+    distance_correct: bool = True,
+    waypoint_mask: Optional[Path] = None,
+    exclusion_mask: Optional[Path] = None,
+    termination_mask: Optional[Path] = None,
+    use_gpu: bool = True
+) -> Dict[str, Any]:
+    """
+    Run probtrackx2 in batch mode - one ROI at a time to avoid memory issues.
+
+    This processes each ROI as a seed separately, tracking to all other ROIs
+    as targets. This approach uses ~3GB RAM per ROI instead of 18+ GB for
+    network mode with all ROIs simultaneously.
+
+    Args:
+        bedpostx_dir: Path to BEDPOSTX output directory
+        roi_masks_dir: Directory containing individual ROI mask files
+        seeds_list: Path to seeds list file (list of ROI mask paths)
+        output_dir: Output directory for tractography results
+        n_samples: Number of samples per seed voxel (default: 5000)
+        step_length: Step length in mm (default: 0.5)
+        curvature_threshold: Curvature threshold, 0-1 (default: 0.2)
+        loop_check: Discard looping paths (default: True)
+        distance_correct: Apply distance correction (default: True)
+        waypoint_mask: Optional waypoint mask (e.g., white matter)
+        exclusion_mask: Optional exclusion mask (e.g., CSF)
+        termination_mask: Optional termination mask (e.g., grey matter)
+        use_gpu: Use probtrackx2_gpu (default: True for batch mode)
+
+    Returns:
+        Dictionary containing:
+            - connectivity_matrix: NxN numpy array
+            - roi_files: List of ROI mask files in order
+            - waytotal: Total streamlines per ROI
+            - output_dir: Path to output directory
+            - timing: Processing time per ROI
+    """
+    import time as time_module
+
+    _, probtrackx_available, probtrackx_gpu_available = check_fsl_installation()
+    if not probtrackx_available:
+        raise StructuralConnectivityError(
+            "probtrackx2 not found. Ensure FSL is installed and $FSLDIR is set."
+        )
+
+    # Determine which executable to use
+    if use_gpu and probtrackx_gpu_available:
+        probtrackx_cmd = 'probtrackx2_gpu'
+        logger.info("Using GPU-accelerated probtrackx2_gpu (batch mode)")
+    else:
+        probtrackx_cmd = 'probtrackx2'
+        if use_gpu and not probtrackx_gpu_available:
+            logger.warning("GPU requested but not available, falling back to CPU")
+
+    bedpostx_dir = Path(bedpostx_dir)
+    roi_masks_dir = Path(roi_masks_dir)
+    seeds_list = Path(seeds_list)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Validate BEDPOSTX outputs
+    bedpostx_outputs = validate_bedpostx_outputs(bedpostx_dir)
+
+    # Read ROI mask files from seeds list
+    with open(seeds_list, 'r') as f:
+        roi_files = [Path(line.strip()) for line in f if line.strip()]
+
+    n_rois = len(roi_files)
+
+    logger.info("=" * 80)
+    logger.info("BATCH MODE STRUCTURAL CONNECTIVITY")
+    logger.info("=" * 80)
+    logger.info(f"BEDPOSTX directory: {bedpostx_dir}")
+    logger.info(f"Number of ROIs: {n_rois}")
+    logger.info(f"Samples per voxel: {n_samples}")
+    logger.info(f"Output directory: {output_dir}")
+    logger.info(f"GPU acceleration: {use_gpu and probtrackx_gpu_available}")
+    logger.info(f"Estimated time: {n_rois * 3} minutes ({n_rois * 3 / 60:.1f} hours)")
+    logger.info("=" * 80)
+
+    # Initialize connectivity matrix
+    connectivity_matrix = np.zeros((n_rois, n_rois), dtype=np.float64)
+    waytotal_per_roi = np.zeros(n_rois, dtype=np.float64)
+    timing_per_roi = []
+
+    # Process each ROI as seed
+    batch_start = time_module.time()
+
+    for i, seed_roi in enumerate(roi_files):
+        roi_start = time_module.time()
+        roi_name = seed_roi.stem
+
+        logger.info(f"\n[ROI {i+1}/{n_rois}] Processing {roi_name}...")
+
+        # Create output directory for this ROI
+        roi_output_dir = output_dir / f"roi_{i:03d}"
+        roi_output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Build probtrackx2 command
+        # We seed from single ROI and track to all ROIs as targets
+        cmd = [
+            probtrackx_cmd,
+            f'--samples={str(bedpostx_outputs["merged"])}',
+            f'--mask={str(bedpostx_outputs["nodif_brain_mask"])}',
+            f'--seed={str(seed_roi)}',
+            f'--targetmasks={str(seeds_list)}',  # All ROIs as targets
+            f'--dir={str(roi_output_dir)}',
+            f'--nsamples={str(n_samples)}',
+            f'--steplength={str(step_length)}',
+            f'--cthr={str(curvature_threshold)}',
+            '--forcedir',
+            '--os2t',  # Output seeds to targets (gives us connectivity counts)
+        ]
+
+        # Optional parameters
+        if loop_check:
+            cmd.append('--loopcheck')
+
+        if distance_correct:
+            cmd.append('--distthresh=0.0')
+
+        if waypoint_mask is not None:
+            cmd.append(f'--waypoints={str(waypoint_mask)}')
+
+        if exclusion_mask is not None:
+            cmd.append(f'--avoid={str(exclusion_mask)}')
+
+        if termination_mask is not None:
+            cmd.append(f'--stop={str(termination_mask)}')
+
+        # Execute probtrackx2
+        log_file = roi_output_dir / "probtrackx2.log"
+
+        try:
+            with open(log_file, 'w') as f:
+                result = subprocess.run(
+                    cmd,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    check=True
+                )
+
+            # Read waytotal for this ROI
+            waytotal_file = roi_output_dir / 'waytotal'
+            if waytotal_file.exists():
+                with open(waytotal_file, 'r') as f:
+                    waytotal_per_roi[i] = float(f.read().strip())
+
+            # Read seeds_to_* files to get connectivity to each target
+            # The --os2t option creates files like seeds_to_roi_001.nii.gz
+            for j, target_roi in enumerate(roi_files):
+                target_name = target_roi.stem
+                # Look for the target file
+                target_file = roi_output_dir / f'seeds_to_{target_name}.nii.gz'
+
+                if target_file.exists():
+                    # Sum all voxels in the target file to get streamline count
+                    target_img = nib.load(target_file)
+                    target_data = target_img.get_fdata()
+                    connectivity_matrix[i, j] = np.sum(target_data)
+                else:
+                    # Alternative: check for numeric naming
+                    alt_file = roi_output_dir / f'seeds_to_{j+1}.nii.gz'
+                    if alt_file.exists():
+                        target_img = nib.load(alt_file)
+                        target_data = target_img.get_fdata()
+                        connectivity_matrix[i, j] = np.sum(target_data)
+
+            roi_elapsed = time_module.time() - roi_start
+            timing_per_roi.append(roi_elapsed)
+
+            # Log progress
+            total_elapsed = time_module.time() - batch_start
+            avg_time = total_elapsed / (i + 1)
+            remaining = avg_time * (n_rois - i - 1)
+
+            logger.info(f"  ✓ Completed in {roi_elapsed:.1f}s | "
+                       f"Total: {total_elapsed/60:.1f}min | "
+                       f"ETA: {remaining/60:.1f}min")
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"  ✗ Failed for ROI {roi_name}: {e}")
+            timing_per_roi.append(-1)
+            continue
+
+    # Total time
+    total_time = time_module.time() - batch_start
+    logger.info(f"\n{'='*80}")
+    logger.info(f"BATCH PROCESSING COMPLETE")
+    logger.info(f"Total time: {total_time/60:.1f} minutes ({total_time/3600:.2f} hours)")
+    logger.info(f"Average per ROI: {np.mean([t for t in timing_per_roi if t > 0]):.1f} seconds")
+    logger.info(f"{'='*80}")
+
+    # Save raw connectivity matrix
+    matrix_file = output_dir / 'connectivity_matrix_raw.npy'
+    np.save(matrix_file, connectivity_matrix)
+    logger.info(f"Saved raw matrix: {matrix_file}")
+
+    # Save waytotal
+    waytotal_file = output_dir / 'waytotal_per_roi.npy'
+    np.save(waytotal_file, waytotal_per_roi)
+
+    return {
+        'connectivity_matrix': connectivity_matrix,
+        'roi_files': roi_files,
+        'waytotal': waytotal_per_roi,
+        'output_dir': output_dir,
+        'timing': timing_per_roi,
+        'total_time': total_time
+    }
+
+
 def construct_connectivity_matrix(
     probtrackx_output_dir: Path,
     roi_names: List[str],
@@ -1418,7 +1971,9 @@ def compute_structural_connectivity(
     gm_mask: Optional[Path] = None,
     use_gmwmi_seeding: bool = False,
     gmwmi_method: str = 'volume',
-    config: Optional[Dict] = None
+    config: Optional[Dict] = None,
+    t1w_brain: Optional[Path] = None,
+    batch_mode: bool = False
 ) -> Dict:
     """
     Complete workflow: Compute structural connectivity matrix using probtrackx2
@@ -1451,6 +2006,13 @@ def compute_structural_connectivity(
         use_gmwmi_seeding: Seed from gray-white matter interface (default: False)
         gmwmi_method: GMWMI creation method - 'volume' or 'surface' (default: 'volume')
         config: Optional config dictionary to override all settings
+        t1w_brain: T1w brain image for FreeSurfer→T1w→DWI transform chain.
+            Required when using FreeSurfer-derived masks. If not provided,
+            will attempt to auto-discover from derivatives_dir/subject/anat/.
+        batch_mode: Use batch processing (one ROI at a time) instead of network
+            mode. This reduces memory usage from ~18GB to ~3GB, enabling GPU
+            processing on machines with limited RAM. Takes longer but is more
+            reliable. Default: False.
 
     Returns:
         Dictionary containing:
@@ -1481,6 +2043,26 @@ def compute_structural_connectivity(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     bedpostx_dir = Path(bedpostx_dir)
+
+    # Create transforms directory for caching registration transforms
+    transforms_dir = output_dir / 'transforms'
+    transforms_dir.mkdir(parents=True, exist_ok=True)
+
+    # Auto-discover T1w brain if not provided (required for FreeSurfer mask transforms)
+    if t1w_brain is None and subject is not None and derivatives_dir is not None:
+        derivatives_path = Path(derivatives_dir)
+        # Look for T1w brain in standard locations
+        t1w_candidates = [
+            derivatives_path / subject / 'anat' / 'brain' / '*_brain.nii.gz',
+            derivatives_path / subject / 'anat' / 'T1w_brain.nii.gz',
+            derivatives_path / subject / 'anat' / '*_brain.nii.gz',
+        ]
+        for pattern in t1w_candidates:
+            matches = list(pattern.parent.glob(pattern.name)) if pattern.parent.exists() else []
+            if matches:
+                t1w_brain = matches[0]
+                logger.info(f"Auto-discovered T1w brain: {t1w_brain}")
+                break
 
     logger.info("=" * 80)
     logger.info("STRUCTURAL CONNECTIVITY ANALYSIS")
@@ -1530,7 +2112,9 @@ def compute_structural_connectivity(
                     source=source_path,
                     output_file=ventricle_output,
                     source_type=source_type,
-                    reference=dwi_reference
+                    reference=dwi_reference,
+                    t1w_brain=t1w_brain,
+                    transforms_dir=transforms_dir
                 )
                 ventricle_mask_used = str(final_exclusion_mask)
                 logger.info(f"  Created ventricle mask from {source_type}: {final_exclusion_mask.name}")
@@ -1574,7 +2158,9 @@ def compute_structural_connectivity(
                     source=source_path,
                     output_file=wm_output,
                     source_type=source_type,
-                    reference=dwi_reference
+                    reference=dwi_reference,
+                    t1w_brain=t1w_brain,
+                    transforms_dir=transforms_dir
                 )
                 wm_mask_used = str(final_waypoint_mask)
                 logger.info(f"  Created WM mask from {source_type}: {final_waypoint_mask.name}")
@@ -1608,7 +2194,9 @@ def compute_structural_connectivity(
                         source=aparc_path,
                         output_file=gm_output,
                         source_type='freesurfer',
-                        reference=dwi_reference
+                        reference=dwi_reference,
+                        t1w_brain=t1w_brain,
+                        transforms_dir=transforms_dir
                     )
                     gm_mask_used = str(final_termination_mask)
 
@@ -1625,7 +2213,9 @@ def compute_structural_connectivity(
                             source=gm_path,
                             output_file=gm_output,
                             source_type='fsl_pve',
-                            reference=dwi_reference
+                            reference=dwi_reference,
+                            t1w_brain=t1w_brain,
+                            transforms_dir=transforms_dir
                         )
                         gm_mask_used = str(final_termination_mask)
                         break
@@ -1672,40 +2262,100 @@ def compute_structural_connectivity(
     )
     logger.info(f"✓ Created {len(roi_names)} ROI masks")
 
-    # Step 3: Run probtrackx2 in network mode
-    logger.info("\n[Step 3] Running probtrackx2 network mode...")
-    logger.info(f"  GPU acceleration: {use_gpu}")
-    if final_exclusion_mask:
-        logger.info(f"  Exclusion mask: {final_exclusion_mask}")
-    if final_waypoint_mask:
-        logger.info(f"  Waypoint mask (WM): {final_waypoint_mask}")
-    if final_termination_mask:
-        logger.info(f"  Termination mask (GM): {final_termination_mask}")
-
+    # Step 3: Run probtrackx2
     probtrackx_dir = output_dir / 'probtrackx_output'
-    probtrackx_outputs = run_probtrackx2_network(
-        bedpostx_dir=bedpostx_dir,
-        seeds_list=seeds_list,
-        output_dir=probtrackx_dir,
-        n_samples=n_samples,
-        step_length=step_length,
-        curvature_threshold=curvature_threshold,
-        waypoint_mask=final_waypoint_mask,
-        exclusion_mask=final_exclusion_mask,
-        termination_mask=final_termination_mask,
-        use_gpu=use_gpu
-    )
-    logger.info("✓ Probtrackx2 completed")
 
-    # Step 4: Construct connectivity matrix
-    logger.info("\n[Step 4] Constructing connectivity matrix...")
-    sc_results = construct_connectivity_matrix(
-        probtrackx_output_dir=probtrackx_dir,
-        roi_names=roi_names,
-        normalize=normalize,
-        threshold=threshold
-    )
-    logger.info("✓ Connectivity matrix constructed")
+    if batch_mode:
+        # Batch mode: process one ROI at a time (lower memory, GPU-friendly)
+        logger.info("\n[Step 3] Running probtrackx2 BATCH mode (one ROI at a time)...")
+        logger.info(f"  GPU acceleration: {use_gpu}")
+        logger.info(f"  Memory usage: ~3GB per ROI (vs ~18GB for network mode)")
+        if final_exclusion_mask:
+            logger.info(f"  Exclusion mask: {final_exclusion_mask}")
+        if final_waypoint_mask:
+            logger.info(f"  Waypoint mask (WM): {final_waypoint_mask}")
+        if final_termination_mask:
+            logger.info(f"  Termination mask (GM): {final_termination_mask}")
+
+        batch_results = run_probtrackx2_batch(
+            bedpostx_dir=bedpostx_dir,
+            roi_masks_dir=output_dir / 'roi_masks',
+            seeds_list=seeds_list,
+            output_dir=probtrackx_dir,
+            n_samples=n_samples,
+            step_length=step_length,
+            curvature_threshold=curvature_threshold,
+            waypoint_mask=final_waypoint_mask,
+            exclusion_mask=final_exclusion_mask,
+            termination_mask=final_termination_mask,
+            use_gpu=use_gpu
+        )
+        logger.info("✓ Batch processing completed")
+
+        # Batch mode returns connectivity matrix directly
+        # Normalize and threshold
+        connectivity_raw = batch_results['connectivity_matrix']
+        waytotal = batch_results['waytotal']
+
+        # Normalize by waytotal (row-wise)
+        if normalize:
+            connectivity_norm = np.zeros_like(connectivity_raw)
+            for i in range(connectivity_raw.shape[0]):
+                if waytotal[i] > 0:
+                    connectivity_norm[i, :] = connectivity_raw[i, :] / waytotal[i]
+        else:
+            connectivity_norm = connectivity_raw.copy()
+
+        # Apply threshold
+        if threshold is not None:
+            connectivity_norm[connectivity_norm < threshold] = 0
+
+        # Symmetrize
+        connectivity_symmetric = (connectivity_norm + connectivity_norm.T) / 2
+
+        sc_results = {
+            'connectivity_matrix': connectivity_symmetric,
+            'connectivity_matrix_raw': connectivity_raw,
+            'connectivity_matrix_normalized': connectivity_norm,
+            'waytotal': waytotal,
+            'roi_names': roi_names
+        }
+        probtrackx_outputs = {'batch_results': batch_results}
+
+    else:
+        # Network mode: all ROIs at once (higher memory requirement)
+        logger.info("\n[Step 3] Running probtrackx2 network mode...")
+        logger.info(f"  GPU acceleration: {use_gpu}")
+        if final_exclusion_mask:
+            logger.info(f"  Exclusion mask: {final_exclusion_mask}")
+        if final_waypoint_mask:
+            logger.info(f"  Waypoint mask (WM): {final_waypoint_mask}")
+        if final_termination_mask:
+            logger.info(f"  Termination mask (GM): {final_termination_mask}")
+
+        probtrackx_outputs = run_probtrackx2_network(
+            bedpostx_dir=bedpostx_dir,
+            seeds_list=seeds_list,
+            output_dir=probtrackx_dir,
+            n_samples=n_samples,
+            step_length=step_length,
+            curvature_threshold=curvature_threshold,
+            waypoint_mask=final_waypoint_mask,
+            exclusion_mask=final_exclusion_mask,
+            termination_mask=final_termination_mask,
+            use_gpu=use_gpu
+        )
+        logger.info("✓ Probtrackx2 completed")
+
+        # Step 4: Construct connectivity matrix
+        logger.info("\n[Step 4] Constructing connectivity matrix...")
+        sc_results = construct_connectivity_matrix(
+            probtrackx_output_dir=probtrackx_dir,
+            roi_names=roi_names,
+            normalize=normalize,
+            threshold=threshold
+        )
+        logger.info("✓ Connectivity matrix constructed")
 
     # Save connectivity matrix and metadata
     logger.info("\n[Step 5] Saving results...")
