@@ -556,6 +556,13 @@ results = run_dwi_multishell_topup_preprocessing(
 )
 ```
 
+**Single-Shell Support** (⚠️ In Progress):
+- Function `run_dwi_singleshell_preprocessing()` added for acquisitions without reverse PE data
+- Handles eddy correction without TOPUP, DTI fitting, optional BEDPOSTX
+- Produces DTI metrics only (FA, MD, AD, RD) - DKI/NODDI require multi-shell
+- **Status**: Function implemented, testing and pipeline auto-detection pending
+- **Subjects identified**: IRC805-3580101, IRC805-2350101 (b=800 single-shell)
+
 ### Advanced Diffusion Models (✅ Production-Ready)
 
 **Location**: `neurovrai/preprocess/workflows/advanced_diffusion.py`

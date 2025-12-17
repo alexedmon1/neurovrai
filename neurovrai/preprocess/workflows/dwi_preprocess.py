@@ -1421,3 +1421,391 @@ def run_dwi_preprocessing(
             logger.warning("  Run anatomical preprocessing first to compute transforms")
 
     return outputs
+
+
+def run_dwi_singleshell_preprocessing(
+    config: Dict[str, Any],
+    subject: str,
+    dwi_file: Path,
+    bval_file: Path,
+    bvec_file: Path,
+    output_dir: Path = None,
+    work_dir: Optional[Path] = None,
+    session: Optional[str] = None,
+    pe_direction: str = 'AP',
+    readout_time: float = 0.05,
+    run_bedpostx: bool = True
+) -> Dict[str, Path]:
+    """
+    Run single-shell DWI preprocessing without TOPUP correction.
+
+    This function handles single-shell acquisitions that lack reverse phase
+    encoding data for TOPUP. It performs:
+    1. Eddy correction (motion + eddy currents, no TOPUP distortion correction)
+    2. Brain extraction
+    3. DTI fitting (FA, MD, AD, RD)
+    4. Optional BEDPOSTX
+    5. Spatial normalization to FMRIB58_FA
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary
+    subject : str
+        Subject identifier
+    dwi_file : Path
+        Input DWI NIfTI file
+    bval_file : Path
+        b-value file
+    bvec_file : Path
+        b-vector file
+    output_dir : Path
+        Study root directory. Derivatives saved to {output_dir}/derivatives/{subject}/dwi/
+    work_dir : Path, optional
+        Working directory for temporary files
+    session : str, optional
+        Session identifier
+    pe_direction : str, default='AP'
+        Phase encoding direction ('AP', 'PA', 'LR', 'RL')
+    readout_time : float, default=0.05
+        Total readout time in seconds
+    run_bedpostx : bool, default=True
+        Run BEDPOSTX for fiber orientation estimation
+
+    Returns
+    -------
+    dict
+        Dictionary with output file paths
+
+    Notes
+    -----
+    Single-shell data can only produce DTI metrics (FA, MD, AD, RD).
+    Advanced models (DKI, NODDI) require multi-shell data and will be skipped.
+
+    Examples
+    --------
+    >>> results = run_dwi_singleshell_preprocessing(
+    ...     config=config,
+    ...     subject="sub-001",
+    ...     dwi_file=Path("dwi_b800.nii.gz"),
+    ...     bval_file=Path("dwi_b800.bval"),
+    ...     bvec_file=Path("dwi_b800.bvec"),
+    ...     output_dir=Path("/data/study"),
+    ...     pe_direction='AP',
+    ...     readout_time=0.05
+    ... )
+    """
+    logger = logging.getLogger(__name__)
+
+    # Convert paths
+    dwi_file = Path(dwi_file)
+    bval_file = Path(bval_file)
+    bvec_file = Path(bvec_file)
+    output_dir = Path(output_dir)
+
+    # Setup directories
+    derivatives_dir = output_dir / 'derivatives' / subject / 'dwi'
+    derivatives_dir.mkdir(parents=True, exist_ok=True)
+
+    if work_dir is None:
+        work_dir = output_dir / 'work' / subject / 'dwi_singleshell'
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    # Determine if BEDPOSTX should be run
+    bedpostx_config = config.get('bedpostx', {})
+    bedpostx_enabled = bedpostx_config.get('enabled', True)
+    run_bedpostx = run_bedpostx and bedpostx_enabled
+
+    logger.info("="*70)
+    logger.info("SINGLE-SHELL DWI PREPROCESSING")
+    logger.info("="*70)
+    logger.info(f"Subject: {subject}")
+    logger.info(f"Input DWI: {dwi_file.name}")
+    logger.info(f"Phase encoding: {pe_direction}")
+    logger.info(f"Readout time: {readout_time}s")
+    logger.info(f"Output: {derivatives_dir}")
+    logger.info(f"BEDPOSTX: {'enabled' if run_bedpostx else 'disabled'}")
+    logger.info("")
+
+    # Check b-values
+    bvals = np.loadtxt(bval_file)
+    unique_bvals = np.unique(bvals[bvals > 50])
+    logger.info(f"Detected b-values: {unique_bvals}")
+    if len(unique_bvals) > 1:
+        logger.warning(f"Multiple b-values detected ({len(unique_bvals)}). Consider using multi-shell pipeline.")
+
+    # Get number of volumes
+    n_vols = _get_nvols(dwi_file)
+    logger.info(f"Number of volumes: {n_vols}")
+
+    # Step 1: Create acqparams.txt for eddy
+    logger.info("")
+    logger.info("Step 1: Creating acquisition parameters for eddy")
+    acqparams_file = work_dir / 'acqparams.txt'
+
+    # Map direction to vector
+    direction_map = {
+        'AP': (0, -1, 0), 'j-': (0, -1, 0),
+        'PA': (0, 1, 0), 'j': (0, 1, 0),
+        'LR': (-1, 0, 0), 'i-': (-1, 0, 0),
+        'RL': (1, 0, 0), 'i': (1, 0, 0),
+    }
+
+    if pe_direction not in direction_map:
+        raise ValueError(f"Invalid PE direction: {pe_direction}. Use AP, PA, LR, or RL")
+
+    pe_vec = direction_map[pe_direction]
+    with open(acqparams_file, 'w') as f:
+        f.write(f"{pe_vec[0]} {pe_vec[1]} {pe_vec[2]} {readout_time}\n")
+    logger.info(f"  Created: {acqparams_file}")
+
+    # Step 2: Create index.txt (all volumes map to line 1)
+    logger.info("Step 2: Creating index file for eddy")
+    index_file = work_dir / 'index.txt'
+    with open(index_file, 'w') as f:
+        f.write(' '.join(['1'] * n_vols) + '\n')
+    logger.info(f"  Created: {index_file}")
+
+    # Step 3: Create initial brain mask for eddy
+    logger.info("")
+    logger.info("Step 3: Creating initial brain mask")
+
+    # Extract first b0 volume
+    b0_file = work_dir / 'b0.nii.gz'
+    b0_indices = np.where(bvals < 50)[0]
+    if len(b0_indices) == 0:
+        # No b0, use first volume
+        logger.warning("No b=0 volume found, using first volume for mask")
+        b0_idx = 0
+    else:
+        b0_idx = b0_indices[0]
+
+    subprocess.run([
+        'fslroi', str(dwi_file), str(b0_file), str(b0_idx), '1'
+    ], check=True)
+
+    # BET on b0
+    b0_mask_file = work_dir / 'b0_brain_mask.nii.gz'
+    subprocess.run([
+        'bet', str(b0_file), str(work_dir / 'b0_brain'),
+        '-f', '0.3', '-m'
+    ], check=True)
+    logger.info(f"  Brain mask: {b0_mask_file}")
+
+    # Step 4: Run eddy correction
+    logger.info("")
+    logger.info("Step 4: Running eddy correction (without TOPUP)")
+
+    eddy_config = config.get('diffusion', {}).get('eddy_config', {})
+    use_cuda = eddy_config.get('use_cuda', True)
+
+    eddy_output = work_dir / 'dwi_eddy'
+    eddy_cmd = [
+        'eddy_cuda' if use_cuda else 'eddy',
+        f'--imain={dwi_file}',
+        f'--mask={b0_mask_file}',
+        f'--acqp={acqparams_file}',
+        f'--index={index_file}',
+        f'--bvecs={bvec_file}',
+        f'--bvals={bval_file}',
+        f'--out={eddy_output}',
+        '--flm=linear',
+        '--slm=linear',
+        '--repol',
+        '--data_is_shelled'
+    ]
+
+    logger.info(f"  Running: {' '.join(eddy_cmd)}")
+    result = subprocess.run(eddy_cmd, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        if use_cuda:
+            logger.warning("CUDA eddy failed, trying CPU version")
+            eddy_cmd[0] = 'eddy'
+            result = subprocess.run(eddy_cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            logger.error(f"Eddy failed: {result.stderr}")
+            raise RuntimeError("Eddy correction failed")
+
+    eddy_corrected = Path(str(eddy_output) + '.nii.gz')
+    rotated_bvec = Path(str(eddy_output) + '.eddy_rotated_bvecs')
+    logger.info(f"  Eddy corrected: {eddy_corrected.name}")
+
+    # Copy to derivatives
+    final_dwi = derivatives_dir / 'dwi_eddy_corrected.nii.gz'
+    final_bvec = derivatives_dir / 'dwi_eddy_rotated.bvec'
+    final_bval = derivatives_dir / 'dwi.bval'
+
+    import shutil
+    shutil.copy(eddy_corrected, final_dwi)
+    shutil.copy(rotated_bvec, final_bvec)
+    shutil.copy(bval_file, final_bval)
+
+    # Step 5: Brain extraction on eddy-corrected data
+    logger.info("")
+    logger.info("Step 5: Brain extraction on eddy-corrected data")
+
+    mean_dwi = derivatives_dir / 'dwi_mean.nii.gz'
+    subprocess.run(['fslmaths', str(final_dwi), '-Tmean', str(mean_dwi)], check=True)
+
+    mask_file = derivatives_dir / 'dwi_brain_mask.nii.gz'
+    brain_file = derivatives_dir / 'dwi_brain.nii.gz'
+    subprocess.run([
+        'bet', str(mean_dwi), str(brain_file), '-f', '0.3', '-m'
+    ], check=True)
+
+    # Rename mask (bet creates _mask suffix)
+    bet_mask = derivatives_dir / 'dwi_brain_mask.nii.gz'
+    if bet_mask.exists():
+        mask_file = bet_mask
+    logger.info(f"  Brain mask: {mask_file.name}")
+
+    # Step 6: DTI fitting
+    logger.info("")
+    logger.info("Step 6: Fitting diffusion tensor (DTIFit)")
+
+    dti_dir = derivatives_dir / 'dti'
+    dti_dir.mkdir(exist_ok=True)
+    dti_basename = dti_dir / 'dti'
+
+    subprocess.run([
+        'dtifit',
+        '-k', str(final_dwi),
+        '-m', str(mask_file),
+        '-r', str(final_bvec),
+        '-b', str(final_bval),
+        '-o', str(dti_basename)
+    ], check=True)
+
+    # Calculate AD and RD
+    logger.info("  Calculating AD and RD...")
+    ad_file, rd_file = calculate_ad_rd(
+        l1_file=dti_dir / 'dti_L1.nii.gz',
+        l2_file=dti_dir / 'dti_L2.nii.gz',
+        l3_file=dti_dir / 'dti_L3.nii.gz',
+        output_dir=dti_dir
+    )
+
+    fa_file = dti_dir / 'dti_FA.nii.gz'
+    md_file = dti_dir / 'dti_MD.nii.gz'
+    logger.info(f"  FA: {fa_file.name}")
+    logger.info(f"  MD: {md_file.name}")
+    logger.info(f"  AD: {ad_file.name}")
+    logger.info(f"  RD: {rd_file.name}")
+
+    # Collect outputs
+    outputs = {
+        'eddy_corrected': final_dwi,
+        'bval': final_bval,
+        'bvec': final_bvec,
+        'mask': mask_file,
+        'fa': fa_file,
+        'md': md_file,
+        'ad': ad_file,
+        'rd': rd_file,
+    }
+
+    # Step 7: BEDPOSTX (optional)
+    if run_bedpostx:
+        logger.info("")
+        logger.info("="*70)
+        logger.info("Step 7: Running BEDPOSTX (fiber orientation estimation)")
+        logger.info("="*70)
+
+        # Create BEDPOSTX input directory
+        bedpostx_input = derivatives_dir / 'bedpostx_input'
+        bedpostx_input.mkdir(exist_ok=True)
+
+        # BEDPOSTX requires specific file names
+        shutil.copy(final_dwi, bedpostx_input / 'data.nii.gz')
+        shutil.copy(mask_file, bedpostx_input / 'nodif_brain_mask.nii.gz')
+        shutil.copy(final_bval, bedpostx_input / 'bvals')
+        shutil.copy(final_bvec, bedpostx_input / 'bvecs')
+
+        # Check for GPU
+        bedpostx_gpu = bedpostx_config.get('use_gpu', True)
+
+        bedpostx_cmd = 'bedpostx_gpu' if bedpostx_gpu else 'bedpostx'
+
+        logger.info(f"  Running {bedpostx_cmd}...")
+        result = subprocess.run([
+            bedpostx_cmd, str(bedpostx_input)
+        ], capture_output=True, text=True)
+
+        if result.returncode != 0:
+            if bedpostx_gpu:
+                logger.warning("GPU BEDPOSTX failed, trying CPU version")
+                result = subprocess.run([
+                    'bedpostx', str(bedpostx_input)
+                ], capture_output=True, text=True)
+
+        # BEDPOSTX creates output in input.bedpostX
+        bedpostx_created = bedpostx_input.with_suffix('.bedpostX')
+        if bedpostx_created.exists():
+            bedpostx_output = derivatives_dir / 'bedpostx'
+            if bedpostx_output.exists():
+                shutil.rmtree(bedpostx_output)
+            shutil.move(str(bedpostx_created), str(bedpostx_output))
+            outputs['bedpostx_dir'] = bedpostx_output
+            logger.info(f"  BEDPOSTX output: {bedpostx_output}")
+        else:
+            logger.warning(f"  BEDPOSTX output not found")
+
+    # Step 8: Spatial normalization to FMRIB58_FA
+    logger.info("")
+    logger.info("="*70)
+    logger.info("Step 8: Normalizing to FMRIB58_FA template")
+    logger.info("="*70)
+
+    if fa_file.exists():
+        try:
+            norm_outputs = normalize_dwi_to_fmrib58(
+                fa_file=fa_file,
+                output_dir=derivatives_dir / 'normalized',
+                fnirt_config=None
+            )
+
+            # Warp other metrics
+            if norm_outputs.get('warp_field'):
+                warped = apply_warp_to_metrics(
+                    metrics={'md': md_file, 'ad': ad_file, 'rd': rd_file},
+                    warp_field=norm_outputs['warp_field'],
+                    ref_file=norm_outputs['reference'],
+                    output_dir=derivatives_dir / 'normalized'
+                )
+                outputs.update({
+                    'fa_mni': norm_outputs.get('fa_normalized'),
+                    'md_mni': warped.get('md'),
+                    'ad_mni': warped.get('ad'),
+                    'rd_mni': warped.get('rd'),
+                    'warp_to_mni': norm_outputs.get('warp_field'),
+                })
+                logger.info("  ✓ Normalization complete")
+        except Exception as e:
+            logger.warning(f"  Normalization failed: {e}")
+    else:
+        logger.warning("  FA file not found, skipping normalization")
+
+    # Summary
+    logger.info("")
+    logger.info("="*70)
+    logger.info("SINGLE-SHELL PREPROCESSING COMPLETE")
+    logger.info("="*70)
+    logger.info(f"Output directory: {derivatives_dir}")
+    for key, path in outputs.items():
+        if path and Path(path).exists():
+            logger.info(f"  {key}: {Path(path).name}")
+
+    return outputs
+
+
+def _get_nvols(nifti_file: Path) -> int:
+    """Get number of volumes in a 4D NIfTI file."""
+    import nibabel as nib
+    img = nib.load(str(nifti_file))
+    shape = img.shape
+    if len(shape) == 4:
+        return shape[3]
+    return 1

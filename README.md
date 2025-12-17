@@ -182,6 +182,8 @@ results = run_dwi_multishell_topup_preprocessing(
 
 **Outputs**: `eddy_corrected.nii.gz`, `dti/FA.nii.gz`, `dti/MD.nii.gz`, `dki/MK.nii.gz`, `noddi/ficvf.nii.gz`
 
+**Single-Shell Support** (In Progress): A `run_dwi_singleshell_preprocessing()` function is available for acquisitions without reverse phase-encoding data (no TOPUP). Single-shell data produces DTI metrics only (FA, MD, AD, RD). Testing and pipeline integration pending.
+
 ### Functional (fMRI)
 
 **Pipeline**: MCFLIRT motion correction → TEDANA (multi-echo) or ICA-AROMA (single-echo) → ACompCor → Bandpass filtering → Smoothing
