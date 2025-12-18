@@ -812,6 +812,7 @@ def create_gmwmi_mask(
                 'mri_surf2vol',
                 '--hemi', 'lh',
                 '--surf', 'white',
+                '--mkmask',
                 '--o', str(lh_vol),
                 '--template', str(orig_mgz),
                 '--sd', str(fs_subject_dir.parent),
@@ -823,6 +824,7 @@ def create_gmwmi_mask(
                 'mri_surf2vol',
                 '--hemi', 'rh',
                 '--surf', 'white',
+                '--mkmask',
                 '--o', str(rh_vol),
                 '--template', str(orig_mgz),
                 '--sd', str(fs_subject_dir.parent),
@@ -2030,6 +2032,7 @@ def compute_structural_connectivity(
         sc_config = get_tractography_config(config)
         # Override parameters from config
         use_gpu = sc_config['tractography'].get('use_gpu', use_gpu)
+        batch_mode = sc_config['tractography'].get('batch_mode', batch_mode)
         n_samples = sc_config['tractography'].get('n_samples', n_samples)
         step_length = sc_config['tractography'].get('step_length', step_length)
         curvature_threshold = sc_config['tractography'].get('curvature_threshold', curvature_threshold)
