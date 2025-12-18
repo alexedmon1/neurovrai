@@ -1074,6 +1074,7 @@ def get_tractography_config(config: Optional[Dict] = None) -> Dict:
     defaults = {
         'tractography': {
             'use_gpu': False,  # Default to CPU for stability with large atlases
+            'batch_mode': True,  # Default to batch mode (one ROI at a time) for GPU stability
             'n_samples': 5000,
             'step_length': 0.5,
             'curvature_threshold': 0.2,

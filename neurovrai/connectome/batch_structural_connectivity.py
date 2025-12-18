@@ -327,6 +327,8 @@ def process_subject_atlas_structural(
     threshold: Optional[float] = None,
     avoid_ventricles: bool = True,
     config: Optional[Dict] = None,
+    batch_mode: bool = True,
+    use_gpu: bool = True,
 ) -> Dict:
     """
     Process structural connectivity for one subject with one atlas
@@ -344,6 +346,9 @@ def process_subject_atlas_structural(
         threshold: Optional threshold for weak connections
         avoid_ventricles: Exclude streamlines through ventricles (default: True)
         config: Optional config dictionary for all tractography settings
+        batch_mode: Use batch processing (one ROI at a time) instead of network
+            mode. Reduces memory ~18GB to ~3GB, enabling GPU processing (default: True)
+        use_gpu: Use GPU acceleration for probtrackx2 (default: True)
 
     Returns:
         Dictionary with results and status
