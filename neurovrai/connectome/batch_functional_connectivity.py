@@ -21,6 +21,9 @@ from typing import Dict, List, Optional, Tuple
 
 import nibabel as nib
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend for server
+import matplotlib.pyplot as plt
 
 from neurovrai.connectome.roi_extraction import extract_roi_timeseries, load_atlas
 from neurovrai.connectome.functional_connectivity import compute_functional_connectivity
@@ -148,6 +151,98 @@ def setup_logging(output_dir: Path, verbose: bool = False) -> logging.Logger:
     return logger
 
 
+def generate_atlas_registration_qc(
+    subject: str,
+    atlas_file: Path,
+    func_ref: Path,
+    qc_dir: Path,
+    atlas_name: str = 'atlas',
+    logger: Optional[logging.Logger] = None
+) -> Optional[Path]:
+    """
+    Generate QC visualization for atlas registration on functional data.
+
+    Creates a 3x3 grid showing atlas overlay on functional data in
+    axial, coronal, and sagittal views.
+
+    Args:
+        subject: Subject ID
+        atlas_file: Path to atlas transformed to functional space
+        func_ref: Path to functional reference (mean or brain)
+        qc_dir: Base QC directory (will create {qc_dir}/{subject}/fc/)
+        atlas_name: Name of atlas for output filename
+        logger: Optional logger
+
+    Returns:
+        Path to saved QC image, or None if failed
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    try:
+        # Create subject QC directory
+        subject_qc_dir = qc_dir / subject / 'fc'
+        subject_qc_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load data
+        atlas_img = nib.load(atlas_file)
+        func_img = nib.load(func_ref)
+        atlas_data = atlas_img.get_fdata()
+        func_data = func_img.get_fdata()
+
+        # Handle 4D functional data
+        if func_data.ndim == 4:
+            func_data = func_data.mean(axis=3)
+
+        # Create figure
+        fig, axes = plt.subplots(3, 3, figsize=(12, 12))
+        fig.suptitle(f'Atlas Registration QC: {subject}\nAtlas: {atlas_name}', fontsize=14)
+
+        # Axial slices
+        z_slices = [atlas_data.shape[2]//4, atlas_data.shape[2]//2, 3*atlas_data.shape[2]//4]
+        for i, z in enumerate(z_slices):
+            ax = axes[0, i]
+            ax.imshow(func_data[:,:,z].T, cmap='gray', origin='lower')
+            masked = np.ma.masked_where(atlas_data[:,:,z] == 0, atlas_data[:,:,z])
+            ax.imshow(masked.T, cmap='nipy_spectral', alpha=0.5, origin='lower')
+            ax.set_title(f'Axial z={z}')
+            ax.axis('off')
+
+        # Coronal slices
+        y_slices = [atlas_data.shape[1]//4, atlas_data.shape[1]//2, 3*atlas_data.shape[1]//4]
+        for i, y in enumerate(y_slices):
+            ax = axes[1, i]
+            ax.imshow(func_data[:,y,:].T, cmap='gray', origin='lower')
+            masked = np.ma.masked_where(atlas_data[:,y,:] == 0, atlas_data[:,y,:])
+            ax.imshow(masked.T, cmap='nipy_spectral', alpha=0.5, origin='lower')
+            ax.set_title(f'Coronal y={y}')
+            ax.axis('off')
+
+        # Sagittal slices
+        x_slices = [atlas_data.shape[0]//4, atlas_data.shape[0]//2, 3*atlas_data.shape[0]//4]
+        for i, x in enumerate(x_slices):
+            ax = axes[2, i]
+            ax.imshow(func_data[x,:,:].T, cmap='gray', origin='lower')
+            masked = np.ma.masked_where(atlas_data[x,:,:] == 0, atlas_data[x,:,:])
+            ax.imshow(masked.T, cmap='nipy_spectral', alpha=0.5, origin='lower')
+            ax.set_title(f'Sagittal x={x}')
+            ax.axis('off')
+
+        plt.tight_layout()
+
+        # Save QC image
+        qc_file = subject_qc_dir / f'{subject}_{atlas_name}_registration.png'
+        plt.savefig(qc_file, dpi=100, bbox_inches='tight')
+        plt.close()
+
+        logger.info(f"  QC image saved: {qc_file}")
+        return qc_file
+
+    except Exception as e:
+        logger.warning(f"  QC generation failed: {e}")
+        return None
+
+
 def find_subjects(study_root: Path) -> List[str]:
     """Find all subjects with preprocessed functional data"""
     derivatives_dir = study_root / "derivatives"
@@ -166,16 +261,41 @@ def get_subject_files(study_root: Path, subject: str) -> Dict[str, Path]:
     deriv_dir = study_root / "derivatives" / subject
     func_dir = deriv_dir / "func"
 
+    # Find functional file (try preprocessed, then bandpass filtered)
+    func_file = func_dir / f"{subject}_bold_preprocessed.nii.gz"
+    if not func_file.exists():
+        func_file = func_dir / f"{subject}_bold_bandpass_filtered.nii.gz"
+
+    # Find brain mask (variable naming convention)
+    brain_dir = func_dir / "brain"
+    mask_file = None
+    if brain_dir.exists():
+        mask_files = list(brain_dir.glob('*brain_mask.nii.gz'))
+        if mask_files:
+            mask_file = mask_files[0]
+
+    # Fallback to standard names
+    if mask_file is None:
+        mask_file = func_dir / "func_mask.nii.gz"
+
+    # Find brain file
+    brain_file = func_dir / "func_brain.nii.gz"
+    if not brain_file.exists() and brain_dir.exists():
+        brain_files = list(brain_dir.glob('*brain.nii.gz'))
+        if brain_files:
+            brain_file = brain_files[0]
+
     files = {
-        'func': func_dir / f"{subject}_bold_preprocessed.nii.gz",
-        'mask': func_dir / "func_mask.nii.gz",
-        'brain': func_dir / "func_brain.nii.gz",
+        'func': func_file,
+        'mask': mask_file,
+        'brain': brain_file,
     }
 
-    # Validate files exist
-    for key, filepath in files.items():
-        if not filepath.exists():
-            raise FileNotFoundError(f"{key} file not found: {filepath}")
+    # Validate critical files exist
+    if not files['func'].exists():
+        raise FileNotFoundError(f"func file not found: {files['func']}")
+    if not files['mask'].exists():
+        raise FileNotFoundError(f"mask file not found: {files['mask']}")
 
     return files
 
@@ -190,6 +310,8 @@ def process_subject_atlas(
     fs_subjects_dir: Optional[Path] = None,
     method: str = 'pearson',
     fisher_z: bool = True,
+    qc_dir: Optional[Path] = None,
+    run_qc: bool = True,
     logger: logging.Logger = None
 ) -> Dict:
     """
@@ -205,6 +327,8 @@ def process_subject_atlas(
         fs_subjects_dir: FreeSurfer subjects directory (for FS atlases)
         method: Correlation method ('pearson' or 'spearman')
         fisher_z: Apply Fisher z-transformation
+        qc_dir: QC output directory (default: None - skips QC)
+        run_qc: Whether to generate QC images
         logger: Logger instance
 
     Returns:
@@ -258,6 +382,7 @@ def process_subject_atlas(
             # Transform atlas to functional space
             resampled_file = subject_atlas_dir / f"atlas_{atlas_name}_in_func.nii.gz"
             intermediate_dir = subject_atlas_dir / 'intermediate'
+            intermediate_dir.mkdir(parents=True, exist_ok=True)
 
             atlas_func, roi_names = transformer.transform_atlas_to_func(
                 atlas_name=atlas_name,
@@ -273,6 +398,7 @@ def process_subject_atlas(
                 atlas_file=resampled_file,
                 labels_file=None  # ROI names from FreeSurfer labels
             )
+            atlas_in_func_file = resampled_file
 
         else:
             # MNI atlas - simple resampling
@@ -305,11 +431,13 @@ def process_subject_atlas(
                     atlas_file=resampled_file,
                     labels_file=atlas_config.get('labels')
                 )
+                atlas_in_func_file = resampled_file
             else:
                 atlas = load_atlas(
                     atlas_file=atlas_file,
                     labels_file=atlas_config.get('labels')
                 )
+                atlas_in_func_file = atlas_file  # Original atlas (already in right space)
 
             roi_names = None  # Will be extracted from atlas
 
@@ -349,7 +477,8 @@ def process_subject_atlas(
             'subject': subject,
             'atlas': atlas_name,
             'atlas_description': atlas_config['description'],
-            'atlas_file': str(atlas_config['file']),
+            'atlas_file': str(atlas_config.get('file', 'freesurfer')),
+            'atlas_source': atlas_config.get('source', 'unknown'),
             'func_file': str(files['func']),
             'n_rois': len(roi_names),
             'n_timepoints': timeseries.shape[0],
@@ -366,6 +495,21 @@ def process_subject_atlas(
         logger.info(f"✓ Success! Results saved to: {subject_atlas_dir}")
         logger.info(f"  Mean connectivity: {fc_results['summary']['mean_connectivity']:.4f}")
         logger.info(f"  Non-zero edges: {fc_results['summary']['n_edges_nonzero']}")
+
+        # Generate QC visualization
+        qc_file = None
+        if run_qc and qc_dir is not None:
+            # Find functional reference for QC
+            func_ref = files.get('brain') or files.get('mask')
+            if func_ref and func_ref.exists():
+                qc_file = generate_atlas_registration_qc(
+                    subject=subject,
+                    atlas_file=atlas_in_func_file,
+                    func_ref=func_ref,
+                    qc_dir=qc_dir,
+                    atlas_name=atlas_name,
+                    logger=logger
+                )
 
         return {
             'subject': subject,
@@ -446,6 +590,18 @@ def main():
         help='Enable verbose logging'
     )
 
+    parser.add_argument(
+        '--qc-dir',
+        type=Path,
+        help='QC output directory (default: {study-root}/qc)'
+    )
+
+    parser.add_argument(
+        '--no-qc',
+        action='store_true',
+        help='Skip QC image generation'
+    )
+
     args = parser.parse_args()
 
     # Set output directory
@@ -453,6 +609,12 @@ def main():
         args.output_dir = args.study_root / "analysis" / "func" / "connectivity"
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Set QC directory
+    if args.qc_dir is None:
+        args.qc_dir = args.study_root / "qc"
+
+    args.qc_dir.mkdir(parents=True, exist_ok=True)
 
     # Derivatives directory
     derivatives_dir = args.study_root / "derivatives"
@@ -531,6 +693,8 @@ def main():
                     fs_subjects_dir=args.fs_subjects_dir,
                     method=args.method,
                     fisher_z=not args.no_fisher_z,
+                    qc_dir=args.qc_dir,
+                    run_qc=not args.no_qc,
                     logger=logger
                 )
 

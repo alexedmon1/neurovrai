@@ -181,13 +181,14 @@ class FuncAtlasTransformer:
             self.subject_func / 'brain' / 'func_brain.nii.gz',
             self.subject_func / 'func_brain.nii.gz',
             self.subject_func / 'mean_bold.nii.gz',
+            self.subject_func / 'registration' / 'func_mean.nii.gz',
         ]
         for candidate in func_ref_candidates:
             if candidate.exists():
                 self.transforms['func_ref'] = candidate
                 break
 
-        # Functional mask
+        # Functional mask - also try glob pattern for variable naming
         mask_candidates = [
             self.subject_func / 'brain' / 'func_mask.nii.gz',
             self.subject_func / 'func_mask.nii.gz',
@@ -196,6 +197,14 @@ class FuncAtlasTransformer:
             if candidate.exists():
                 self.transforms['func_mask'] = candidate
                 break
+
+        # Glob fallback for func_mask (variable naming convention)
+        if 'func_mask' not in self.transforms:
+            brain_dir = self.subject_func / 'brain'
+            if brain_dir.exists():
+                masks = list(brain_dir.glob('*brain_mask.nii.gz'))
+                if masks:
+                    self.transforms['func_mask'] = masks[0]
 
         # Functional → T1w transform (need inverse for T1w → Func)
         reg_dir = self.subject_func / 'registration'
@@ -421,79 +430,76 @@ class FuncAtlasTransformer:
 
         logger.info(f"Transforming FreeSurfer {atlas_type} to functional space")
 
-        # Step 1: Extract atlas from FreeSurfer (converts to NIfTI in FS space)
-        atlas_fs = intermediate_dir / f'{atlas_type}_fs.nii.gz'
-        self._extract_freesurfer_atlas(
-            fs_subject_dir=fs_subject_dir,
-            atlas_type=atlas_type,
-            output_file=atlas_fs
-        )
-
-        # Step 2: FreeSurfer → T1w
-        # FreeSurfer's orig.mgz is typically in alignment with the preprocessed T1w
-        # We may need to register, but often they're already aligned
+        # Step 1: Use mri_vol2vol to resample atlas directly to T1w space
+        # This is fast because FreeSurfer was run on the same T1w - uses --regheader
         atlas_in_t1w = intermediate_dir / f'{atlas_type}_in_t1w.nii.gz'
+        atlas_mgz = fs_subject_dir / 'mri' / f'{atlas_type}.mgz'
 
-        # Check if FS orig and T1w are aligned (same dimensions/affine)
-        fs_orig = fs_subject_dir / 'mri' / 'orig.mgz'
-        if fs_orig.exists():
-            # Register FS to T1w if needed
-            fs_to_t1w_mat = intermediate_dir / 'fs_to_t1w.mat'
-            self._compute_fs_to_t1w_transform(
-                fs_orig=fs_orig,
-                t1w_brain=t1w_brain,
-                output_mat=fs_to_t1w_mat
-            )
+        if not atlas_mgz.exists():
+            raise FileNotFoundError(f"FreeSurfer atlas not found: {atlas_mgz}")
 
-            logger.info("  Step 2: FreeSurfer → T1w (FLIRT)")
-            cmd = [
+        logger.info("  Step 1: FreeSurfer → T1w (mri_vol2vol --regheader)")
+        cmd_vol2vol = [
+            'mri_vol2vol',
+            '--mov', str(atlas_mgz),
+            '--targ', str(t1w_brain),
+            '--regheader',
+            '--o', str(atlas_in_t1w),
+            '--interp', 'nearest',
+            '--no-save-reg'
+        ]
+        result = subprocess.run(cmd_vol2vol, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"mri_vol2vol failed: {result.stderr}")
+
+        # Step 2: T1w → Func using ANTs inverse transform
+        # Check if we have ANTs affine (func_to_t1w0GenericAffine.mat)
+        if str(func_to_t1w_mat).endswith('.mat') and 'GenericAffine' in str(func_to_t1w_mat):
+            # ANTs affine - use antsApplyTransforms with inverse
+            logger.info("  Step 2: T1w → Func (ANTs inverse)")
+            cmd_ants = [
+                'antsApplyTransforms',
+                '-d', '3',
+                '-i', str(atlas_in_t1w),
+                '-r', str(func_ref),
+                '-o', str(output_file),
+                '-n', 'NearestNeighbor',
+                '-t', f'[{str(func_to_t1w_mat)},1]'  # ,1 = inverse
+            ]
+            result = subprocess.run(cmd_ants, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"antsApplyTransforms failed: {result.stderr}")
+        else:
+            # FSL FLIRT matrix - use convert_xfm and flirt
+            t1w_to_func_mat = intermediate_dir / 't1w_to_func.mat'
+
+            logger.info("  Step 2a: Computing T1w → Func inverse transform")
+            cmd_invert = [
+                'convert_xfm',
+                '-omat', str(t1w_to_func_mat),
+                '-inverse', str(func_to_t1w_mat)
+            ]
+            result = subprocess.run(cmd_invert, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"convert_xfm inverse failed: {result.stderr}")
+
+            logger.info("  Step 2b: T1w → Func (FLIRT inverse)")
+            cmd_flirt = [
                 'flirt',
-                '-in', str(atlas_fs),
-                '-ref', str(t1w_brain),
+                '-in', str(atlas_in_t1w),
+                '-ref', str(func_ref),
                 '-applyxfm',
-                '-init', str(fs_to_t1w_mat),
-                '-out', str(atlas_in_t1w),
+                '-init', str(t1w_to_func_mat),
+                '-out', str(output_file),
                 '-interp', 'nearestneighbour'
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd_flirt, capture_output=True, text=True)
             if result.returncode != 0:
-                raise RuntimeError(f"FLIRT FS→T1w failed: {result.stderr}")
-        else:
-            # Assume atlas is already in T1w space
-            atlas_in_t1w = atlas_fs
+                raise RuntimeError(f"FLIRT T1w→Func failed: {result.stderr}")
 
-        # Step 3: T1w → Func (inverse of func_to_t1w)
-        t1w_to_func_mat = intermediate_dir / 't1w_to_func.mat'
-
-        logger.info("  Step 3: Computing T1w → Func inverse transform")
-        cmd_invert = [
-            'convert_xfm',
-            '-omat', str(t1w_to_func_mat),
-            '-inverse', str(func_to_t1w_mat)
-        ]
-        result = subprocess.run(cmd_invert, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"convert_xfm inverse failed: {result.stderr}")
-
-        logger.info("  Step 4: T1w → Func (FLIRT inverse)")
-        cmd_flirt = [
-            'flirt',
-            '-in', str(atlas_in_t1w),
-            '-ref', str(func_ref),
-            '-applyxfm',
-            '-init', str(t1w_to_func_mat),
-            '-out', str(output_file),
-            '-interp', 'nearestneighbour'
-        ]
-
-        result = subprocess.run(cmd_flirt, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"FLIRT T1w→Func failed: {result.stderr}")
-
-        # Clean up intermediate
-        for f in [atlas_fs, atlas_in_t1w]:
-            if f.exists() and f != output_file:
-                f.unlink()
+        # Clean up intermediate files
+        if atlas_in_t1w.exists() and atlas_in_t1w != output_file:
+            atlas_in_t1w.unlink()
 
         logger.info(f"  Output: {output_file}")
         return output_file
