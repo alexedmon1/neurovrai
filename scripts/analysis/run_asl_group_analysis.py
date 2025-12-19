@@ -119,31 +119,63 @@ def gather_subject_maps(
     return output_4d, subject_ids
 
 
-def create_mean_mask(image_4d: Path, output_dir: Path) -> Path:
+def create_mean_mask(image_4d: Path, output_dir: Path, brain_mask: Path = None) -> Path:
     """
-    Create a mean mask from 4D image (non-zero voxels across subjects)
+    Create a group mask from 4D image, constrained to brain region.
+
+    The mask includes voxels that:
+    1. Are within the brain (MNI brain mask)
+    2. Have valid (non-zero) data in at least 50% of subjects
 
     Args:
         image_4d: Path to 4D image
         output_dir: Output directory
+        brain_mask: Path to brain mask (default: MNI152_T1_2mm_brain_mask)
 
     Returns:
         Path to mask file
     """
+    import os
     logging.info("\nCreating group mask...")
 
     img = nib.load(image_4d)
     data = img.get_fdata()
 
-    # Mask: voxels that are non-zero in at least 50% of subjects
+    # Load brain mask (CRITICAL: constrains analysis to brain only)
+    if brain_mask is None:
+        fsldir = os.environ.get('FSLDIR', '/usr/local/fsl')
+        brain_mask = Path(fsldir) / 'data' / 'standard' / 'MNI152_T1_2mm_brain_mask.nii.gz'
+
+    if not brain_mask.exists():
+        raise FileNotFoundError(f"Brain mask not found: {brain_mask}")
+
+    brain_img = nib.load(brain_mask)
+    brain_data = brain_img.get_fdata()
+
+    logging.info(f"  Using brain mask: {brain_mask}")
+    n_brain_voxels = np.sum(brain_data > 0)
+    logging.info(f"  Brain mask voxels: {n_brain_voxels:,}")
+
+    # Create data mask: voxels that are non-zero in at least 50% of subjects
     n_subjects = data.shape[3]
     threshold = n_subjects * 0.5
 
     nonzero_count = np.sum(data != 0, axis=3)
-    mask = (nonzero_count >= threshold).astype(np.uint8)
+    data_mask = (nonzero_count >= threshold).astype(np.uint8)
+
+    n_data_voxels = np.sum(data_mask)
+    logging.info(f"  Data coverage voxels: {n_data_voxels:,}")
+
+    # CRITICAL: Intersect with brain mask to exclude non-brain voxels
+    mask = (data_mask * (brain_data > 0)).astype(np.uint8)
 
     n_voxels = np.sum(mask)
-    logging.info(f"  Mask contains {n_voxels:,} voxels")
+    logging.info(f"  Final mask voxels (brain ∩ data): {n_voxels:,}")
+
+    # Warn if significant data is outside brain (indicates normalization issue)
+    outside_brain = np.sum(data_mask * (brain_data == 0))
+    if outside_brain > 1000:
+        logging.warning(f"  ⚠ {outside_brain:,} non-zero voxels were outside brain mask (excluded)")
 
     mask_file = output_dir / 'group_mask.nii.gz'
     mask_img = nib.Nifti1Image(mask, img.affine, img.header)
