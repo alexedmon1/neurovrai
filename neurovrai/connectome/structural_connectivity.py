@@ -67,7 +67,9 @@ def compute_t1w_to_dwi_transform(
     dwi_reference: Path,
     output_dir: Path,
     cost: str = 'mutualinfo',
-    dof: int = 6
+    dof: int = 6,
+    study_root: Optional[Path] = None,
+    subject: Optional[str] = None
 ) -> Path:
     """
     Compute T1w to DWI transform using FLIRT.
@@ -80,6 +82,8 @@ def compute_t1w_to_dwi_transform(
         output_dir: Directory to save transform
         cost: FLIRT cost function (default: mutualinfo for cross-modality)
         dof: Degrees of freedom (default: 6 for rigid body)
+        study_root: Study root directory for standardized transform storage
+        subject: Subject identifier for standardized transform storage
 
     Returns:
         Path to T1w→DWI transform matrix
@@ -90,7 +94,14 @@ def compute_t1w_to_dwi_transform(
     t1w_to_dwi_mat = output_dir / 't1w_to_dwi.mat'
     dwi_to_t1w_mat = output_dir / 'dwi_to_t1w.mat'
 
-    # Check if already computed
+    # Check standardized location first
+    if study_root and subject:
+        std_t1w_to_dwi = Path(study_root) / 'transforms' / subject / 't1w-dwi-affine.mat'
+        if std_t1w_to_dwi.exists():
+            logger.debug(f"Using existing T1w→DWI transform from standardized location: {std_t1w_to_dwi}")
+            return std_t1w_to_dwi
+
+    # Check if already computed locally
     if t1w_to_dwi_mat.exists():
         logger.debug(f"Using existing T1w→DWI transform: {t1w_to_dwi_mat}")
         return t1w_to_dwi_mat
@@ -128,6 +139,21 @@ def compute_t1w_to_dwi_transform(
         raise StructuralConnectivityError(f"convert_xfm inverse failed: {result.stderr}")
 
     logger.info(f"  T1w→DWI transform: {t1w_to_dwi_mat}")
+
+    # Copy to standardized location if study_root and subject provided
+    if study_root and subject:
+        import shutil
+        std_transforms_dir = Path(study_root) / 'transforms' / subject
+        std_transforms_dir.mkdir(parents=True, exist_ok=True)
+
+        std_t1w_to_dwi = std_transforms_dir / 't1w-dwi-affine.mat'
+        std_dwi_to_t1w = std_transforms_dir / 'dwi-t1w-affine.mat'
+
+        shutil.copy2(t1w_to_dwi_mat, std_t1w_to_dwi)
+        shutil.copy2(dwi_to_t1w_mat, std_dwi_to_t1w)
+
+        logger.info(f"  Copied to standardized location: {std_transforms_dir}")
+
     return t1w_to_dwi_mat
 
 

@@ -153,6 +153,9 @@ class FuncAtlasTransformer:
         """Discover available transformation files for this subject."""
         self.transforms = {}
 
+        # Standardized transforms location: {study_root}/transforms/{subject}/
+        central_transforms = self.study_root / 'transforms' / self.subject
+
         # T1w brain
         brain_candidates = [
             self.subject_anat / 'brain' / 'brain.nii.gz',
@@ -172,9 +175,15 @@ class FuncAtlasTransformer:
                     self.transforms['t1w_brain'] = brains[0]
 
         # ANTs T1w → MNI composite (for MNI → T1w inverse)
-        ants_composite = self.subject_anat / 'transforms' / 'ants_Composite.h5'
-        if ants_composite.exists():
-            self.transforms['t1w_to_mni_ants'] = ants_composite
+        # Check standardized location first, then fall back to old location
+        t1w_to_mni_candidates = [
+            central_transforms / 't1w-mni-composite.h5',  # Standardized
+            self.subject_anat / 'transforms' / 'ants_Composite.h5',  # Legacy
+        ]
+        for candidate in t1w_to_mni_candidates:
+            if candidate.exists():
+                self.transforms['t1w_to_mni_ants'] = candidate
+                break
 
         # Functional reference
         func_ref_candidates = [
@@ -207,11 +216,13 @@ class FuncAtlasTransformer:
                     self.transforms['func_mask'] = masks[0]
 
         # Functional → T1w transform (need inverse for T1w → Func)
+        # Check standardized location first
         reg_dir = self.subject_func / 'registration'
         func_to_t1w_candidates = [
-            reg_dir / 'func_to_t1w0GenericAffine.mat',
-            reg_dir / 'func_to_t1w.mat',
-            reg_dir / 'func2anat.mat',
+            central_transforms / 'func-t1w-affine.mat',  # Standardized
+            reg_dir / 'func_to_t1w0GenericAffine.mat',  # Legacy ANTs
+            reg_dir / 'func_to_t1w.mat',  # Legacy
+            reg_dir / 'func2anat.mat',  # Legacy
         ]
         for candidate in func_to_t1w_candidates:
             if candidate.exists():
@@ -219,9 +230,15 @@ class FuncAtlasTransformer:
                 break
 
         # Func → MNI composite (for MNI → Func inverse)
-        func_to_mni = reg_dir / 'func_to_mni_Composite.h5'
-        if func_to_mni.exists():
-            self.transforms['func_to_mni_ants'] = func_to_mni
+        # Check standardized location first
+        func_to_mni_candidates = [
+            central_transforms / 'func-mni-composite.h5',  # Standardized
+            reg_dir / 'func_to_mni_Composite.h5',  # Legacy
+        ]
+        for candidate in func_to_mni_candidates:
+            if candidate.exists():
+                self.transforms['func_to_mni_ants'] = candidate
+                break
 
         # FreeSurfer subject directory
         if self.subject_fs and self.subject_fs.exists():

@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 def normalize_dwi_to_fmrib58(
     fa_file: Path,
     output_dir: Path,
-    fmrib58_template: Optional[Path] = None
+    fmrib58_template: Optional[Path] = None,
+    study_root: Optional[Path] = None,
+    subject: Optional[str] = None
 ) -> Dict[str, Path]:
     """
     Normalize FA map to FMRIB58_FA standard space.
@@ -32,6 +34,11 @@ def normalize_dwi_to_fmrib58(
         Output directory for transforms and normalized FA
     fmrib58_template : Path, optional
         Path to FMRIB58_FA template. If None, uses $FSLDIR/data/standard/FMRIB58_FA_1mm.nii.gz
+    study_root : Path, optional
+        Study root directory. If provided with subject, transforms will be copied
+        to the standardized location: {study_root}/transforms/{subject}/
+    subject : str, optional
+        Subject identifier. Required if study_root is provided.
 
     Returns
     -------
@@ -47,6 +54,12 @@ def normalize_dwi_to_fmrib58(
     Uses FLIRT (affine) + FNIRT (nonlinear) registration.
     Forward warp is used to normalize all DWI metrics to standard space.
     Inverse warp is used to warp atlas ROIs to native DWI space for tractography.
+
+    If study_root and subject are provided, transforms are also saved to the
+    standardized location using the naming convention:
+    - fa-fmrib58-affine.mat
+    - fa-fmrib58-warp.nii.gz
+    - fmrib58-fa-warp.nii.gz
     """
     logger.info("=" * 70)
     logger.info("DWI Normalization to FMRIB58_FA")
@@ -149,6 +162,29 @@ def normalize_dwi_to_fmrib58(
 
     logger.info("DWI normalization complete!")
     logger.info("")
+
+    # Copy transforms to standardized location if study_root and subject provided
+    if study_root and subject:
+        import shutil
+        std_transforms_dir = Path(study_root) / 'transforms' / subject
+        std_transforms_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info("Copying transforms to standardized location...")
+        logger.info(f"  Location: {std_transforms_dir}")
+
+        # Standardized naming: {source}-{target}-{type}.{ext}
+        std_affine = std_transforms_dir / 'fa-fmrib58-affine.mat'
+        std_forward = std_transforms_dir / 'fa-fmrib58-warp.nii.gz'
+        std_inverse = std_transforms_dir / 'fmrib58-fa-warp.nii.gz'
+
+        shutil.copy2(affine_mat, std_affine)
+        shutil.copy2(forward_warp, std_forward)
+        shutil.copy2(inverse_warp, std_inverse)
+
+        logger.info(f"  Copied: fa-fmrib58-affine.mat")
+        logger.info(f"  Copied: fa-fmrib58-warp.nii.gz")
+        logger.info(f"  Copied: fmrib58-fa-warp.nii.gz")
+        logger.info("")
 
     return {
         'affine_mat': affine_mat,

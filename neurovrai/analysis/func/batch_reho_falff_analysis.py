@@ -448,16 +448,38 @@ def run_batch_analysis(
     for subject in subjects:
         subj_deriv = derivatives / subject
 
-        # Get transforms
-        func_to_t1w = subj_deriv / 'func' / 'registration' / 'func_to_t1w0GenericAffine.mat'
-        t1w_to_mni = subj_deriv / 'anat' / 'transforms' / 'ants_Composite.h5'
+        # Get transforms - check standardized location first, then legacy
+        # Standardized: {study_root}/transforms/{subject}/
+        std_transforms = study_root / 'transforms' / subject
 
-        if not func_to_t1w.exists():
+        # Func -> T1w transform
+        func_to_t1w_candidates = [
+            std_transforms / 'func-t1w-affine.mat',  # Standardized
+            subj_deriv / 'func' / 'registration' / 'func_to_t1w0GenericAffine.mat',  # Legacy
+        ]
+        func_to_t1w = None
+        for tf in func_to_t1w_candidates:
+            if tf.exists():
+                func_to_t1w = tf
+                break
+
+        # T1w -> MNI transform
+        t1w_to_mni_candidates = [
+            std_transforms / 't1w-mni-composite.h5',  # Standardized
+            subj_deriv / 'anat' / 'transforms' / 'ants_Composite.h5',  # Legacy
+        ]
+        t1w_to_mni = None
+        for tf in t1w_to_mni_candidates:
+            if tf.exists():
+                t1w_to_mni = tf
+                break
+
+        if func_to_t1w is None:
             logger.warning(f"  {subject}: func->t1w transform not found")
             results['normalize'].append({'subject': subject, 'status': 'skipped', 'error': 'func->t1w not found'})
             continue
 
-        if not t1w_to_mni.exists():
+        if t1w_to_mni is None:
             logger.warning(f"  {subject}: t1w->MNI transform not found")
             results['normalize'].append({'subject': subject, 'status': 'skipped', 'error': 't1w->MNI not found'})
             continue

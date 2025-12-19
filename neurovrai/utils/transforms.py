@@ -702,3 +702,250 @@ def create_transform_registry(
     """
     transforms_dir = Path(config['paths']['transforms'])
     return TransformRegistry(transforms_dir, subject, session)
+
+
+# =============================================================================
+# Standardized Transform Naming Convention
+# =============================================================================
+#
+# All transforms follow: {source}-{target}-{type}.{ext}
+#
+# Standard transforms:
+#   func-t1w-affine.mat       - Functional to T1w (affine, FSL or ANTs)
+#   t1w-mni-affine.mat        - T1w to MNI (affine only)
+#   t1w-mni-warp.nii.gz       - T1w to MNI (nonlinear warp field)
+#   t1w-mni-composite.h5      - T1w to MNI (ANTs composite)
+#   func-mni-composite.h5     - Functional to MNI (ANTs composite, combines func->t1w + t1w->mni)
+#   dwi-t1w-affine.mat        - DWI to T1w
+#   dwi-fmrib58-affine.mat    - DWI FA to FMRIB58 (affine)
+#   dwi-fmrib58-warp.nii.gz   - DWI FA to FMRIB58 (nonlinear)
+#   asl-t1w-affine.mat        - ASL to T1w
+#   fs-t1w-affine.lta         - FreeSurfer to T1w
+#
+# Location: {study_root}/transforms/{subject}/
+# =============================================================================
+
+
+def get_transform_path(
+    study_root: Path,
+    subject: str,
+    source: str,
+    target: str,
+    transform_type: str,
+    extension: Optional[str] = None
+) -> Path:
+    """
+    Get the standardized path for a transform file.
+
+    Parameters
+    ----------
+    study_root : Path
+        Study root directory
+    subject : str
+        Subject identifier
+    source : str
+        Source space (e.g., 'func', 't1w', 'dwi', 'asl', 'fs')
+    target : str
+        Target space (e.g., 't1w', 'mni', 'fmrib58')
+    transform_type : str
+        Transform type (e.g., 'affine', 'warp', 'composite')
+    extension : str, optional
+        File extension (auto-detected if None)
+
+    Returns
+    -------
+    Path
+        Full path to transform file
+
+    Examples
+    --------
+    >>> path = get_transform_path(study_root, 'IRC805-0580101', 'func', 'mni', 'composite')
+    >>> # Returns: {study_root}/transforms/IRC805-0580101/func-mni-composite.h5
+    """
+    # Auto-detect extension based on transform type
+    if extension is None:
+        if transform_type == 'composite':
+            extension = '.h5'
+        elif transform_type == 'warp':
+            extension = '.nii.gz'
+        elif transform_type == 'affine':
+            extension = '.mat'
+        else:
+            extension = '.mat'
+
+    # Ensure extension starts with dot
+    if not extension.startswith('.'):
+        extension = '.' + extension
+
+    filename = f"{source}-{target}-{transform_type}{extension}"
+    return Path(study_root) / 'transforms' / subject / filename
+
+
+def find_transform(
+    study_root: Path,
+    subject: str,
+    source: str,
+    target: str,
+    prefer_composite: bool = True
+) -> Optional[Path]:
+    """
+    Find a transform file, checking multiple types.
+
+    Parameters
+    ----------
+    study_root : Path
+        Study root directory
+    subject : str
+        Subject identifier
+    source : str
+        Source space
+    target : str
+        Target space
+    prefer_composite : bool
+        If True, prefer composite over separate affine+warp
+
+    Returns
+    -------
+    Path or None
+        Path to transform file if found
+
+    Examples
+    --------
+    >>> transform = find_transform(study_root, 'IRC805-0580101', 'func', 'mni')
+    >>> if transform:
+    ...     print(f"Found: {transform}")
+    """
+    transforms_dir = Path(study_root) / 'transforms' / subject
+
+    if not transforms_dir.exists():
+        return None
+
+    # Check order based on preference
+    if prefer_composite:
+        check_order = ['composite', 'warp', 'affine']
+    else:
+        check_order = ['affine', 'warp', 'composite']
+
+    for xfm_type in check_order:
+        if xfm_type == 'composite':
+            path = transforms_dir / f"{source}-{target}-composite.h5"
+        elif xfm_type == 'warp':
+            path = transforms_dir / f"{source}-{target}-warp.nii.gz"
+        else:
+            path = transforms_dir / f"{source}-{target}-affine.mat"
+
+        if path.exists():
+            return path
+
+    return None
+
+
+def get_func_to_mni_transform(study_root: Path, subject: str) -> Optional[Path]:
+    """Get functional to MNI composite transform."""
+    return find_transform(study_root, subject, 'func', 'mni')
+
+
+def get_t1w_to_mni_transform(study_root: Path, subject: str) -> Optional[Path]:
+    """Get T1w to MNI transform (composite or warp)."""
+    return find_transform(study_root, subject, 't1w', 'mni')
+
+
+def get_func_to_t1w_transform(study_root: Path, subject: str) -> Optional[Path]:
+    """Get functional to T1w affine transform."""
+    return find_transform(study_root, subject, 'func', 't1w', prefer_composite=False)
+
+
+def get_dwi_to_t1w_transform(study_root: Path, subject: str) -> Optional[Path]:
+    """Get DWI to T1w affine transform."""
+    return find_transform(study_root, subject, 'dwi', 't1w', prefer_composite=False)
+
+
+def get_asl_to_t1w_transform(study_root: Path, subject: str) -> Optional[Path]:
+    """Get ASL to T1w affine transform."""
+    return find_transform(study_root, subject, 'asl', 't1w', prefer_composite=False)
+
+
+def list_available_transforms(study_root: Path, subject: str) -> List[Dict]:
+    """
+    List all available transforms for a subject.
+
+    Returns
+    -------
+    list
+        List of dicts with 'source', 'target', 'type', 'path' keys
+    """
+    transforms_dir = Path(study_root) / 'transforms' / subject
+
+    if not transforms_dir.exists():
+        return []
+
+    transforms = []
+    for f in transforms_dir.glob('*'):
+        if f.name == 'transforms.json':
+            continue
+
+        # Parse filename: source-target-type.ext
+        name = f.stem
+        if name.endswith('.nii'):  # Handle .nii.gz
+            name = name[:-4]
+
+        parts = name.split('-')
+        if len(parts) >= 3:
+            transforms.append({
+                'source': parts[0],
+                'target': parts[1],
+                'type': '-'.join(parts[2:]),
+                'path': f
+            })
+
+    return transforms
+
+
+def save_transform(
+    transform_file: Path,
+    study_root: Path,
+    subject: str,
+    source: str,
+    target: str,
+    transform_type: str
+) -> Path:
+    """
+    Save a transform to the standardized location.
+
+    Parameters
+    ----------
+    transform_file : Path
+        Source transform file to copy
+    study_root : Path
+        Study root directory
+    subject : str
+        Subject identifier
+    source : str
+        Source space
+    target : str
+        Target space
+    transform_type : str
+        Transform type
+
+    Returns
+    -------
+    Path
+        Destination path
+    """
+    transform_file = Path(transform_file)
+    if not transform_file.exists():
+        raise FileNotFoundError(f"Transform file not found: {transform_file}")
+
+    # Get destination path
+    dest = get_transform_path(
+        study_root, subject, source, target, transform_type,
+        extension=transform_file.suffix if not transform_file.name.endswith('.nii.gz') else '.nii.gz'
+    )
+
+    # Create directory if needed
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    # Copy file
+    shutil.copy2(transform_file, dest)
+
+    return dest

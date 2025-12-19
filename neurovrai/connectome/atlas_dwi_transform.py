@@ -168,9 +168,15 @@ class DWIAtlasTransformer:
                     self.transforms['t1w_brain'] = brains[0]
 
         # ANTs T1w → MNI composite (for MNI → T1w inverse)
-        ants_composite = self.subject_anat / 'transforms' / 'ants_Composite.h5'
-        if ants_composite.exists():
-            self.transforms['t1w_to_mni_ants'] = ants_composite
+        # Check standardized location first, then legacy
+        t1w_to_mni_candidates = [
+            self.study_root / 'transforms' / self.subject / 't1w-mni-composite.h5',  # Standardized
+            self.subject_anat / 'transforms' / 'ants_Composite.h5',  # Legacy
+        ]
+        for candidate in t1w_to_mni_candidates:
+            if candidate.exists():
+                self.transforms['t1w_to_mni_ants'] = candidate
+                break
 
         # DWI reference (b0 brain)
         dwi_candidates = [
@@ -195,9 +201,16 @@ class DWIAtlasTransformer:
                     break
 
         # FMRIB58 inverse warp (from DWI normalization)
-        fmrib_inverse = self.subject_dwi / 'normalized' / 'fmrib58_to_fa_warp.nii.gz'
-        if fmrib_inverse.exists():
-            self.transforms['fmrib58_to_dwi_warp'] = fmrib_inverse
+        # Check standardized location first, then legacy
+        fmrib_inverse_candidates = [
+            self.study_root / 'transforms' / self.subject / 'fmrib58-fa-warp.nii.gz',  # Standardized
+            self.subject_dwi / 'normalized' / 'fmrib58_to_fa_warp.nii.gz',  # Legacy
+            self.subject_dwi / 'transforms' / 'FMRIB58_to_FA_warp.nii.gz',  # Legacy alt
+        ]
+        for candidate in fmrib_inverse_candidates:
+            if candidate.exists():
+                self.transforms['fmrib58_to_dwi_warp'] = candidate
+                break
 
         # FA image (for FMRIB58 transforms)
         fa_candidates = [

@@ -1061,7 +1061,15 @@ def run_func_preprocessing(
             # Locate anatomical preprocessing outputs
             anat_dir = Path(anat_derivatives)
             brain_files = list(anat_dir.glob('brain/*brain.nii.gz'))
-            t1w_to_mni_transform = anat_dir / 'transforms' / 'ants_Composite.h5'
+
+            # Use standardized transform location: {study_root}/transforms/{subject}/
+            study_root = output_dir.parent if output_dir.name == subject else output_dir.parent.parent
+            t1w_to_mni_transform = study_root / 'transforms' / subject / 't1w-mni-composite.h5'
+
+            # Fallback to old location if not found (backward compatibility)
+            if not t1w_to_mni_transform.exists():
+                t1w_to_mni_transform = anat_dir / 'transforms' / 'ants_Composite.h5'
+
             mni_template = Path(config.get('templates', {}).get('mni152_t1_2mm',
                                 '/usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz'))
 
@@ -1087,6 +1095,14 @@ def run_func_preprocessing(
                     results['func_to_t1w_transform'] = registration_results['func_to_t1w']
                     results['func_to_mni_transform'] = registration_results['func_to_mni']
                     results['func_warped_to_t1w'] = registration_results['func_warped_to_t1w']
+
+                    # Save transforms to standardized location
+                    from neurovrai.utils.transforms import save_transform
+                    transforms_dir = study_root / 'transforms' / subject
+                    transforms_dir.mkdir(parents=True, exist_ok=True)
+                    save_transform(registration_results['func_to_t1w'], study_root, subject, 'func', 't1w', 'affine')
+                    save_transform(registration_results['func_to_mni'], study_root, subject, 'func', 'mni', 'composite')
+                    logger.info(f"  Saved transforms to: {transforms_dir}")
 
                     # Copy func_mean to registration directory for ACompCor (CRITICAL!)
                     # ACompCor needs this file in derivatives/registration/ to transform tissue masks
@@ -1191,7 +1207,14 @@ def run_func_preprocessing(
             # Locate anatomical preprocessing outputs
             anat_dir = Path(anat_derivatives)
             brain_files = list(anat_dir.glob('brain/*brain.nii.gz'))
-            t1w_to_mni_transform = anat_dir / 'transforms' / 'ants_Composite.h5'
+
+            # Use standardized transform location: {study_root}/transforms/{subject}/
+            t1w_to_mni_transform = study_root / 'transforms' / subject / 't1w-mni-composite.h5'
+
+            # Fallback to old location if not found (backward compatibility)
+            if not t1w_to_mni_transform.exists():
+                t1w_to_mni_transform = anat_dir / 'transforms' / 'ants_Composite.h5'
+
             mni_template = Path(config.get('templates', {}).get('mni152_t1_2mm',
                                 '/usr/local/fsl/data/standard/MNI152_T1_2mm_brain.nii.gz'))
 
@@ -1218,6 +1241,14 @@ def run_func_preprocessing(
                     results['func_to_t1w_transform'] = registration_results['func_to_t1w']
                     results['func_to_mni_transform'] = registration_results['func_to_mni']
                     results['func_warped_to_t1w'] = registration_results['func_warped_to_t1w']
+
+                    # Save transforms to standardized location
+                    from neurovrai.utils.transforms import save_transform
+                    transforms_dir = study_root / 'transforms' / subject
+                    transforms_dir.mkdir(parents=True, exist_ok=True)
+                    save_transform(registration_results['func_to_t1w'], study_root, subject, 'func', 't1w', 'affine')
+                    save_transform(registration_results['func_to_mni'], study_root, subject, 'func', 'mni', 'composite')
+                    logger.info(f"  Saved transforms to: {transforms_dir}")
 
                     logger.info("Registration pipeline completed successfully")
                     logger.info("")

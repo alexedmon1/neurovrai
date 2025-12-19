@@ -385,14 +385,18 @@ def prepare_vbm_data(
                 continue
 
             # Locate transform (warp field) from anatomical preprocessing
-            # Try different possible locations: derivatives, transforms registry, etc.
+            # Check standardized location first, then fall back to legacy locations
             study_root = derivatives_dir.parent if (derivatives_dir.parent / 'transforms').exists() else derivatives_dir
             possible_transforms = [
-                derivatives_dir / subject / 'anat' / 'transforms' / 'highres2standard_warp.nii.gz',
-                derivatives_dir / subject / 'anat' / 'highres2standard_warp.nii.gz',
-                derivatives_dir / subject / 'anat' / 'transforms' / 'ants_Composite.h5',
+                # Standardized naming convention (check first)
+                study_root / 'transforms' / subject / 't1w-mni-composite.h5',
+                study_root / 'transforms' / subject / 't1w-mni-warp.nii.gz',
+                # Legacy naming conventions
                 study_root / 'transforms' / subject / 'T1w_to_MNI152_composite.h5',
                 study_root / 'transforms' / subject / 'T1w_to_MNI152_warp.nii.gz',
+                derivatives_dir / subject / 'anat' / 'transforms' / 'ants_Composite.h5',
+                derivatives_dir / subject / 'anat' / 'transforms' / 'highres2standard_warp.nii.gz',
+                derivatives_dir / subject / 'anat' / 'highres2standard_warp.nii.gz',
             ]
 
             transform_file = None

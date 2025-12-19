@@ -45,7 +45,7 @@ from neurovrai.preprocess.qc.asl_qc import (
     compute_perfusion_tsnr,
     generate_asl_qc_report
 )
-from neurovrai.utils.transforms import create_transform_registry
+from neurovrai.utils.transforms import create_transform_registry, save_transform, find_transform
 
 logger = logging.getLogger(__name__)
 
@@ -533,14 +533,14 @@ def run_asl_preprocessing(
 
         subprocess.run(flirt_cmd, check=True, capture_output=True)
 
-        # Save to TransformRegistry
-        registry = create_transform_registry(config, subject)
-        asl_to_anat_mat = registry.save_linear_transform(
+        # Save to standardized location: {study_root}/transforms/{subject}/
+        asl_to_anat_mat = save_transform(
             transform_file=temp_mat,
-            source_space='ASL',
-            target_space='T1w',
-            source_image=control_mean_file,
-            reference=t1w_brain
+            study_root=study_root,
+            subject=subject,
+            source='asl',
+            target='t1w',
+            transform_type='affine'
         )
         temp_mat.unlink()  # Clean up temp file
 
@@ -570,15 +570,19 @@ def run_asl_preprocessing(
     if normalize_to_mni and t1w_brain and asl_to_anat_mat:
         logger.info("Step 9: Spatial normalization to MNI152")
 
-        # Get anatomical transforms from TransformRegistry
-        registry = create_transform_registry(config, subject)
-        anat_transforms = registry.get_nonlinear_transform('T1w', 'MNI152')
+        # Look for T1w→MNI transform in standardized location first
+        t1w_to_mni_warp = find_transform(study_root, subject, 't1w', 'mni', prefer_composite=True)
 
-        if anat_transforms:
-            t1w_to_mni_warp, t1w_to_mni_affine = anat_transforms
+        # Fall back to TransformRegistry if not found
+        if not t1w_to_mni_warp:
+            registry = create_transform_registry(config, subject)
+            anat_transforms = registry.get_nonlinear_transform('T1w', 'MNI152')
+            if anat_transforms:
+                t1w_to_mni_warp, t1w_to_mni_affine = anat_transforms
+
+        if t1w_to_mni_warp:
             logger.info("  Reusing anatomical transforms for normalization")
             logger.info(f"  ASL→anat: {asl_to_anat_mat}")
-            logger.info(f"  Anat→MNI affine: {t1w_to_mni_affine}")
             logger.info(f"  Anat→MNI warp: {t1w_to_mni_warp}")
 
             # Concatenate transforms
@@ -600,13 +604,15 @@ def run_asl_preprocessing(
 
             subprocess.run(convertwarp_cmd, check=True, capture_output=True)
 
-            # Save concatenated warp to TransformRegistry
-            # Note: This is a composite warp, so we save it as a special case
-            # For now, just copy to registry directory manually since it's composite
-            registry_dir = registry.subject_dir
-            asl_to_mni_warp = registry_dir / f'ASL_to_MNI152_warp.nii.gz'
-            import shutil
-            shutil.copy2(temp_warp, asl_to_mni_warp)
+            # Save to standardized location: {study_root}/transforms/{subject}/
+            asl_to_mni_warp = save_transform(
+                transform_file=temp_warp,
+                study_root=study_root,
+                subject=subject,
+                source='asl',
+                target='mni',
+                transform_type='warp'
+            )
             temp_warp.unlink()
 
             logger.info(f"  Concatenated warp: {asl_to_mni_warp}")

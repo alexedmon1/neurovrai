@@ -877,37 +877,29 @@ def run_anat_preprocessing(
         'mni_warped': list(derivatives_dir.glob('**/mni_space/*.nii.gz'))[0] if list(derivatives_dir.glob('**/mni_space/*.nii.gz')) else None
     }
 
-    # Save transformations to registry
+    # Save transformations to standardized location: {study_root}/transforms/{subject}/
     if save_transforms and outputs['mni_affine'] and outputs['mni_warp']:
-        from neurovrai.utils.transforms import create_transform_registry
-
-        registry = create_transform_registry(config, subject, session)
+        from neurovrai.utils.transforms import save_transform
 
         # Get registration method
         registration_method = config.get('anatomical', {}).get('registration_method', 'ants')
 
-        # Save transform based on method
+        # Save transform to standardized location
+        transforms_dir = study_root / 'transforms' / subject
+        transforms_dir.mkdir(parents=True, exist_ok=True)
+
         if registration_method == 'ants':
-            # ANTs: save composite transform
-            registry.save_ants_composite_transform(
-                composite_file=outputs['mni_warp'],  # For ANTs, this is the composite .h5
-                source_space='T1w',
-                target_space='MNI152',
-                reference=get_reference_template('mni152_t1_2mm', config),
-                source_image=t1w_file
+            # ANTs: save composite transform as t1w-mni-composite.h5
+            save_transform(
+                outputs['mni_warp'],  # For ANTs, this is the composite .h5
+                study_root, subject, 't1w', 'mni', 'composite'
             )
-            logging.info(f"Saved ANTs T1w->MNI152 composite transformation to registry")
+            logging.info(f"Saved ANTs T1w->MNI composite to: {transforms_dir / 't1w-mni-composite.h5'}")
         else:
             # FSL: save separate warp and affine
-            registry.save_nonlinear_transform(
-                warp_file=outputs['mni_warp'],
-                affine_file=outputs['mni_affine'],
-                source_space='T1w',
-                target_space='MNI152',
-                reference=get_reference_template('mni152_t1_2mm', config),
-                source_image=t1w_file
-            )
-            logging.info(f"Saved FSL T1w->MNI152 transformation to registry")
+            save_transform(outputs['mni_warp'], study_root, subject, 't1w', 'mni', 'warp')
+            save_transform(outputs['mni_affine'], study_root, subject, 't1w', 'mni', 'affine')
+            logging.info(f"Saved FSL T1w->MNI transforms to: {transforms_dir}")
 
     # Run Quality Control
     if run_qc:

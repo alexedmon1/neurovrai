@@ -873,7 +873,9 @@ def run_dwi_multishell_topup_preprocessing(
         norm_results = normalize_dwi_to_fmrib58(
             fa_file=outputs['fa'],
             output_dir=derivatives_dir,
-            fmrib58_template=None  # Uses $FSLDIR default
+            fmrib58_template=None,  # Uses $FSLDIR default
+            study_root=study_root,  # For standardized transform storage
+            subject=subject
         )
 
         # Add transform outputs

@@ -57,6 +57,73 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Work directory structure**: `{study_root}/work/{subject}/` (Nipype adds workflow name automatically)
 - **Nipype DataSink hierarchy**: DataSink creates subdirectories based on `container` parameter. When `base_directory` is already `{study_root}/derivatives/{subject}/anat/`, setting `container='anat'` creates redundant `/anat/anat/` hierarchy. **Solution**: Set `container=''` (empty string) to use base_directory as-is.
 
+### Critical Guidelines: Spatial Transforms & Atlases
+
+**⚠️ NEVER resample atlases - always co-register properly**
+
+When working with atlases and spatial transforms:
+
+1. **Atlas Transforms**: NEVER simply resample an atlas to match image dimensions. Atlases must be properly co-registered through the transform chain:
+   - For MNI atlases → functional space: Transform functional data TO MNI space, then apply atlas directly
+   - For FreeSurfer atlases → functional space: Use the proper FS→T1w→func transform chain
+   - Resampling destroys registration accuracy and introduces spatial errors
+
+2. **Transform to target space, not atlas to source space**: When using an atlas in a different space:
+   - ✅ CORRECT: Normalize 4D BOLD to MNI space, then use MNI atlas directly
+   - ❌ WRONG: Resample MNI atlas to native functional space
+
+**Transform Naming Convention (MANDATORY)**
+
+All transforms MUST follow the naming pattern: `{source}-{target}-{type}.{ext}`
+
+Where:
+- `{source}`: Source space in lowercase (e.g., `func`, `t1w`, `dwi`, `asl`, `fa`, `fmrib58`, `fs`)
+- `{target}`: Target space in lowercase (e.g., `t1w`, `mni`, `dwi`, `fmrib58`)
+- `{type}`: Transform type (`affine`, `warp`, `composite`)
+- `{ext}`: Extension based on tool (`.mat` for FSL FLIRT, `.h5` for ANTs composite, `.nii.gz` for warp fields, `.lta` for FreeSurfer)
+
+| Transform | Filename | Description |
+|-----------|----------|-------------|
+| `func-t1w-affine.mat` | Functional → T1w | FSL FLIRT affine matrix |
+| `t1w-mni-affine.mat` | T1w → MNI | FSL FLIRT affine matrix |
+| `t1w-mni-warp.nii.gz` | T1w → MNI | FSL FNIRT warp field |
+| `t1w-mni-composite.h5` | T1w → MNI | ANTs composite (affine + warp) |
+| `func-mni-composite.h5` | Func → MNI | ANTs composite (func→t1w + t1w→mni) |
+| `t1w-dwi-affine.mat` | T1w → DWI | Cross-modality affine |
+| `dwi-t1w-affine.mat` | DWI → T1w | Cross-modality affine (inverse) |
+| `fa-fmrib58-affine.mat` | FA → FMRIB58 | DWI normalization affine |
+| `fa-fmrib58-warp.nii.gz` | FA → FMRIB58 | DWI normalization warp |
+| `fmrib58-fa-warp.nii.gz` | FMRIB58 → FA | Inverse warp (for atlas→DWI) |
+| `asl-t1w-affine.mat` | ASL → T1w | ASL registration |
+| `asl-mni-warp.nii.gz` | ASL → MNI | ASL normalization warp |
+| `fs-t1w-affine.lta` | FreeSurfer → T1w | FreeSurfer LTA format |
+
+**Transform Storage Location (MANDATORY)**
+
+All transforms MUST be stored in the centralized location:
+```
+{study_root}/transforms/{subject}/
+├── func-t1w-affine.mat
+├── t1w-mni-composite.h5
+├── t1w-mni-warp.nii.gz
+├── func-mni-composite.h5
+├── t1w-dwi-affine.mat
+├── dwi-t1w-affine.mat
+├── fa-fmrib58-affine.mat
+├── fa-fmrib58-warp.nii.gz
+├── fmrib58-fa-warp.nii.gz
+├── asl-t1w-affine.mat
+├── asl-mni-warp.nii.gz
+└── fs-t1w-affine.lta
+```
+
+**Implementation Status (✅ Complete as of 2025-12-19)**:
+- All preprocessing workflows save transforms to standardized location
+- All analysis/connectome code checks standardized location first
+- Legacy locations are checked as fallback for backward compatibility
+- Use `neurovrai.utils.transforms.save_transform()` to save new transforms
+- Use `neurovrai.utils.transforms.find_transform()` to locate transforms
+
 ## Project Overview
 
 This repository contains Python-based MRI preprocessing pipelines built with Nipype for neuroimaging analysis. The project processes multiple MRI modalities (anatomical T1w, diffusion DWI, resting-state fMRI, arterial spin labeling ASL) from DICOM to analysis-ready formats, with FSL, ANTs, and FreeSurfer as the primary neuroimaging tools.
