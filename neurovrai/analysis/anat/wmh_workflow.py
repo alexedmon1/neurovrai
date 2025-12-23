@@ -350,7 +350,9 @@ def create_clean_wm_mask_mni(
     wm_threshold: float = 0.7,
     csf_exclude_threshold: float = 0.1,
     gm_exclude_threshold: float = 0.5,
-    erode_iterations: int = 1
+    erode_iterations: int = 1,
+    csf_dilate_iterations: int = 1,
+    gm_dilate_iterations: int = 0
 ) -> Path:
     """
     Create a clean white matter mask excluding CSF and GM regions.
@@ -376,7 +378,16 @@ def create_clean_wm_mask_mni(
     gm_exclude_threshold : float
         GM probability threshold for exclusion (default: 0.5)
     erode_iterations : int
-        Number of erosion iterations (default: 1)
+        Number of erosion iterations for final WM mask (default: 1)
+    csf_dilate_iterations : int
+        Number of dilation iterations for CSF exclusion mask (default: 1).
+        Creates a buffer zone around CSF to prevent periventricular false
+        positives due to registration imperfections. Each iteration adds
+        approximately one voxel width (~2mm in MNI 2mm space).
+    gm_dilate_iterations : int
+        Number of dilation iterations for GM exclusion mask (default: 0).
+        Creates a buffer zone at the cortical boundary to prevent false
+        positives at the GM/WM interface.
 
     Returns
     -------
@@ -399,18 +410,46 @@ def create_clean_wm_mask_mni(
             raise RuntimeError(f"fslmaths WM threshold failed: {result.stderr}")
 
         # Step 2: Create CSF exclusion mask (areas with CSF > threshold)
-        csf_mask = tmpdir / 'csf_mask.nii.gz'
-        cmd = ['fslmaths', str(csf_prob_mni), '-thr', str(csf_exclude_threshold), '-bin', str(csf_mask)]
+        csf_mask_base = tmpdir / 'csf_mask_base.nii.gz'
+        cmd = ['fslmaths', str(csf_prob_mni), '-thr', str(csf_exclude_threshold), '-bin', str(csf_mask_base)]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"fslmaths CSF threshold failed: {result.stderr}")
 
+        # Step 2b: Dilate CSF mask to create buffer zone around ventricles/sulci
+        csf_mask = tmpdir / 'csf_mask.nii.gz'
+        if csf_dilate_iterations > 0:
+            cmd = ['fslmaths', str(csf_mask_base)]
+            for _ in range(csf_dilate_iterations):
+                cmd.append('-dilM')
+            cmd.append(str(csf_mask))
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"fslmaths CSF dilation failed: {result.stderr}")
+        else:
+            import shutil
+            shutil.copy(str(csf_mask_base), str(csf_mask))
+
         # Step 3: Create GM exclusion mask (areas with GM > threshold)
-        gm_mask = tmpdir / 'gm_mask.nii.gz'
-        cmd = ['fslmaths', str(gm_prob_mni), '-thr', str(gm_exclude_threshold), '-bin', str(gm_mask)]
+        gm_mask_base = tmpdir / 'gm_mask_base.nii.gz'
+        cmd = ['fslmaths', str(gm_prob_mni), '-thr', str(gm_exclude_threshold), '-bin', str(gm_mask_base)]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"fslmaths GM threshold failed: {result.stderr}")
+
+        # Step 3b: Dilate GM mask to create buffer zone at cortical boundary
+        gm_mask = tmpdir / 'gm_mask.nii.gz'
+        if gm_dilate_iterations > 0:
+            cmd = ['fslmaths', str(gm_mask_base)]
+            for _ in range(gm_dilate_iterations):
+                cmd.append('-dilM')
+            cmd.append(str(gm_mask))
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"fslmaths GM dilation failed: {result.stderr}")
+        else:
+            import shutil
+            shutil.copy(str(gm_mask_base), str(gm_mask))
 
         # Step 4: Combine exclusion masks
         exclusion_mask = tmpdir / 'exclusion_mask.nii.gz'
@@ -449,7 +488,8 @@ def create_clean_wm_mask_mni(
         voxels, volume = result.stdout.strip().split()
         logger.info(f"Clean WM mask: {voxels} voxels, {volume} mm³")
         logger.info(f"  WM threshold: {wm_threshold}, CSF exclude: {csf_exclude_threshold}, "
-                   f"GM exclude: {gm_exclude_threshold}, erosion: {erode_iterations}")
+                   f"CSF dilate: {csf_dilate_iterations}, GM exclude: {gm_exclude_threshold}, "
+                   f"GM dilate: {gm_dilate_iterations}, erosion: {erode_iterations}")
 
     return output_file
 
@@ -703,6 +743,8 @@ def run_wmh_analysis_single(
     csf_exclude_threshold: float = 0.1,
     gm_exclude_threshold: float = 0.5,
     erode_wm_mask: int = 0,
+    csf_dilate: int = 1,
+    gm_dilate: int = 0,
     overwrite: bool = False
 ) -> Dict:
     """
@@ -736,7 +778,15 @@ def run_wmh_analysis_single(
     gm_exclude_threshold : float
         GM probability threshold for exclusion (default: 0.5)
     erode_wm_mask : int
-        Number of erosion iterations for WM mask (default: 1)
+        Number of erosion iterations for WM mask (default: 0)
+    csf_dilate : int
+        Number of dilation iterations for CSF exclusion mask (default: 1).
+        Creates a ~2mm buffer zone per iteration around CSF to prevent
+        periventricular false positives.
+    gm_dilate : int
+        Number of dilation iterations for GM exclusion mask (default: 0).
+        Creates a ~2mm buffer zone per iteration at cortical boundary to
+        prevent false positives at the GM/WM interface.
     overwrite : bool
         Overwrite existing outputs (default: False)
 
@@ -837,7 +887,9 @@ def run_wmh_analysis_single(
         wm_threshold=wm_threshold,
         csf_exclude_threshold=csf_exclude_threshold,
         gm_exclude_threshold=gm_exclude_threshold,
-        erode_iterations=erode_wm_mask
+        erode_iterations=erode_wm_mask,
+        csf_dilate_iterations=csf_dilate,
+        gm_dilate_iterations=gm_dilate
     )
 
     # Step 5: Detect WMH
@@ -898,7 +950,9 @@ def run_wmh_analysis_single(
         'mask_parameters': {
             'wm_threshold': wm_threshold,
             'csf_exclude_threshold': csf_exclude_threshold,
+            'csf_dilate_iterations': csf_dilate,
             'gm_exclude_threshold': gm_exclude_threshold,
+            'gm_dilate_iterations': gm_dilate,
             'erode_iterations': erode_wm_mask
         },
         'wm_intensity_stats': {
@@ -976,7 +1030,8 @@ def discover_subjects(study_root: Path) -> List[str]:
 def _process_subject_wrapper(args):
     """Wrapper for parallel processing."""
     (subject, study_root, output_dir, sd_threshold, min_cluster_size,
-     wm_threshold, csf_exclude_threshold, gm_exclude_threshold, erode_wm_mask, overwrite) = args
+     wm_threshold, csf_exclude_threshold, gm_exclude_threshold, erode_wm_mask,
+     csf_dilate, gm_dilate, overwrite) = args
     try:
         return run_wmh_analysis_single(
             subject=subject,
@@ -988,6 +1043,8 @@ def _process_subject_wrapper(args):
             csf_exclude_threshold=csf_exclude_threshold,
             gm_exclude_threshold=gm_exclude_threshold,
             erode_wm_mask=erode_wm_mask,
+            csf_dilate=csf_dilate,
+            gm_dilate=gm_dilate,
             overwrite=overwrite
         )
     except Exception as e:
@@ -1005,6 +1062,8 @@ def run_wmh_analysis_batch(
     csf_exclude_threshold: float = 0.1,
     gm_exclude_threshold: float = 0.5,
     erode_wm_mask: int = 0,
+    csf_dilate: int = 1,
+    gm_dilate: int = 0,
     n_jobs: int = 4,
     overwrite: bool = False
 ) -> Dict:
@@ -1030,7 +1089,11 @@ def run_wmh_analysis_batch(
     gm_exclude_threshold : float
         GM probability threshold for exclusion (default: 0.5)
     erode_wm_mask : int
-        Number of erosion iterations for WM mask (default: 1)
+        Number of erosion iterations for WM mask (default: 0)
+    csf_dilate : int
+        Number of dilation iterations for CSF exclusion mask (default: 1)
+    gm_dilate : int
+        Number of dilation iterations for GM exclusion mask (default: 0)
     n_jobs : int
         Number of parallel jobs
     overwrite : bool
@@ -1056,7 +1119,8 @@ def run_wmh_analysis_batch(
     logger.info(f"Processing {len(subjects)} subjects with {n_jobs} workers")
     logger.info(f"Parameters: SD threshold={sd_threshold}, min cluster={min_cluster_size}")
     logger.info(f"WM mask: WM threshold={wm_threshold}, CSF exclude={csf_exclude_threshold}, "
-                f"GM exclude={gm_exclude_threshold}, erosion={erode_wm_mask}")
+                f"CSF dilate={csf_dilate}, GM exclude={gm_exclude_threshold}, "
+                f"GM dilate={gm_dilate}, erosion={erode_wm_mask}")
 
     # Process subjects
     results = []
@@ -1076,6 +1140,8 @@ def run_wmh_analysis_batch(
                 csf_exclude_threshold=csf_exclude_threshold,
                 gm_exclude_threshold=gm_exclude_threshold,
                 erode_wm_mask=erode_wm_mask,
+                csf_dilate=csf_dilate,
+                gm_dilate=gm_dilate,
                 overwrite=overwrite
             )
             results.append(result)
@@ -1087,7 +1153,8 @@ def run_wmh_analysis_batch(
         # Parallel processing
         args_list = [
             (s, study_root, output_dir, sd_threshold, min_cluster_size,
-             wm_threshold, csf_exclude_threshold, gm_exclude_threshold, erode_wm_mask, overwrite)
+             wm_threshold, csf_exclude_threshold, gm_exclude_threshold, erode_wm_mask,
+             csf_dilate, gm_dilate, overwrite)
             for s in subjects
         ]
 
@@ -1232,6 +1299,8 @@ def main():
     single_parser.add_argument('--csf-exclude', type=float, default=0.1, help='CSF probability threshold for exclusion (default: 0.1)')
     single_parser.add_argument('--gm-exclude', type=float, default=0.5, help='GM probability threshold for exclusion (default: 0.5)')
     single_parser.add_argument('--erode-wm', type=int, default=0, help='WM mask erosion iterations (default: 0)')
+    single_parser.add_argument('--csf-dilate', type=int, default=1, help='CSF exclusion dilation iterations (default: 1). Creates ~2mm buffer zone per iteration.')
+    single_parser.add_argument('--gm-dilate', type=int, default=0, help='GM exclusion dilation iterations (default: 0). Creates ~2mm buffer zone per iteration at cortical boundary.')
     single_parser.add_argument('--overwrite', action='store_true', help='Overwrite existing outputs')
 
     # Batch command
@@ -1245,6 +1314,8 @@ def main():
     batch_parser.add_argument('--csf-exclude', type=float, default=0.1, help='CSF probability threshold for exclusion (default: 0.1)')
     batch_parser.add_argument('--gm-exclude', type=float, default=0.5, help='GM probability threshold for exclusion (default: 0.5)')
     batch_parser.add_argument('--erode-wm', type=int, default=0, help='WM mask erosion iterations (default: 0)')
+    batch_parser.add_argument('--csf-dilate', type=int, default=1, help='CSF exclusion dilation iterations (default: 1). Creates ~2mm buffer zone per iteration.')
+    batch_parser.add_argument('--gm-dilate', type=int, default=0, help='GM exclusion dilation iterations (default: 0). Creates ~2mm buffer zone per iteration at cortical boundary.')
     batch_parser.add_argument('--n-jobs', type=int, default=4, help='Number of parallel jobs (default: 4)')
     batch_parser.add_argument('--overwrite', action='store_true', help='Overwrite existing outputs')
 
@@ -1278,6 +1349,8 @@ def main():
             csf_exclude_threshold=args.csf_exclude,
             gm_exclude_threshold=args.gm_exclude,
             erode_wm_mask=args.erode_wm,
+            csf_dilate=args.csf_dilate,
+            gm_dilate=args.gm_dilate,
             overwrite=args.overwrite
         )
 
@@ -1293,6 +1366,8 @@ def main():
             csf_exclude_threshold=args.csf_exclude,
             gm_exclude_threshold=args.gm_exclude,
             erode_wm_mask=args.erode_wm,
+            csf_dilate=args.csf_dilate,
+            gm_dilate=args.gm_dilate,
             n_jobs=args.n_jobs,
             overwrite=args.overwrite
         )
