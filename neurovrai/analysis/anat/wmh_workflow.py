@@ -31,6 +31,7 @@ Usage:
 import nibabel as nib
 import numpy as np
 import pandas as pd
+import shutil
 import subprocess
 import json
 import logging
@@ -75,6 +76,41 @@ def setup_logging(log_file: Optional[Path] = None, level: int = logging.INFO):
 # ============================================================================
 # T2w Preprocessing Functions
 # ============================================================================
+
+def find_preprocessed_t2w(derivatives_dir: Path, subject: str) -> Optional[Path]:
+    """
+    Find preprocessed T2w registered to T1w from derivatives.
+
+    Checks for output from t2w_preprocess.py workflow.
+
+    Parameters
+    ----------
+    derivatives_dir : Path
+        Derivatives directory root
+    subject : str
+        Subject identifier
+
+    Returns
+    -------
+    Path or None
+        Path to T2w registered to T1w, or None if not found
+    """
+    t2w_dir = derivatives_dir / subject / 't2w' / 'registered'
+    if t2w_dir.exists():
+        # Check for t2w_to_t1w.nii.gz (standard output from t2w_preprocess)
+        t2w_t1w = t2w_dir / 't2w_to_t1w.nii.gz'
+        if t2w_t1w.exists():
+            logger.info(f"Found preprocessed T2w: {t2w_t1w}")
+            return t2w_t1w
+
+        # Also check for any other T2w files in registered dir
+        t2w_files = list(t2w_dir.glob('*t2w*.nii.gz')) + list(t2w_dir.glob('*T2w*.nii.gz'))
+        if t2w_files:
+            logger.info(f"Found preprocessed T2w: {t2w_files[0]}")
+            return t2w_files[0]
+
+    return None
+
 
 def find_t2w_image(bids_dir: Path, subject: str) -> Optional[Path]:
     """
@@ -750,9 +786,13 @@ def run_wmh_analysis_single(
     """
     Run complete WMH analysis for a single subject.
 
+    This workflow can use preprocessed T2w from the t2w_preprocess.py workflow
+    if available. When preprocessed T2w is found in derivatives, the registration
+    step is skipped for efficiency and consistency.
+
     Steps:
-    1. Find T2w image in BIDS directory
-    2. Co-register T2w to T1w space
+    1. Check for preprocessed T2w (from t2w_preprocess.py), otherwise use raw T2w
+    2. Co-register T2w to T1w space (skipped if preprocessed T2w available)
     3. Normalize T2w to MNI using existing transform
     4. Create clean WM mask in MNI space (excluding CSF and GM)
     5. Detect WMH using intensity thresholding
@@ -817,11 +857,19 @@ def run_wmh_analysis_single(
     derivatives_dir = study_root / 'derivatives'
     transforms_dir = study_root / 'transforms'
 
-    # Find T2w
-    t2w_file = find_t2w_image(bids_dir, subject)
-    if t2w_file is None:
-        logger.error(f"No T2w image found for {subject}")
-        return {'error': 'No T2w image found', 'subject': subject}
+    # Check for preprocessed T2w from t2w_preprocess workflow first
+    preprocessed_t2w = find_preprocessed_t2w(derivatives_dir, subject)
+    use_preprocessed = preprocessed_t2w is not None
+
+    if use_preprocessed:
+        logger.info(f"Using preprocessed T2w from derivatives (skipping registration)")
+        t2w_file = preprocessed_t2w
+    else:
+        # Find raw T2w from BIDS
+        t2w_file = find_t2w_image(bids_dir, subject)
+        if t2w_file is None:
+            logger.error(f"No T2w image found for {subject}")
+            return {'error': 'No T2w image found', 'subject': subject}
 
     # Find T1w brain
     t1w_brain = find_t1w_brain(derivatives_dir, subject)
@@ -852,17 +900,28 @@ def run_wmh_analysis_single(
         return {'error': 'No T1w->MNI transform found', 'subject': subject}
 
     logger.info(f"Input files:")
-    logger.info(f"  T2w: {t2w_file}")
+    logger.info(f"  T2w: {t2w_file} {'(preprocessed)' if use_preprocessed else '(raw)'}")
     logger.info(f"  T1w brain: {t1w_brain}")
     logger.info(f"  WM segmentation: {wm_seg}")
     logger.info(f"  CSF segmentation: {csf_seg}")
     logger.info(f"  GM segmentation: {gm_seg}")
     logger.info(f"  T1w->MNI transform: {t1w_mni_transform}")
 
-    # Step 1: Register T2w to T1w
+    # Step 1: Register T2w to T1w (skip if using preprocessed T2w)
     t2w_t1w = subj_output / 't2w_t1w.nii.gz'
     t2w_t1w_mat = subj_output / 't2w_to_t1w.mat'
-    register_t2w_to_t1w(t2w_file, t1w_brain, t2w_t1w, t2w_t1w_mat)
+
+    if use_preprocessed:
+        # T2w is already registered to T1w - just copy/link to output location
+        shutil.copy(str(t2w_file), str(t2w_t1w))
+        logger.info(f"Using preprocessed T2w (already in T1w space): {t2w_t1w}")
+        # Check if transform exists in transforms directory
+        transform_file = transforms_dir / subject / 't2w-t1w-affine.mat'
+        if transform_file.exists():
+            shutil.copy(str(transform_file), str(t2w_t1w_mat))
+    else:
+        # Perform registration
+        register_t2w_to_t1w(t2w_file, t1w_brain, t2w_t1w, t2w_t1w_mat)
 
     # Step 2: Normalize T2w to MNI
     t2w_mni = subj_output / 't2w_mni.nii.gz'
@@ -969,6 +1028,7 @@ def run_wmh_analysis_single(
         'size_distribution': size_dist,
         'input_files': {
             't2w': str(t2w_file),
+            't2w_preprocessed': use_preprocessed,
             't1w_brain': str(t1w_brain),
             'wm_segmentation': str(wm_seg),
             'csf_segmentation': str(csf_seg),

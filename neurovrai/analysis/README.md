@@ -124,12 +124,14 @@ Detect and quantify white matter hyperintensities using T2w imaging with tract-l
 
 ### Processing Pipeline
 
-1. **T2w Registration**: Register T2w → T1w (FSL FLIRT, 6 DOF rigid body)
+1. **T2w Input**: Use preprocessed T2w from `t2w_preprocess.py` if available, otherwise register raw T2w → T1w
 2. **MNI Normalization**: Apply existing T1w→MNI ANTs transform to T2w
 3. **Clean WM Mask**: Create WM mask excluding CSF (with dilatable buffer) and GM
 4. **WMH Detection**: Intensity thresholding within WM (mean + SD × threshold)
 5. **Lesion Labeling**: Connected component analysis with minimum cluster filtering
 6. **Tract Analysis**: Map lesions to JHU ICBM-DTI-81 white matter atlas
+
+**Note**: When preprocessed T2w is found at `{derivatives}/{subject}/t2w/registered/t2w_to_t1w.nii.gz`, the WMH workflow uses it directly and skips the internal registration step. This ensures consistency with other analyses (e.g., T1-T2-ratio) and improves efficiency.
 
 ### Python API
 
