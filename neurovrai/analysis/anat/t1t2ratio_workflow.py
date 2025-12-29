@@ -285,10 +285,11 @@ def normalize_to_mni(
 
     # Default reference
     if reference is None:
-        fsl_dir = Path(subprocess.run(['echo', '$FSLDIR'], capture_output=True, text=True, shell=True).stdout.strip())
-        if not fsl_dir.exists():
-            fsl_dir = Path('/usr/local/fsl')
-        reference = fsl_dir / 'data' / 'standard' / 'MNI152_T1_2mm_brain.nii.gz'
+        import os
+        fsl_dir = os.environ.get('FSLDIR', '/usr/local/fsl')
+        reference = Path(fsl_dir) / 'data' / 'standard' / 'MNI152_T1_2mm_brain.nii.gz'
+        if not reference.exists():
+            raise FileNotFoundError(f"MNI template not found: {reference}")
 
     # Detect transform type
     if str(transform_file).endswith('.h5'):
