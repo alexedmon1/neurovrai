@@ -613,36 +613,20 @@ class DWIAtlasTransformer:
         return result, roi_names
 
     def _get_roi_names(self, atlas_name: str, atlas_file: Path) -> List[str]:
-        """Extract ROI names from atlas."""
-        config = ATLAS_CONFIGS[atlas_name]
+        """Extract ROI names from atlas.
 
-        if config['space'] == 'freesurfer':
-            from neurovrai.preprocess.utils.freesurfer_utils import (
-                get_desikan_killiany_labels,
-                get_subcortical_labels
-            )
+        ROI names use standardized format: ROI_{label:04d}
+        This ensures consistent naming across FC and SC analyses,
+        enabling proper ROI intersection and SC-FC coupling analysis.
+        """
+        # Get unique labels from atlas image
+        img = nib.load(atlas_file)
+        data = img.get_fdata().astype(int)
+        unique_labels = sorted(set(data.flatten()) - {0})
 
-            # Get labels from atlas image
-            img = nib.load(atlas_file)
-            data = img.get_fdata().astype(int)
-            unique_labels = sorted(set(data.flatten()) - {0})
-
-            if config['atlas_type'] == 'aparc+aseg':
-                label_map = get_desikan_killiany_labels()
-            else:
-                label_map = get_desikan_killiany_labels()
-
-            roi_names = [
-                label_map.get(label, f'Unknown_{label}')
-                for label in unique_labels
-            ]
-
-        else:
-            # For MNI/FMRIB58 atlases, use numbered labels
-            img = nib.load(atlas_file)
-            data = img.get_fdata().astype(int)
-            unique_labels = sorted(set(data.flatten()) - {0})
-            roi_names = [f'ROI_{label}' for label in unique_labels]
+        # Use standardized ROI naming (4-digit zero-padded)
+        # This matches FC pipeline for SC-FC coupling analysis
+        roi_names = [f'ROI_{label:04d}' for label in unique_labels]
 
         return roi_names
 

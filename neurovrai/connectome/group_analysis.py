@@ -103,6 +103,322 @@ def load_connectivity_matrices(
     return matrices_array, loaded_subjects
 
 
+def load_connectivity_with_rois(
+    connectivity_dir: Path,
+    matrix_pattern: str = '*_matrix.npy',
+    roi_pattern: str = '*_roi_names.txt',
+    subject_pattern: Optional[str] = None
+) -> Dict[str, Dict]:
+    """
+    Load connectivity matrices along with their ROI names.
+
+    This function handles varying matrix sizes across subjects by loading
+    each matrix with its associated ROI names, enabling ROI intersection
+    analysis.
+
+    Args:
+        connectivity_dir: Base directory containing subject subdirectories
+        matrix_pattern: Glob pattern for matrix files (default: '*_matrix.npy')
+        roi_pattern: Glob pattern for ROI name files (default: '*_roi_names.txt')
+        subject_pattern: Optional pattern to filter subjects (e.g., 'IRC805-*')
+
+    Returns:
+        Dictionary mapping subject_id -> {
+            'matrix': np.ndarray,
+            'rois': List[str],
+            'matrix_file': Path,
+            'roi_file': Path
+        }
+
+    Example:
+        data = load_connectivity_with_rois(
+            connectivity_dir=Path('/study/connectome/functional'),
+            matrix_pattern='fc_matrix.npy',
+            roi_pattern='fc_roi_names.txt'
+        )
+    """
+    connectivity_dir = Path(connectivity_dir)
+    logger.info(f"Loading connectivity data from: {connectivity_dir}")
+
+    data = {}
+
+    # Find subject directories
+    if subject_pattern:
+        subject_dirs = sorted(connectivity_dir.glob(subject_pattern))
+    else:
+        subject_dirs = sorted([d for d in connectivity_dir.iterdir() if d.is_dir()])
+
+    for subj_dir in subject_dirs:
+        subject = subj_dir.name
+
+        # Find matrix file
+        matrix_files = list(subj_dir.glob(f'**/{matrix_pattern}'))
+        if not matrix_files:
+            logger.debug(f"  {subject}: No matrix file found")
+            continue
+        matrix_file = matrix_files[0]
+
+        # Find ROI names file
+        roi_files = list(subj_dir.glob(f'**/{roi_pattern}'))
+        if not roi_files:
+            logger.debug(f"  {subject}: No ROI names file found")
+            continue
+        roi_file = roi_files[0]
+
+        # Load matrix
+        matrix = np.load(matrix_file)
+
+        # Load ROI names
+        with open(roi_file) as f:
+            rois = [line.strip() for line in f if line.strip()]
+
+        # Verify dimensions match
+        if matrix.shape[0] != len(rois):
+            logger.warning(
+                f"  {subject}: Matrix size ({matrix.shape[0]}) != ROI count ({len(rois)}), "
+                f"using min({matrix.shape[0]}, {len(rois)})"
+            )
+            n = min(matrix.shape[0], len(rois))
+            matrix = matrix[:n, :n]
+            rois = rois[:n]
+
+        data[subject] = {
+            'matrix': matrix,
+            'rois': rois,
+            'matrix_file': matrix_file,
+            'roi_file': roi_file
+        }
+
+    logger.info(f"  Loaded {len(data)} subjects")
+
+    # Show size distribution
+    sizes = {}
+    for subj, d in data.items():
+        size = d['matrix'].shape[0]
+        sizes[size] = sizes.get(size, 0) + 1
+    logger.info(f"  Matrix sizes: {sizes}")
+
+    return data
+
+
+def compute_roi_intersection(
+    data: Dict[str, Dict],
+    min_subjects: Optional[int] = None,
+    min_rois_per_subject: int = 1
+) -> List[str]:
+    """
+    Compute the intersection of ROIs present across all subjects.
+
+    Args:
+        data: Dictionary from load_connectivity_with_rois()
+        min_subjects: If specified, include ROIs present in at least this many subjects
+                     (default: None = require all subjects)
+        min_rois_per_subject: Minimum number of ROIs a subject must have to be included
+                             (default: 1, excludes subjects with empty ROI lists)
+
+    Returns:
+        Sorted list of ROI names present in all (or min_subjects) subjects
+
+    Example:
+        common_rois = compute_roi_intersection(data)
+        # Returns: ['ROI_001', 'ROI_002', ...]
+    """
+    if not data:
+        return []
+
+    # Filter out subjects with too few ROIs
+    valid_data = {k: v for k, v in data.items() if len(v['rois']) >= min_rois_per_subject}
+
+    if len(valid_data) < len(data):
+        excluded = len(data) - len(valid_data)
+        logger.info(f"  Excluded {excluded} subjects with < {min_rois_per_subject} ROIs")
+
+    if not valid_data:
+        logger.warning("No subjects have sufficient ROIs")
+        return []
+
+    # Get ROI sets for each valid subject
+    roi_sets = [set(d['rois']) for d in valid_data.values()]
+
+    if min_subjects is None or min_subjects >= len(valid_data):
+        # Strict intersection - ROI must be in all subjects
+        common_rois = set.intersection(*roi_sets)
+    else:
+        # Count ROI occurrences
+        from collections import Counter
+        all_rois = []
+        for roi_set in roi_sets:
+            all_rois.extend(roi_set)
+        roi_counts = Counter(all_rois)
+
+        # Keep ROIs present in at least min_subjects
+        common_rois = {roi for roi, count in roi_counts.items() if count >= min_subjects}
+
+    common_rois = sorted(common_rois)
+
+    logger.info(f"ROI intersection: {len(common_rois)} common ROIs across {len(valid_data)} subjects")
+
+    return common_rois
+
+
+def extract_common_roi_submatrices(
+    data: Dict[str, Dict],
+    common_rois: List[str],
+    output_dir: Optional[Path] = None
+) -> Tuple[Dict[str, np.ndarray], List[str]]:
+    """
+    Extract submatrices containing only the common ROIs.
+
+    This function re-indexes each subject's matrix to include only ROIs
+    present in the common_rois list, enabling group comparisons across
+    subjects with originally different ROI sets.
+
+    Args:
+        data: Dictionary from load_connectivity_with_rois()
+        common_rois: List of common ROI names from compute_roi_intersection()
+        output_dir: Optional directory to save extracted matrices and ROI list
+
+    Returns:
+        Tuple of:
+            - Dictionary mapping subject_id -> extracted matrix (n_common x n_common)
+            - List of common ROI names (same as input for consistency)
+
+    Example:
+        matrices, roi_names = extract_common_roi_submatrices(data, common_rois)
+        # Now all matrices are the same size and aligned to common_rois
+    """
+    extracted = {}
+    skipped = []
+
+    for subject, subj_data in data.items():
+        roi_list = subj_data['rois']
+        matrix = subj_data['matrix']
+
+        # Get indices of common ROIs in this subject's ROI list
+        indices = []
+        valid = True
+
+        for roi in common_rois:
+            if roi in roi_list:
+                idx = roi_list.index(roi)
+                if idx < matrix.shape[0]:
+                    indices.append(idx)
+                else:
+                    logger.warning(f"  {subject}: ROI '{roi}' index {idx} out of bounds")
+                    valid = False
+                    break
+            else:
+                logger.debug(f"  {subject}: ROI '{roi}' not found")
+                valid = False
+                break
+
+        if valid and len(indices) == len(common_rois):
+            # Extract submatrix
+            submatrix = matrix[np.ix_(indices, indices)]
+            extracted[subject] = submatrix
+        else:
+            skipped.append(subject)
+
+    logger.info(f"Extracted {len(extracted)} subjects with {len(common_rois)} common ROIs")
+    if skipped:
+        logger.warning(f"Skipped {len(skipped)} subjects: {skipped}")
+
+    # Save outputs if directory provided
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save common ROI list
+        roi_file = output_dir / 'common_rois.txt'
+        with open(roi_file, 'w') as f:
+            f.write('\n'.join(common_rois))
+        logger.info(f"  Saved common ROI list: {roi_file}")
+
+        # Save extraction summary
+        summary = {
+            'n_common_rois': len(common_rois),
+            'n_subjects_extracted': len(extracted),
+            'n_subjects_skipped': len(skipped),
+            'subjects_extracted': list(extracted.keys()),
+            'subjects_skipped': skipped
+        }
+        summary_file = output_dir / 'extraction_summary.json'
+        with open(summary_file, 'w') as f:
+            json.dump(summary, f, indent=2)
+        logger.info(f"  Saved extraction summary: {summary_file}")
+
+    return extracted, common_rois
+
+
+def load_and_align_connectivity(
+    connectivity_dir: Path,
+    matrix_pattern: str = '*_matrix.npy',
+    roi_pattern: str = '*_roi_names.txt',
+    subject_pattern: Optional[str] = None,
+    min_subjects: Optional[int] = None,
+    output_dir: Optional[Path] = None
+) -> Tuple[np.ndarray, List[str], List[str]]:
+    """
+    Load connectivity matrices and align them to common ROIs.
+
+    This is a convenience function that combines load_connectivity_with_rois,
+    compute_roi_intersection, and extract_common_roi_submatrices.
+
+    Args:
+        connectivity_dir: Base directory containing subject subdirectories
+        matrix_pattern: Glob pattern for matrix files
+        roi_pattern: Glob pattern for ROI name files
+        subject_pattern: Optional pattern to filter subjects
+        min_subjects: Minimum subjects for ROI inclusion (default: all)
+        output_dir: Optional directory to save outputs
+
+    Returns:
+        Tuple of:
+            - matrices: Array of shape (n_subjects, n_rois, n_rois)
+            - subject_ids: List of subject IDs
+            - roi_names: List of common ROI names
+
+    Example:
+        matrices, subjects, rois = load_and_align_connectivity(
+            connectivity_dir=Path('/study/connectome/functional'),
+            matrix_pattern='fc_matrix.npy',
+            roi_pattern='fc_roi_names.txt'
+        )
+    """
+    # Load all data with ROIs
+    data = load_connectivity_with_rois(
+        connectivity_dir=connectivity_dir,
+        matrix_pattern=matrix_pattern,
+        roi_pattern=roi_pattern,
+        subject_pattern=subject_pattern
+    )
+
+    if not data:
+        raise ValueError("No connectivity data loaded")
+
+    # Compute ROI intersection
+    common_rois = compute_roi_intersection(data, min_subjects=min_subjects)
+
+    if not common_rois:
+        raise ValueError("No common ROIs found across subjects")
+
+    # Extract aligned submatrices
+    extracted, roi_names = extract_common_roi_submatrices(
+        data, common_rois, output_dir=output_dir
+    )
+
+    if not extracted:
+        raise ValueError("No subjects successfully extracted")
+
+    # Stack into 3D array
+    subject_ids = sorted(extracted.keys())
+    matrices = np.stack([extracted[s] for s in subject_ids])
+
+    logger.info(f"Final aligned data: {matrices.shape}")
+
+    return matrices, subject_ids, roi_names
+
+
 def average_connectivity_matrices(
     matrices: np.ndarray,
     subject_ids: Optional[List[str]] = None,
@@ -631,3 +947,170 @@ def compute_network_based_statistic(
     logger.info("=" * 80)
 
     return results
+
+
+# =============================================================================
+# Convenience Functions for FC and SC Analysis
+# =============================================================================
+
+def normalize_roi_name(roi_name: str) -> str:
+    """
+    Normalize ROI name to standardized 4-digit format: ROI_XXXX
+
+    Handles various input formats:
+    - ROI_2, ROI_02, ROI_002 -> ROI_0002
+    - ROI_1234 -> ROI_1234
+
+    Args:
+        roi_name: ROI name in any format
+
+    Returns:
+        Normalized ROI name in ROI_XXXX format
+    """
+    if roi_name.startswith('ROI_'):
+        label = roi_name[4:]
+        try:
+            num = int(label)
+            return f'ROI_{num:04d}'
+        except ValueError:
+            return roi_name
+    return roi_name
+
+
+def load_fc_matrices_aligned(
+    fc_dir: Path,
+    atlas: str = 'desikan_killiany',
+    subject_pattern: Optional[str] = None,
+    output_dir: Optional[Path] = None
+) -> Tuple[np.ndarray, List[str], List[str]]:
+    """
+    Load and align functional connectivity matrices.
+
+    Convenience wrapper for load_and_align_connectivity with FC-specific defaults.
+
+    FC directory structure: {fc_dir}/{subject}/{atlas}/fc_matrix.npy
+
+    Args:
+        fc_dir: Path to functional connectome directory (e.g., {study_root}/connectome/functional)
+        atlas: Atlas name (default: 'desikan_killiany')
+        subject_pattern: Optional glob pattern for subjects
+        output_dir: Optional output directory for aligned matrices
+
+    Returns:
+        Tuple of (matrices, subject_ids, roi_names)
+        - matrices: np.ndarray of shape (n_subjects, n_rois, n_rois)
+        - subject_ids: List of subject identifiers
+        - roi_names: List of ROI names (intersection across subjects)
+    """
+    fc_dir = Path(fc_dir)
+
+    # FC uses structure: {fc_dir}/{subject}/{atlas}/
+    # Load connectivity with ROIs
+    data = load_connectivity_with_rois(
+        connectivity_dir=fc_dir,
+        matrix_pattern=f'{atlas}/fc_matrix.npy',
+        roi_pattern=f'{atlas}/fc_roi_names.txt',
+        subject_pattern=subject_pattern
+    )
+
+    if not data:
+        raise ValueError(f"No FC data found in {fc_dir}")
+
+    # Normalize ROI names to standardized format
+    for subj in data:
+        data[subj]['rois'] = [normalize_roi_name(r) for r in data[subj]['rois']]
+
+    # Compute ROI intersection
+    common_rois = compute_roi_intersection(data)
+
+    if not common_rois:
+        raise ValueError("No common ROIs found across subjects")
+
+    # Extract aligned submatrices
+    extracted, roi_names = extract_common_roi_submatrices(data, common_rois, output_dir=output_dir)
+
+    if not extracted:
+        raise ValueError("No subjects successfully extracted")
+
+    # Stack into 3D array
+    subject_ids = sorted(extracted.keys())
+    matrices = np.stack([extracted[s] for s in subject_ids])
+
+    logger.info(f"Final aligned FC data: {matrices.shape}")
+
+    return matrices, subject_ids, roi_names
+
+
+def load_sc_matrices_aligned(
+    sc_dir: Path,
+    atlas: str = 'desikan_killiany',
+    subject_pattern: Optional[str] = None,
+    output_dir: Optional[Path] = None,
+    use_rebuilt: bool = True
+) -> Tuple[np.ndarray, List[str], List[str]]:
+    """
+    Load and align structural connectivity matrices.
+
+    Convenience wrapper for load_and_align_connectivity with SC-specific defaults.
+    By default, uses rebuilt matrices (sc_matrix_rebuilt.npy) which are properly
+    aggregated from probtrackx outputs.
+
+    SC directory structure: {sc_dir}/{atlas}/{subject}/sc_matrix.npy
+
+    Args:
+        sc_dir: Path to structural connectome directory (e.g., {study_root}/connectome/structural)
+        atlas: Atlas name (default: 'desikan_killiany')
+        subject_pattern: Optional glob pattern for subjects
+        output_dir: Optional output directory for aligned matrices
+        use_rebuilt: If True, use rebuilt matrices from probtrackx (default: True)
+
+    Returns:
+        Tuple of (matrices, subject_ids, roi_names)
+        - matrices: np.ndarray of shape (n_subjects, n_rois, n_rois)
+        - subject_ids: List of subject identifiers
+        - roi_names: List of ROI names (intersection across subjects)
+    """
+    # SC uses structure: {sc_dir}/{atlas}/{subject}/
+    atlas_dir = Path(sc_dir) / atlas if atlas else Path(sc_dir)
+
+    if use_rebuilt:
+        matrix_pattern = 'sc_matrix_rebuilt.npy'
+        roi_pattern = 'sc_roi_names_rebuilt.txt'
+    else:
+        matrix_pattern = 'sc_matrix.npy'
+        roi_pattern = 'sc_roi_names.txt'
+
+    # Load connectivity with ROIs
+    data = load_connectivity_with_rois(
+        connectivity_dir=atlas_dir,
+        matrix_pattern=matrix_pattern,
+        roi_pattern=roi_pattern,
+        subject_pattern=subject_pattern
+    )
+
+    if not data:
+        raise ValueError(f"No SC data found in {atlas_dir}")
+
+    # Normalize ROI names to standardized format
+    for subj in data:
+        data[subj]['rois'] = [normalize_roi_name(r) for r in data[subj]['rois']]
+
+    # Compute ROI intersection
+    common_rois = compute_roi_intersection(data)
+
+    if not common_rois:
+        raise ValueError("No common ROIs found across subjects")
+
+    # Extract aligned submatrices
+    extracted, roi_names = extract_common_roi_submatrices(data, common_rois, output_dir=output_dir)
+
+    if not extracted:
+        raise ValueError("No subjects successfully extracted")
+
+    # Stack into 3D array
+    subject_ids = sorted(extracted.keys())
+    matrices = np.stack([extracted[s] for s in subject_ids])
+
+    logger.info(f"Final aligned SC data: {matrices.shape}")
+
+    return matrices, subject_ids, roi_names

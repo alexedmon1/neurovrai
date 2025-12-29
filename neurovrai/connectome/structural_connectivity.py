@@ -1437,13 +1437,13 @@ def prepare_atlas_for_probtrackx(
             logger.warning(f"  ROI {label}: only {n_voxels} voxels, excluding")
             continue
 
-        # Save individual ROI mask
-        roi_file = output_dir / f"roi_{label:03d}.nii.gz"
+        # Save individual ROI mask (4-digit padding for consistent naming)
+        roi_file = output_dir / f"roi_{label:04d}.nii.gz"
         roi_img = nib.Nifti1Image(roi_mask, atlas_img.affine, atlas_img.header)
         nib.save(roi_img, roi_file)
 
         roi_masks.append(roi_file)
-        roi_names.append(f"ROI_{label:03d}")
+        roi_names.append(f"ROI_{label:04d}")
         valid_labels.append(label)
 
         logger.info(f"  ROI {label}: {n_voxels} voxels -> {roi_file.name}")
@@ -1462,8 +1462,8 @@ def prepare_atlas_for_probtrackx(
     logger.info(f"✓ Created {len(roi_masks)} ROI masks")
     logger.info(f"✓ Seeds list: {seeds_list_file}")
 
-    # Save ROI names for later use
-    roi_names_file = output_dir / "roi_names.txt"
+    # Save ROI names for later use (standardized filename for group analysis)
+    roi_names_file = output_dir / "sc_roi_names.txt"
     with open(roi_names_file, 'w') as f:
         for name in roi_names:
             f.write(f"{name}\n")
@@ -2454,3 +2454,200 @@ def compute_structural_connectivity(
                                 for k, v in probtrackx_outputs.items()},
         'metadata': metadata
     }
+
+
+def rebuild_sc_matrix_from_probtrackx(
+    probtrackx_dir: Path,
+    output_dir: Optional[Path] = None,
+    save_results: bool = True
+) -> Dict[str, Any]:
+    """
+    Rebuild structural connectivity matrix from probtrackx outputs.
+
+    This function reconstructs the connectivity matrix by reading the
+    seeds_to_roi_*.nii.gz files from each ROI's probtrackx output directory.
+    Each file contains streamline counts from the seed ROI to the target ROI.
+
+    Args:
+        probtrackx_dir: Path to probtrackx output directory containing roi_* subdirectories
+        output_dir: Where to save results. If None, uses probtrackx_dir parent
+        save_results: If True, save matrix and ROI names to files
+
+    Returns:
+        Dict containing:
+            - connectivity_matrix: np.ndarray, symmetrized connectivity matrix
+            - roi_names: List[str], ROI names in matrix order (ROI_XXXX format)
+            - roi_indices: List[int], original ROI indices from atlas
+            - n_edges: int, number of non-zero connections
+            - output_dir: str, where results were saved
+
+    Raises:
+        StructuralConnectivityError: If probtrackx directory structure is invalid
+    """
+    probtrackx_dir = Path(probtrackx_dir)
+
+    if not probtrackx_dir.exists():
+        raise StructuralConnectivityError(f"Probtrackx directory not found: {probtrackx_dir}")
+
+    # Find all ROI directories
+    roi_dirs = sorted([d for d in probtrackx_dir.iterdir()
+                       if d.is_dir() and d.name.startswith('roi_')])
+
+    if not roi_dirs:
+        raise StructuralConnectivityError(f"No roi_* directories found in {probtrackx_dir}")
+
+    logger.info(f"Found {len(roi_dirs)} ROI directories in {probtrackx_dir}")
+
+    # Extract ROI indices from directory names (roi_XXXX)
+    roi_indices = []
+    for roi_dir in roi_dirs:
+        try:
+            idx = int(roi_dir.name.split('_')[1])
+            roi_indices.append(idx)
+        except (IndexError, ValueError):
+            logger.warning(f"Could not parse ROI index from {roi_dir.name}, skipping")
+            continue
+
+    n_rois = len(roi_indices)
+    if n_rois == 0:
+        raise StructuralConnectivityError("No valid ROI directories found")
+
+    # Create mapping from ROI index to matrix position
+    roi_to_pos = {idx: pos for pos, idx in enumerate(roi_indices)}
+
+    # Initialize connectivity matrix
+    matrix = np.zeros((n_rois, n_rois), dtype=np.float64)
+
+    # Load seeds_to_roi files for each ROI
+    for seed_dir in roi_dirs:
+        seed_idx = int(seed_dir.name.split('_')[1])
+        seed_pos = roi_to_pos.get(seed_idx)
+
+        if seed_pos is None:
+            continue
+
+        # Find all seeds_to_roi files in this directory
+        target_files = list(seed_dir.glob('seeds_to_roi_*.nii.gz'))
+
+        for target_file in target_files:
+            # Extract target ROI index from filename (seeds_to_roi_XXXX.nii.gz)
+            try:
+                target_idx = int(target_file.stem.replace('seeds_to_roi_', '').replace('.nii', ''))
+            except ValueError:
+                continue
+
+            target_pos = roi_to_pos.get(target_idx)
+            if target_pos is None:
+                continue
+
+            # Load and sum streamline density
+            try:
+                img = nib.load(target_file)
+                data = np.asarray(img.dataobj)
+                streamline_count = np.sum(data)
+                matrix[seed_pos, target_pos] = streamline_count
+            except Exception as e:
+                logger.warning(f"Failed to load {target_file}: {e}")
+                continue
+
+    # Symmetrize the matrix
+    matrix = (matrix + matrix.T) / 2
+
+    # Create standardized ROI names
+    roi_names = [f"ROI_{idx:04d}" for idx in roi_indices]
+
+    # Calculate statistics
+    n_edges = int(np.sum(matrix > 0) / 2)  # Divide by 2 since symmetric
+    max_weight = float(np.max(matrix))
+
+    logger.info(f"Rebuilt SC matrix: {n_rois} ROIs, {n_edges} edges, max={max_weight:.0f}")
+
+    # Save results
+    if save_results:
+        if output_dir is None:
+            output_dir = probtrackx_dir.parent
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save matrix
+        np.save(output_dir / 'sc_matrix_rebuilt.npy', matrix)
+
+        # Save ROI names
+        with open(output_dir / 'sc_roi_names_rebuilt.txt', 'w') as f:
+            for name in roi_names:
+                f.write(f"{name}\n")
+
+        # Save metadata
+        metadata = {
+            'n_rois': n_rois,
+            'n_edges': n_edges,
+            'max_weight': max_weight,
+            'roi_indices': roi_indices,
+            'source_dir': str(probtrackx_dir)
+        }
+        with open(output_dir / 'sc_rebuild_metadata.json', 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        logger.info(f"Saved rebuilt SC matrix to {output_dir}")
+
+    return {
+        'connectivity_matrix': matrix,
+        'roi_names': roi_names,
+        'roi_indices': roi_indices,
+        'n_edges': n_edges,
+        'output_dir': str(output_dir) if output_dir else None
+    }
+
+
+def batch_rebuild_sc_matrices(
+    connectome_dir: Path,
+    atlas: str = 'desikan_killiany',
+    subjects: Optional[List[str]] = None
+) -> Dict[str, Dict]:
+    """
+    Rebuild SC matrices for multiple subjects from probtrackx outputs.
+
+    Args:
+        connectome_dir: Path to connectome directory (e.g., {study_root}/connectome/structural)
+        atlas: Atlas name subdirectory (default: 'desikan_killiany')
+        subjects: List of subject IDs. If None, discovers all subjects.
+
+    Returns:
+        Dict mapping subject IDs to rebuild results
+    """
+    connectome_dir = Path(connectome_dir)
+    atlas_dir = connectome_dir / atlas
+
+    if not atlas_dir.exists():
+        raise StructuralConnectivityError(f"Atlas directory not found: {atlas_dir}")
+
+    # Discover subjects
+    if subjects is None:
+        subjects = sorted([d.name for d in atlas_dir.iterdir()
+                          if d.is_dir() and not d.name.startswith('.')])
+
+    logger.info(f"Rebuilding SC matrices for {len(subjects)} subjects")
+
+    results = {}
+    for subject in subjects:
+        subject_dir = atlas_dir / subject
+        probtrackx_dir = subject_dir / 'probtrackx_output'
+
+        if not probtrackx_dir.exists():
+            logger.warning(f"No probtrackx_output for {subject}, skipping")
+            continue
+
+        try:
+            result = rebuild_sc_matrix_from_probtrackx(
+                probtrackx_dir=probtrackx_dir,
+                output_dir=subject_dir,
+                save_results=True
+            )
+            results[subject] = result
+            logger.info(f"  {subject}: {result['n_edges']} edges")
+        except Exception as e:
+            logger.error(f"  {subject}: Failed - {e}")
+            continue
+
+    logger.info(f"Successfully rebuilt {len(results)}/{len(subjects)} SC matrices")
+    return results
