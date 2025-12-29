@@ -287,7 +287,7 @@ def run_t2w_preprocessing(
         T1w brain-extracted image (reference for registration)
     output_dir : Path
         Study root directory (e.g., /mnt/bytopia/IRC805/)
-        Derivatives will be saved to: {output_dir}/derivatives/{subject}/t2w/
+        Derivatives will be saved to: {output_dir}/derivatives/{subject}/anat/t2w/
     work_dir : Path, optional
         Working directory for temporary files
         Default: {output_dir}/work/{subject}/t2w_preprocess/
@@ -323,8 +323,9 @@ def run_t2w_preprocessing(
     >>> print(results['t2w_to_t1w'])
     """
     # Setup directories first (needed for logging)
+    # T2w outputs go under anat/t2w/ to keep all anatomical data together
     study_root = Path(output_dir)
-    derivatives_dir = study_root / 'derivatives' / subject / 't2w'
+    derivatives_dir = study_root / 'derivatives' / subject / 'anat' / 't2w'
     derivatives_dir.mkdir(parents=True, exist_ok=True)
 
     if work_dir is None:

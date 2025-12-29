@@ -82,6 +82,8 @@ def find_preprocessed_t2w(derivatives_dir: Path, subject: str) -> Optional[Path]
     Find preprocessed T2w registered to T1w from derivatives.
 
     Checks for output from t2w_preprocess.py workflow.
+    Looks in {derivatives}/{subject}/anat/t2w/registered/ (current location)
+    and falls back to {derivatives}/{subject}/t2w/registered/ (legacy location).
 
     Parameters
     ----------
@@ -95,9 +97,9 @@ def find_preprocessed_t2w(derivatives_dir: Path, subject: str) -> Optional[Path]
     Path or None
         Path to T2w registered to T1w, or None if not found
     """
-    t2w_dir = derivatives_dir / subject / 't2w' / 'registered'
+    # Check current location: anat/t2w/registered/
+    t2w_dir = derivatives_dir / subject / 'anat' / 't2w' / 'registered'
     if t2w_dir.exists():
-        # Check for t2w_to_t1w.nii.gz (standard output from t2w_preprocess)
         t2w_t1w = t2w_dir / 't2w_to_t1w.nii.gz'
         if t2w_t1w.exists():
             logger.info(f"Found preprocessed T2w: {t2w_t1w}")
@@ -107,6 +109,19 @@ def find_preprocessed_t2w(derivatives_dir: Path, subject: str) -> Optional[Path]
         t2w_files = list(t2w_dir.glob('*t2w*.nii.gz')) + list(t2w_dir.glob('*T2w*.nii.gz'))
         if t2w_files:
             logger.info(f"Found preprocessed T2w: {t2w_files[0]}")
+            return t2w_files[0]
+
+    # Fallback: check legacy location {derivatives}/{subject}/t2w/registered/
+    legacy_t2w_dir = derivatives_dir / subject / 't2w' / 'registered'
+    if legacy_t2w_dir.exists():
+        t2w_t1w = legacy_t2w_dir / 't2w_to_t1w.nii.gz'
+        if t2w_t1w.exists():
+            logger.info(f"Found preprocessed T2w (legacy location): {t2w_t1w}")
+            return t2w_t1w
+
+        t2w_files = list(legacy_t2w_dir.glob('*t2w*.nii.gz')) + list(legacy_t2w_dir.glob('*T2w*.nii.gz'))
+        if t2w_files:
+            logger.info(f"Found preprocessed T2w (legacy location): {t2w_files[0]}")
             return t2w_files[0]
 
     return None

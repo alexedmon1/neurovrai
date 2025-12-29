@@ -77,10 +77,14 @@ def find_t1w_bias_corrected(derivatives_dir: Path, subject: str) -> Optional[Pat
 
 
 def find_t2w_registered(derivatives_dir: Path, subject: str) -> Optional[Path]:
-    """Find T2w image registered to T1w space."""
-    t2w_dir = derivatives_dir / subject / 't2w'
+    """
+    Find T2w image registered to T1w space.
 
-    # Check registered/ subdirectory
+    Checks current location ({derivatives}/{subject}/anat/t2w/registered/)
+    and falls back to legacy location ({derivatives}/{subject}/t2w/registered/).
+    """
+    # Check current location: anat/t2w/registered/
+    t2w_dir = derivatives_dir / subject / 'anat' / 't2w'
     reg_dir = t2w_dir / 'registered'
     if reg_dir.exists():
         reg_files = list(reg_dir.glob('t2w_to_t1w.nii.gz'))
@@ -88,6 +92,17 @@ def find_t2w_registered(derivatives_dir: Path, subject: str) -> Optional[Path]:
             return reg_files[0]
         # Try other patterns
         reg_files = list(reg_dir.glob('*.nii.gz'))
+        if reg_files:
+            return reg_files[0]
+
+    # Fallback: check legacy location {derivatives}/{subject}/t2w/registered/
+    legacy_t2w_dir = derivatives_dir / subject / 't2w'
+    legacy_reg_dir = legacy_t2w_dir / 'registered'
+    if legacy_reg_dir.exists():
+        reg_files = list(legacy_reg_dir.glob('t2w_to_t1w.nii.gz'))
+        if reg_files:
+            return reg_files[0]
+        reg_files = list(legacy_reg_dir.glob('*.nii.gz'))
         if reg_files:
             return reg_files[0]
 
