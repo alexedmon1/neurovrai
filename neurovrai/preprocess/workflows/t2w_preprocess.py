@@ -322,8 +322,19 @@ def run_t2w_preprocessing(
     ... )
     >>> print(results['t2w_to_t1w'])
     """
+    # Setup directories first (needed for logging)
+    study_root = Path(output_dir)
+    derivatives_dir = study_root / 'derivatives' / subject / 't2w'
+    derivatives_dir.mkdir(parents=True, exist_ok=True)
+
+    if work_dir is None:
+        work_dir = study_root / 'work' / subject / 't2w_preprocess'
+    work_dir.mkdir(parents=True, exist_ok=True)
+
     # Setup logging
-    setup_logging(subject, 't2w_preprocess')
+    log_dir = study_root / 'logs' / subject
+    log_dir.mkdir(parents=True, exist_ok=True)
+    setup_logging(log_dir, subject, 't2w_preprocess')
 
     logger.info("=" * 70)
     logger.info(f"T2w Preprocessing: {subject}")
@@ -332,15 +343,6 @@ def run_t2w_preprocessing(
     # Validate inputs
     validate_inputs(t2w_file)
     validate_inputs(t1w_brain)
-
-    # Setup directories
-    study_root = Path(output_dir)
-    derivatives_dir = study_root / 'derivatives' / subject / 't2w'
-    derivatives_dir.mkdir(parents=True, exist_ok=True)
-
-    if work_dir is None:
-        work_dir = study_root / 'work' / subject / 't2w_preprocess'
-    work_dir.mkdir(parents=True, exist_ok=True)
 
     outputs = {}
 
