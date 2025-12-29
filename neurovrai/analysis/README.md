@@ -9,6 +9,8 @@ This module provides group-level analyses following a two-stage pipeline pattern
 | Analysis | Stage 1 (Preparation) | Stage 2 (Statistics) | Status |
 |----------|----------------------|---------------------|--------|
 | **VBM** | Tissue normalization, smoothing | FSL randomise / nilearn GLM | Production |
+| **WMH** | T2w normalization, WM masking | Intensity thresholding, tract analysis | Production |
+| **T1-T2-ratio** | Ratio computation, WM masking | FSL randomise / nilearn GLM | Production |
 | **TBSS** | FSL TBSS pipeline (1-4) | FSL randomise | Production |
 | **ReHo/fALFF** | Metric computation, z-scoring | FSL randomise / nilearn GLM | Production |
 | **MELODIC** | Group ICA | Dual regression | Production |
@@ -19,7 +21,12 @@ This module provides group-level analyses following a two-stage pipeline pattern
 ```
 analysis/
 ├── anat/
-│   └── vbm_workflow.py        # Voxel-Based Morphometry
+│   ├── vbm_workflow.py        # Voxel-Based Morphometry
+│   ├── wmh_detection.py       # WMH detection algorithm
+│   ├── wmh_workflow.py        # WMH analysis orchestration
+│   ├── wmh_reporting.py       # WMH HTML report generation
+│   ├── t1t2ratio_workflow.py  # T1w/T2w ratio analysis
+│   └── t1t2ratio_reporting.py # T1-T2-ratio HTML report generation
 ├── tbss/
 │   ├── prepare_tbss.py        # TBSS data preparation
 │   └── run_tbss_stats.py      # TBSS statistical analysis
@@ -108,6 +115,287 @@ analysis/vbm/GM/
 └── cluster_reports/
     └── contrast_report.html
 ```
+
+---
+
+## WMH (White Matter Hyperintensity Detection)
+
+Detect and quantify white matter hyperintensities using T2w imaging with tract-level analysis.
+
+### Processing Pipeline
+
+1. **T2w Registration**: Register T2w → T1w (FSL FLIRT, 6 DOF rigid body)
+2. **MNI Normalization**: Apply existing T1w→MNI ANTs transform to T2w
+3. **Clean WM Mask**: Create WM mask excluding CSF (with dilatable buffer) and GM
+4. **WMH Detection**: Intensity thresholding within WM (mean + SD × threshold)
+5. **Lesion Labeling**: Connected component analysis with minimum cluster filtering
+6. **Tract Analysis**: Map lesions to JHU ICBM-DTI-81 white matter atlas
+
+### Python API
+
+```python
+from neurovrai.analysis.anat.wmh_workflow import (
+    run_wmh_analysis_single,
+    run_wmh_analysis_batch,
+    generate_group_summary
+)
+from neurovrai.analysis.anat.wmh_reporting import generate_wmh_html_report
+from pathlib import Path
+
+# Single subject
+results = run_wmh_analysis_single(
+    subject='sub-001',
+    study_root=Path('/mnt/data/study'),
+    output_dir=Path('/mnt/data/study/hyperintensities'),
+    sd_threshold=3.0,        # Detection sensitivity (lower = more sensitive)
+    min_cluster_size=5,      # Minimum voxels per lesion
+    csf_dilate=1,            # CSF buffer iterations (~2mm each)
+    gm_dilate=0              # GM buffer iterations (optional)
+)
+
+print(f"Detected {results['wmh_summary']['n_lesions']} lesions")
+print(f"Total volume: {results['wmh_summary']['total_volume_mm3']:.2f} mm³")
+
+# Batch processing (parallel)
+batch_results = run_wmh_analysis_batch(
+    study_root=Path('/mnt/data/study'),
+    output_dir=Path('/mnt/data/study/hyperintensities'),
+    n_jobs=4,
+    sd_threshold=3.0
+)
+
+# Generate group summary and HTML report
+group_df = generate_group_summary(Path('/mnt/data/study/hyperintensities'))
+report_path = generate_wmh_html_report(Path('/mnt/data/study/hyperintensities'))
+```
+
+### CLI Usage
+
+```bash
+# Single subject
+uv run python -m neurovrai.analysis.anat.wmh_workflow single \
+    --subject sub-001 \
+    --study-root /mnt/data/study \
+    --output-dir /mnt/data/study/hyperintensities \
+    --sd-threshold 3.0 \
+    --min-cluster-size 5 \
+    --csf-dilate 1
+
+# Batch processing
+uv run python -m neurovrai.analysis.anat.wmh_workflow batch \
+    --study-root /mnt/data/study \
+    --output-dir /mnt/data/study/hyperintensities \
+    --n-jobs 4
+
+# Generate HTML report
+uv run python -m neurovrai.analysis.anat.wmh_workflow report \
+    --hyperintensities-dir /mnt/data/study/hyperintensities
+```
+
+### Configuration Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `sd_threshold` | 3.0 | Detection threshold (mean + SD × threshold) |
+| `min_cluster_size` | 5 | Minimum voxels per lesion |
+| `wm_threshold` | 0.7 | WM probability for inclusion |
+| `csf_exclude_threshold` | 0.1 | CSF probability for exclusion |
+| `csf_dilate` | 1 | CSF dilation iterations (~2mm buffer each) |
+| `gm_exclude_threshold` | 0.5 | GM probability for exclusion |
+| `gm_dilate` | 0 | GM dilation iterations (optional) |
+
+### Input Requirements
+
+```
+{study_root}/
+├── bids/{subject}/anat/
+│   └── *T2W*.nii.gz                   # T2w image(s)
+├── derivatives/{subject}/anat/
+│   ├── brain/*_brain.nii.gz           # T1w brain-extracted
+│   └── segmentation/
+│       ├── csf.nii.gz                 # CSF probability map
+│       ├── gm.nii.gz                  # GM probability map
+│       └── wm.nii.gz                  # WM probability map
+└── transforms/{subject}/
+    └── t1w-mni-composite.h5           # T1w→MNI ANTs transform
+```
+
+### Outputs
+
+**Per Subject** (`{output_dir}/{subject}/`):
+```
+├── t2w_mni.nii.gz           # T2w normalized to MNI
+├── wm_mask_mni.nii.gz       # Clean WM mask in MNI
+├── wmh_mask.nii.gz          # Binary WMH detection mask
+├── wmh_labeled.nii.gz       # Labeled lesion map (IDs: 1, 2, 3, ...)
+├── wmh_metrics.json         # Complete results with metadata
+├── wmh_tract_counts.csv     # Per-tract lesion counts and volumes
+├── wmh_lesions.csv          # Per-lesion detailed metrics
+└── wmh_visualization.png    # Multi-slice overlay
+```
+
+**Group Level** (`{output_dir}/group/`):
+```
+├── wmh_summary.csv          # Per-subject summary statistics
+├── wmh_by_tract.csv         # Aggregated tract-wise statistics
+└── wmh_report.html          # Interactive HTML report
+```
+
+---
+
+## T1-T2-ratio (T1w/T2w Ratio Analysis)
+
+Compute T1w/T2w ratio as a proxy for myelin content in white matter. Based on [Du et al. 2019 (PMID: 30408230)](https://pubmed.ncbi.nlm.nih.gov/30408230/).
+
+### Processing Pipeline
+
+1. **Load Preprocessed Data**: T1w bias-corrected and T2w registered to T1w from derivatives
+2. **Compute Ratio**: T1w / T2w in native space (with T2w threshold for zero handling)
+3. **MNI Normalization**: Apply existing T1w→MNI transform to ratio map
+4. **WM Masking**: Create WM mask from tissue probability maps (threshold 0.5)
+5. **Smoothing**: Apply 4mm FWHM Gaussian kernel
+6. **Group Statistics**: FSL randomise or nilearn GLM within WM mask
+
+### Python API
+
+```python
+from neurovrai.analysis.anat.t1t2ratio_workflow import (
+    prepare_t1t2ratio_single,
+    prepare_t1t2ratio_batch,
+    run_t1t2ratio_analysis
+)
+from neurovrai.analysis.anat.t1t2ratio_reporting import generate_t1t2ratio_html_report
+from pathlib import Path
+
+# Single subject preparation
+results = prepare_t1t2ratio_single(
+    subject='sub-001',
+    study_root=Path('/mnt/data/study'),
+    output_dir=Path('/mnt/data/study/analysis/t1t2ratio'),
+    wm_threshold=0.5,        # WM probability threshold
+    smooth_fwhm=4.0,         # Smoothing kernel (mm)
+    overwrite=False
+)
+
+print(f"Mean ratio: {results['statistics']['ratio_mean']:.3f}")
+print(f"WM voxels: {results['statistics']['n_wm_voxels']}")
+
+# Batch processing (parallel)
+batch_results = prepare_t1t2ratio_batch(
+    study_root=Path('/mnt/data/study'),
+    output_dir=Path('/mnt/data/study/analysis/t1t2ratio'),
+    subjects=None,           # Auto-discover subjects
+    n_jobs=4,
+    wm_threshold=0.5,
+    smooth_fwhm=4.0
+)
+
+# Group statistics (requires design matrices)
+stats_results = run_t1t2ratio_analysis(
+    t1t2ratio_dir=Path('/mnt/data/study/analysis/t1t2ratio'),
+    design_dir=Path('/mnt/data/study/designs/t1t2ratio'),
+    method='randomise',      # 'randomise' or 'glm'
+    n_permutations=5000,
+    tfce=True
+)
+
+# Generate HTML report
+report_path = generate_t1t2ratio_html_report(
+    Path('/mnt/data/study/analysis/t1t2ratio')
+)
+```
+
+### CLI Usage
+
+```bash
+# Single subject
+uv run python -m neurovrai.analysis.anat.t1t2ratio_workflow prepare-single \
+    --subject sub-001 \
+    --study-root /mnt/data/study \
+    --output-dir /mnt/data/study/analysis/t1t2ratio \
+    --wm-threshold 0.5 \
+    --smooth-fwhm 4.0
+
+# Batch processing
+uv run python -m neurovrai.analysis.anat.t1t2ratio_workflow prepare-batch \
+    --study-root /mnt/data/study \
+    --output-dir /mnt/data/study/analysis/t1t2ratio \
+    --n-jobs 4
+
+# Group statistics
+uv run python -m neurovrai.analysis.anat.t1t2ratio_workflow analyze \
+    --t1t2ratio-dir /mnt/data/study/analysis/t1t2ratio \
+    --design-dir /mnt/data/study/designs/t1t2ratio \
+    --method randomise \
+    --n-permutations 5000
+
+# Generate HTML report
+uv run python -m neurovrai.analysis.anat.t1t2ratio_workflow report \
+    --t1t2ratio-dir /mnt/data/study/analysis/t1t2ratio
+```
+
+### Configuration Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `wm_threshold` | 0.5 | WM probability threshold for mask creation |
+| `smooth_fwhm` | 4.0 | Gaussian smoothing FWHM (mm) |
+| `min_t2w_threshold` | 10.0 | Minimum T2w intensity (avoid division artifacts) |
+| `n_jobs` | 4 | Parallel workers for batch processing |
+| `n_permutations` | 5000 | Permutations for FSL randomise |
+| `tfce` | True | Use TFCE correction in randomise |
+
+### Input Requirements
+
+```
+{study_root}/
+├── derivatives/{subject}/
+│   ├── anat/
+│   │   ├── bias_corrected/*_n4.nii.gz    # N4 bias-corrected T1w
+│   │   └── segmentation/wm.nii.gz        # WM probability map
+│   └── t2w/
+│       └── registered/t2w_to_t1w.nii.gz  # T2w registered to T1w
+└── transforms/{subject}/
+    └── t1w-mni-composite.h5              # T1w→MNI ANTs transform
+```
+
+**Prerequisites**:
+- T1w preprocessing (`t1w_preprocess.py`) with N4 bias correction
+- T2w preprocessing (`t2w_preprocess.py`) with T1w registration
+- Tissue segmentation with WM probability map
+
+### Outputs
+
+**Per Subject** (`{output_dir}/{subject}/`):
+```
+├── t1t2_ratio.nii.gz              # Ratio in native T1w space
+├── t1t2_ratio_mni.nii.gz          # Ratio normalized to MNI
+├── wm_mask_mni.nii.gz             # WM mask in MNI space
+├── t1t2_ratio_mni_wm.nii.gz       # Ratio masked to WM
+├── t1t2_ratio_mni_wm_smooth.nii.gz # Smoothed (analysis-ready)
+└── t1t2ratio_metrics.json         # Statistics and metadata
+```
+
+**Group Level** (`{output_dir}/group/`):
+```
+├── merged_t1t2ratio.nii.gz        # 4D merged volume
+├── group_wm_mask.nii.gz           # Intersection WM mask
+├── t1t2ratio_summary.csv          # Per-subject statistics
+└── t1t2ratio_report.html          # Interactive HTML report
+```
+
+**Statistics** (`{output_dir}/stats/`):
+```
+└── randomise_*/
+    ├── randomise_tstat1.nii.gz
+    ├── randomise_tfce_corrp_tstat1.nii.gz
+    └── cluster_reports/
+        └── t1t2ratio_cluster_report.html
+```
+
+### Reference
+
+Du G, Lewis MM, Sica C, Kong L, Huang X. (2019). Magnetic resonance T1w/T2w ratio: A parsimonious marker for Parkinson disease. Ann Neurol. 85(1):96-104. [PMID: 30408230](https://pubmed.ncbi.nlm.nih.gov/30408230/)
 
 ---
 

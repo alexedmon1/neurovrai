@@ -149,9 +149,9 @@ uv run python -m neurovrai.connectome.run_structural_connectivity \
 **Pipeline**: N4 bias correction → BET skull stripping → Atropos segmentation → FLIRT/FNIRT registration
 
 ```python
-from neurovrai.preprocess.workflows.anat_preprocess import run_anatomical_preprocessing
+from neurovrai.preprocess.workflows.t1w_preprocess import run_t1w_preprocessing
 
-results = run_anatomical_preprocessing(
+results = run_t1w_preprocessing(
     config=config,
     subject='sub-001',
     t1w_file=Path('T1w.nii.gz'),
@@ -160,6 +160,24 @@ results = run_anatomical_preprocessing(
 ```
 
 **Outputs**: `brain.nii.gz`, `brain_mask.nii.gz`, `segmentation/pve_*.nii.gz`, `transforms/`
+
+### T2w Preprocessing
+
+**Pipeline**: N4 bias correction → BET skull stripping → FLIRT registration to T1w
+
+```python
+from neurovrai.preprocess.workflows.t2w_preprocess import run_t2w_preprocessing
+
+results = run_t2w_preprocessing(
+    config=config,
+    subject='sub-001',
+    t2w_file=Path('T2w.nii.gz'),
+    t1w_brain=Path('/derivatives/sub-001/anat/brain/T1w_brain.nii.gz'),
+    output_dir=Path('/derivatives')
+)
+```
+
+**Outputs**: `brain/t2w_brain.nii.gz`, `registered/t2w_to_t1w.nii.gz`, `t2w-t1w-affine.mat`
 
 ### Diffusion (DWI)
 

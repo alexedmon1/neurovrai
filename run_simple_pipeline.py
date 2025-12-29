@@ -32,7 +32,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Import configuration and workflow functions
 from neurovrai.config import load_config
 from neurovrai.preprocess.utils.dicom_converter import convert_subject_dicoms
-from neurovrai.preprocess.workflows.anat_preprocess import run_anat_preprocessing
+from neurovrai.preprocess.workflows.t1w_preprocess import run_t1w_preprocessing
 from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
 from neurovrai.preprocess.workflows.func_preprocess import run_func_preprocessing
 from neurovrai.preprocess.workflows.asl_preprocess import run_asl_preprocessing
@@ -88,14 +88,14 @@ def preprocess_anatomical(subject, config, nifti_dir, derivatives_dir, work_dir)
     logger.info(f"Input: {t1w_file.name}")
 
     try:
-        results = run_anat_preprocessing(
+        results = run_t1w_preprocessing(
             config=config,
             subject=subject,
             t1w_file=t1w_file,
             output_dir=derivatives_dir,
             work_dir=work_dir
         )
-        logger.info("✓ Anatomical preprocessing complete\n")
+        logger.info("✓ T1w preprocessing complete\n")
         return results
 
     except Exception as e:

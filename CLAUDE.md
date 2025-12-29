@@ -31,8 +31,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Directory Standardization**: All workflows use `{outdir}/{subject}/{modality}/` pattern
 - **Analysis Modules**:
   - **TBSS**: Complete data preparation and statistical infrastructure (✅ Production-Ready)
+  - **T1-T2-ratio**: T1w/T2w ratio analysis for myelin mapping (✅ Production-Ready)
   - **Resting-State fMRI**: ReHo, fALFF, and MELODIC group ICA (✅ Production-Ready)
   - **VBM**: Voxel-Based Morphometry with tissue normalization and group statistics (✅ Production-Ready)
+  - **WMH**: White Matter Hyperintensity detection and tract analysis (✅ Production-Ready)
   - **Enhanced Reporting**: Atlas-based cluster localization with HTML visualization
 
 > **Note**: Detailed development history is archived in `docs/status/SESSION_HISTORY_2025-11.md`
@@ -342,7 +344,9 @@ The codebase is organized by MRI modality, with each module containing class-bas
   - Uses pydicom SeriesDescription to route files to correct modalities
 
 - **`anat/`**: T1w/T2w anatomical preprocessing
-  - `anat-preproc.py`: T1w workflow (reorient → FAST bias correction → BET → FLIRT/FNIRT to MNI152)
+  - **Modern Workflows** (`neurovrai/preprocess/workflows/`):
+    - `t1w_preprocess.py`: T1w workflow (reorient → N4 bias correction → BET → FLIRT/FNIRT to MNI152) (✅ VALIDATED)
+    - `t2w_preprocess.py`: T2w workflow (reorient → N4 → skull strip → register to T1w) (✅ VALIDATED)
   - `freesurfer.py`: Wrapper for FreeSurfer `recon-all` with T1w+T2w inputs
   - **VBM** (`neurovrai/analysis/anat/vbm_workflow.py`): Voxel-Based Morphometry (✅ Production-Ready)
     - Tissue probability map normalization to MNI space
@@ -417,8 +421,9 @@ The codebase is organized by MRI modality, with each module containing class-bas
   - **QC Modules** (`neurovrai/preprocess/qc/`):
     - `asl_qc.py`: Motion QC, CBF distributions, tSNR analysis, skull stripping QC, HTML reports
 
-- **`myelin/`**: T1w/T2w ratio myelin mapping
-  - `myelin_workflow.py`: Computes T1w/T2w ratio as myelin proxy (coregister to MNI → masked division)
+- **`myelin/`**: T1w/T2w ratio myelin mapping (legacy - see T1-T2-ratio analysis below)
+  - `myelin_workflow.py`: Legacy workflow (archived in `archive/myelin/`)
+  - **For production T1w/T2w analysis, use `neurovrai.analysis.anat.t1t2ratio_workflow`**
 
 - **`analysis/`** (✅ Partially Production-Ready): Group-level statistical analysis
   - **TBSS** (`neurovrai/analysis/tbss/`):
@@ -431,6 +436,17 @@ The codebase is organized by MRI modality, with each module containing class-bas
       - Design matrix and contrast generation
       - TFCE correction with permutation testing
       - Integration with participant demographics
+  - **T1-T2-ratio Analysis** (`neurovrai/analysis/anat/`) (✅ Production-Ready):
+    - `t1t2ratio_workflow.py`: T1w/T2w ratio analysis (based on Du et al. 2019, PMID: 30408230)
+      - Uses preprocessed T1w and T2w derivatives
+      - Ratio computation in native space with MNI normalization
+      - White matter masking (threshold 0.5)
+      - 4mm FWHM Gaussian smoothing
+      - Group statistics with FSL randomise or nilearn GLM
+    - `t1t2ratio_reporting.py`: Interactive HTML report generation
+      - Group visualization with tri-planar views
+      - Distribution plots and summary statistics
+      - Per-subject metrics table
   - **Resting-State fMRI Analysis** (`neurovrai/analysis/func/`) (✅ Production-Ready):
     - `reho.py`: Regional Homogeneity analysis
       - Kendall's coefficient of concordance (KCC)
@@ -487,7 +503,8 @@ results = run_dwi_multishell_topup_preprocessing(
 ```
 
 **Production-Ready Workflows:**
-- ✅ `anat_preprocess.py` - Anatomical T1w/T2w preprocessing
+- ✅ `t1w_preprocess.py` - T1w anatomical preprocessing (renamed from anat_preprocess.py)
+- ✅ `t2w_preprocess.py` - T2w preprocessing with T1w registration
 - ✅ `dwi_preprocess.py` - DWI with optional TOPUP distortion correction
 - ✅ `func_preprocess.py` - Functional/resting-state fMRI
 - ✅ `asl_preprocess.py` - Arterial Spin Labeling perfusion imaging

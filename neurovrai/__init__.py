@@ -23,7 +23,7 @@ connectome : Connectivity and network analysis (planned)
 Usage
 -----
 >>> from neurovrai.config import load_config
->>> from neurovrai.preprocess.workflows import anat_preprocess
+>>> from neurovrai.preprocess.workflows import t1w_preprocess
 >>> config = load_config('config.yaml')
 """
 
