@@ -1,5 +1,5 @@
 # MRI Preprocessing Pipeline - Project Status
-**Last Updated**: 2025-12-16
+**Last Updated**: 2026-01-08
 
 ## 🎯 Project Overview
 
@@ -415,27 +415,36 @@ structural_connectivity:
 
 ## 📋 Planned Features
 
-### 1. FreeSurfer Integration (Priority: Medium, Status: PRODUCTION READY FOR STRUCTURAL CONNECTIVITY)
+### 1. FreeSurfer Integration (✅ PRODUCTION READY)
 
-**Current Status**: FreeSurfer integration for structural connectivity is **production ready**
+**Current Status**: FreeSurfer integration is **production ready** for structural and functional connectivity.
 
-**What's Implemented** (2025-12-16):
-- ✅ Detection of existing FreeSurfer outputs (`detect_freesurfer_subject()`)
-- ✅ ROI extraction from aparc+aseg parcellation
+**What's Implemented** (verified 2026-01-08):
+- ✅ Detection of existing FreeSurfer outputs (`freesurfer_utils.py`)
+- ✅ ROI extraction from aparc+aseg (Desikan-Killiany 85 ROIs, Destrieux 165 ROIs)
 - ✅ Config integration (`freesurfer.enabled`, `freesurfer.subjects_dir`)
+- ✅ Optimized FS→T1w transform using `mri_vol2vol` (~5 sec vs 5 min with FLIRT)
+- ✅ T1w→DWI transform with smart registration (DWI→T1w + inverse)
+- ✅ Transform chain composition (FS→T1w→DWI)
+- ✅ QC validation with correlation/NMI metrics (`freesurfer_qc.py`)
+- ✅ Visual alignment overlays (tri-planar PNG generation)
 - ✅ Ventricle avoidance mask from FreeSurfer labels (4, 5, 14, 15, 43, 44, 72)
 - ✅ White matter mask from FreeSurfer (labels 2, 41, 77, 251-255)
-- ✅ GMWMI (Gray-White Matter Interface) seeding for anatomically precise tractography
+- ✅ GMWMI seeding for anatomically precise tractography
 - ✅ GM termination mask for ACT-style constraints
 - ✅ Subcortical waypoint masks (thalamus, basal ganglia)
-- ✅ Desikan-Killiany atlas support for structural connectivity
+- ✅ Structural connectivity with `probtrackx2_gpu`
+- ✅ Functional connectivity with FreeSurfer atlases (`atlas_func_transform.py`)
 
-**Still Missing for Full Integration**:
-- ⏳ FreeSurfer→T1w→DWI transform validation QC
-- ⏳ FreeSurfer integration with functional preprocessing
-- ⏳ Validation that FreeSurfer T1 matches preprocessing T1
+**Not Implemented** (lower priority):
+- ⏳ Cortical thickness analysis
+- ⏳ Surface-based rendering
 
-**Note**: For structural connectivity, FreeSurfer masks and atlases are transformed to DWI space using existing anatomical transforms. This is sufficient for tractography but full FreeSurfer integration (cortical thickness, surface-based analysis) would require additional development.
+**Key Files**:
+- `neurovrai/preprocess/utils/freesurfer_utils.py` - Detection, ROI extraction
+- `neurovrai/preprocess/utils/freesurfer_transforms.py` - Transform pipeline
+- `neurovrai/preprocess/qc/freesurfer_qc.py` - QC validation
+- `neurovrai/connectome/structural_connectivity.py` - SC with anatomical constraints
 
 ### 2. Enhanced QC (Priority: Medium)
 **Scope**:
