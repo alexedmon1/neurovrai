@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use neurovrai in your research, please cite it as follows:"
+authors:
+  - family-names: "Edmondson"
+    given-names: "Alex"
+    orcid: "https://orcid.org/0000-0002-7380-2843"
+title: "neurovrai: Comprehensive MRI preprocessing and analysis platform"
+version: 0.2.0
+doi: 10.5281/zenodo.XXXXXXX  # Replace with actual Zenodo DOI after archiving
+date-released: 2025-01-12
+url: "https://github.com/alexedmon1/neurovrai"
+repository-code: "https://github.com/alexedmon1/neurovrai"
+license: MIT  # Replace with your actual license
+keywords:
+  - neuroimaging
+  - MRI
+  - preprocessing
+  - connectivity
+  - FSL
+  - ANTs
+  - FreeSurfer
+abstract: "neurovrai is a production-ready MRI preprocessing and analysis platform that integrates FSL, ANTs, FreeSurfer, and Nipype workflows for comprehensive analysis of anatomical, diffusion, functional, and perfusion MRI data."
