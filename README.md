@@ -18,6 +18,7 @@ neurovrai/
 
 ## Features
 
+- **Study Initialization**: Automated setup with DICOM/BIDS discovery and config generation
 - **Multi-Modal Preprocessing**: Anatomical T1w, diffusion DWI, functional fMRI, ASL perfusion
 - **GPU Acceleration**: CUDA support for eddy and BEDPOSTX (10-50x speedup)
 - **Advanced Diffusion Models**: DKI, NODDI with AMICO acceleration (100x faster)
@@ -81,13 +82,39 @@ uv pip install future
 
 ## Quick Start
 
-### 1. Create Configuration
+### 1. Initialize Study
+
+Set up directory structure, discover your data, and generate configuration:
 
 ```bash
-uv run python create_config.py --study-root /mnt/data/my_study
+# Initialize a new study with DICOM data
+uv run python scripts/init_study.py /mnt/data/my_study \
+    --name "My MRI Study" \
+    --code STUDY01 \
+    --dicom-root /mnt/data/raw_dicom
+
+# Or with existing BIDS data
+uv run python scripts/init_study.py /mnt/data/my_study \
+    --name "My MRI Study" \
+    --code STUDY01 \
+    --bids-root /mnt/data/existing_bids
+
+# With FreeSurfer integration (for connectivity analysis)
+uv run python scripts/init_study.py /mnt/data/my_study \
+    --name "My MRI Study" \
+    --code STUDY01 \
+    --freesurfer-dir /mnt/data/freesurfer/subjects
 ```
 
-This creates a `config.yaml` with all processing parameters.
+This creates:
+- Directory structure (`raw/`, `derivatives/`, `work/`, `qc/`, `transforms/`, `logs/`)
+- `config.yaml` with all processing parameters
+- `study_manifest.json` with data inventory
+
+**Discover data without initializing:**
+```bash
+uv run python scripts/init_study.py --discover-only /path/to/data
+```
 
 ### 2. Run Preprocessing
 
@@ -95,8 +122,14 @@ This creates a `config.yaml` with all processing parameters.
 # Single subject - all modalities
 uv run python run_simple_pipeline.py \
     --subject sub-001 \
-    --dicom-dir /mnt/data/my_study/dicom/sub-001 \
-    --config config.yaml
+    --dicom-dir /mnt/data/my_study/raw/dicom/sub-001 \
+    --config /mnt/data/my_study/config.yaml
+
+# With existing BIDS/NIfTI data
+uv run python run_simple_pipeline.py \
+    --subject sub-001 \
+    --nifti-dir /mnt/data/my_study/raw/bids/sub-001 \
+    --config /mnt/data/my_study/config.yaml
 
 # Skip specific modalities
 uv run python run_simple_pipeline.py \
@@ -104,6 +137,13 @@ uv run python run_simple_pipeline.py \
     --dicom-dir /path/to/dicom \
     --config config.yaml \
     --skip-func --skip-asl
+
+# Parallel modality processing (faster)
+uv run python run_simple_pipeline.py \
+    --subject sub-001 \
+    --dicom-dir /path/to/dicom \
+    --config config.yaml \
+    --parallel-modalities
 ```
 
 ### 3. Run Group Analysis
@@ -132,12 +172,12 @@ uv run python -m neurovrai.connectome.batch_functional_connectivity \
     --atlases harvardoxford_cort juelich \
     --output-dir /mnt/data/my_study/analysis/connectivity
 
-# Structural connectivity
+# Structural connectivity (requires BEDPOSTX)
 uv run python -m neurovrai.connectome.run_structural_connectivity \
     --subject sub-001 \
     --derivatives-dir /mnt/data/my_study/derivatives \
     --atlas schaefer_200 \
-    --config config.yaml
+    --config /mnt/data/my_study/config.yaml
 ```
 
 ---
@@ -451,12 +491,13 @@ neurovrai/
 ├── README.md                   # This file
 ├── CLAUDE.md                   # AI assistant guidelines
 ├── PROJECT_STATUS.md           # Current implementation status
-├── config.yaml                 # Example configuration
-├── create_config.py            # Config generator
+├── create_config.py            # Config generator (legacy)
 ├── run_simple_pipeline.py      # Main pipeline runner
 ├── verify_environment.py       # Installation verifier
 │
 ├── neurovrai/                  # Main package
+│   ├── config.py               # Configuration loading
+│   ├── study_initialization.py # Study setup & data discovery
 │   ├── preprocess/             # Preprocessing workflows
 │   │   ├── workflows/          # anat, dwi, func, asl
 │   │   ├── utils/              # Helper functions
@@ -473,9 +514,9 @@ neurovrai/
 │       └── batch_*.py          # Batch processing
 │
 ├── scripts/                    # Utility scripts
+│   ├── init_study.py           # Study initialization CLI
 │   ├── analysis/               # Group analysis runners
-│   ├── batch/                  # Batch processing
-│   └── monitoring/             # Progress monitoring
+│   └── batch/                  # Batch processing
 │
 ├── examples/                   # Usage examples
 ├── docs/                       # Documentation
@@ -486,22 +527,29 @@ neurovrai/
 
 ## Output Structure
 
-All outputs follow a standardized hierarchy:
+Study initialization creates a standardized hierarchy:
 
 ```
 {study_root}/
+├── raw/
+│   ├── dicom/                  # Raw DICOM files
+│   └── bids/                   # BIDS-formatted NIfTI files
 ├── derivatives/                # Preprocessed outputs
 │   └── {subject}/
 │       ├── anat/               # Anatomical
 │       ├── dwi/                # Diffusion
 │       ├── func/               # Functional
 │       └── asl/                # Perfusion
+├── transforms/{subject}/       # Spatial transformations
 ├── analysis/                   # Group analysis
 │   ├── vbm/
 │   ├── tbss/
 │   └── connectivity/
 ├── work/                       # Temporary Nipype files
-└── qc/                         # Quality control reports
+├── qc/                         # Quality control reports
+├── logs/                       # Pipeline logs
+├── config.yaml                 # Study configuration
+└── study_manifest.json         # Data inventory
 ```
 
 ---

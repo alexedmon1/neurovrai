@@ -14,23 +14,82 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install dependencies
 uv sync
 
+# Verify environment (check FSL, ANTs, Python deps)
+uv run python verify_environment.py
+
 # Run preprocessing (primary entry point)
 uv run python run_simple_pipeline.py --subject sub-001 --dicom-dir /path/to/dicom --config config.yaml
 
 # Run with parallel modalities (ThreadPoolExecutor, NOT ProcessPoolExecutor)
 uv run python run_simple_pipeline.py --subject sub-001 --parallel-modalities
 
-# Run specific modality
+# Run specific modality only
 uv run python run_simple_pipeline.py --subject sub-001 --skip-dwi --skip-func --skip-asl  # Only T1w
 
-# Run tests (note: no formal pytest suite, tests are in archive/tests/)
-uv run python verify_environment.py
-
-# Generate config file
+# Generate config file for a new study
 uv run python create_config.py --study-root /path/to/study
+
+# CLI entry point (alternative)
+uv run neurovrai --help
 ```
 
 **IMPORTANT**: Always use `uv run python` instead of activating the venv manually. This ensures consistent dependency resolution.
+
+## Study Initialization
+
+Initialize a new study with directory structure, data discovery, and configuration:
+
+```bash
+# Initialize a new study (creates directories, discovers data, generates config)
+uv run python scripts/init_study.py /path/to/study --name "My MRI Study" --code STUDY01
+
+# Initialize with existing BIDS data
+uv run python scripts/init_study.py /path/to/study --name "My Study" --code STUDY01 \
+    --bids-root /path/to/existing/bids
+
+# Initialize with DICOM data
+uv run python scripts/init_study.py /path/to/study --name "My Study" --code STUDY01 \
+    --dicom-root /path/to/dicom
+
+# With FreeSurfer integration
+uv run python scripts/init_study.py /path/to/study --name "My Study" --code STUDY01 \
+    --freesurfer-dir /path/to/freesurfer/subjects
+
+# Discover data without creating directories
+uv run python scripts/init_study.py --discover-only /path/to/data
+
+# Print study summary
+uv run python scripts/init_study.py /path/to/study --summary
+
+# List subjects ready for processing
+uv run python scripts/init_study.py /path/to/study --list-subjects --modality dwi
+```
+
+### Programmatic Usage
+```python
+from neurovrai.study_initialization import setup_study, discover_bids_data
+
+# Full study setup
+report = setup_study(
+    study_root=Path('/path/to/study'),
+    study_name='My MRI Study',
+    study_code='STUDY01',
+    dicom_root=Path('/path/to/dicom'),  # Optional
+    freesurfer_subjects_dir=Path('/path/to/fs'),  # Optional
+)
+
+# Just discover existing BIDS data
+manifest = discover_bids_data(Path('/path/to/bids'))
+print(f"Found {manifest.n_subjects} subjects")
+```
+
+### What `setup_study()` Does
+1. Creates directory structure (raw/, derivatives/, work/, qc/, transforms/, logs/)
+2. Discovers DICOM data (if provided) with modality classification
+3. Discovers BIDS data with subject/session/modality inventory
+4. Generates `config.yaml` with study-specific settings
+5. Saves `study_manifest.json` with complete data inventory
+6. Returns report with next steps for preprocessing
 
 ## Architecture
 
@@ -38,17 +97,22 @@ uv run python create_config.py --study-root /path/to/study
 neurovrai/
 ├── preprocess/           # Subject-level preprocessing
 │   ├── workflows/        # Main workflow files (t1w, dwi, func, asl)
-│   ├── utils/            # Helper functions
-│   └── qc/               # Quality control modules
+│   ├── utils/            # Helper functions (transforms, normalization, FreeSurfer)
+│   ├── qc/               # Quality control modules (per modality)
+│   └── dicom/            # DICOM conversion utilities
 ├── analysis/             # Group-level statistics
-│   ├── anat/             # VBM, T1-T2 ratio, WMH
-│   ├── func/             # ReHo, fALFF, MELODIC
+│   ├── anat/             # VBM, T1-T2 ratio, WMH detection
+│   ├── func/             # ReHo, fALFF, MELODIC, dual regression
 │   ├── tbss/             # Tract-based spatial statistics
-│   └── stats/            # Randomise, GLM, cluster reports
-└── connectome/           # Connectivity analysis
-    ├── functional_connectivity.py
-    ├── structural_connectivity.py
-    └── graph_metrics.py
+│   └── stats/            # Randomise, GLM, cluster reports, effect sizes
+├── connectome/           # Connectivity analysis
+│   ├── functional_connectivity.py  # FC with atlas-based ROI extraction
+│   ├── structural_connectivity.py  # probtrackx2 tractography
+│   ├── graph_metrics.py            # Network topology (degree, clustering, etc.)
+│   └── group_analysis.py           # NBS, group comparisons
+├── utils/                # Shared utilities (transforms, workflow helpers)
+├── config.py             # Configuration loading and validation
+└── study_initialization.py  # Study setup, BIDS/DICOM discovery
 ```
 
 ### Workflow Entry Points
@@ -58,7 +122,7 @@ neurovrai/
 | T1w | `run_t1w_preprocessing()` | `preprocess/workflows/t1w_preprocess.py` |
 | T2w | `run_t2w_preprocessing()` | `preprocess/workflows/t2w_preprocess.py` |
 | DWI | `run_dwi_multishell_topup_preprocessing()` | `preprocess/workflows/dwi_preprocess.py` |
-| Functional | `run_functional_preprocessing()` | `preprocess/workflows/func_preprocess.py` |
+| Functional | `run_func_preprocessing()` | `preprocess/workflows/func_preprocess.py` |
 | ASL | `run_asl_preprocessing()` | `preprocess/workflows/asl_preprocess.py` |
 
 ## Configuration System
@@ -83,16 +147,21 @@ config = load_config(Path('config.yaml'))
 
 ## Directory Structure Conventions
 
-All workflows use standardized output hierarchy:
+Study initialization creates this standardized hierarchy:
 
 ```
 {study_root}/
-├── subjects/{subject}/nifti/{modality}/  # Raw NIfTI files
+├── raw/
+│   ├── dicom/                            # Raw DICOM files
+│   └── bids/                             # BIDS-formatted NIfTI files
 ├── derivatives/{subject}/{modality}/      # Preprocessed outputs
 ├── transforms/{subject}/                  # Centralized transform registry
 ├── work/{subject}/{workflow}/             # Nipype work files
 ├── analysis/                              # Group-level results
-└── qc/{subject}/{modality}/               # QC reports
+├── qc/{subject}/{modality}/               # QC reports
+├── logs/                                  # Pipeline logs
+├── config.yaml                            # Study configuration
+└── study_manifest.json                    # Data inventory from init
 ```
 
 **Critical Rules**:
@@ -231,30 +300,40 @@ uv run python scripts/analysis/run_vbm_group_analysis.py \
 uv run python -m neurovrai.analysis.tbss.run_tbss_stats \
     --tbss-dir /path/to/tbss --design-dir /path/to/designs
 
+# Resting-state analysis (ReHo/fALFF)
+uv run python -m neurovrai.analysis.func.resting_workflow \
+    --func-file preprocessed_bold.nii.gz --mask-file brain_mask.nii.gz
+
 # Functional connectivity (batch)
 uv run python -m neurovrai.connectome.batch_functional_connectivity \
     --study-root /path/to/study --atlases harvardoxford_cort juelich
 
-# Structural connectivity
+# Structural connectivity (requires BEDPOSTX output)
 uv run python -m neurovrai.connectome.run_structural_connectivity \
     --subject sub-001 --derivatives-dir /path/to/derivatives --atlas schaefer_200
 ```
 
 ## Code Style
 
-**Modern code** (`neurovrai/preprocess/`):
+**Modern code** (`neurovrai/`):
 - Function-based workflows (not class-based)
 - `pathlib.Path` for all paths
 - Type hints and comprehensive docstrings
-- Config-driven execution
+- Config-driven execution via `load_config()` and `get_config_value()`
 - Module-level loggers throughout
 
 **When creating new workflows**:
-- Use function-based patterns from existing workflows
-- Add `wf.write_graph()` for workflow visualization
-- Include QC integration
-- Save transforms to centralized location
+- Use function-based patterns from existing workflows (see `t1w_preprocess.py` as template)
+- Add `wf.write_graph()` for Nipype workflow visualization
+- Include QC integration (see `preprocess/qc/` modules)
+- Save transforms to centralized location (`transforms/{subject}/`)
 - Handle Atropos tissue standardization if using segmentation
+
+**Imports pattern** for workflow functions:
+```python
+from neurovrai.config import load_config, get_config_value
+from neurovrai.preprocess.utils.transforms import save_transform, find_transform
+```
 
 ## Testing & Development
 
@@ -262,6 +341,13 @@ uv run python -m neurovrai.connectome.run_structural_connectivity \
 - **No formal pytest suite** currently implemented
 - **Environment check**: `uv run python verify_environment.py`
 - **Extensive logging**: Module-level loggers everywhere for debugging
+
+## External Dependencies
+
+- **FSL 6.0+**: Required. Ensure `$FSLDIR` is set. Use `output_type='NIFTI_GZ'` for all FSL Nipype nodes.
+- **ANTs**: Required for N4 bias correction and Atropos segmentation.
+- **FreeSurfer**: Optional but recommended for connectivity analysis with anatomical constraints.
+- **CUDA**: Optional for GPU-accelerated eddy, BEDPOSTX, and probtrackx2 (10-50x speedup).
 
 ## Session Management
 

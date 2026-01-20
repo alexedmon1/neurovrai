@@ -1,5 +1,5 @@
 # MRI Preprocessing Pipeline - Project Status
-**Last Updated**: 2026-01-08
+**Last Updated**: 2026-01-20
 
 ## 🎯 Project Overview
 
@@ -14,7 +14,62 @@ See `docs/NEUROVRAI_ARCHITECTURE.md` for complete roadmap.
 
 ---
 
-## 📝 Latest Updates (2025-12-16 PM)
+## 📝 Latest Updates (2026-01-20)
+
+### Study Initialization System ✅
+**Goal**: Implement comprehensive study setup workflow similar to neurofaune, adapted for human MRI data
+
+**Completed**:
+1. **Study Initialization Module** (`neurovrai/study_initialization.py`):
+   - ✅ `setup_study()` - Main entry point for complete study initialization
+   - ✅ `discover_bids_data()` - BIDS directory scanning with subject/session/modality inventory
+   - ✅ `discover_dicom_data()` - DICOM directory scanning with automatic modality classification
+   - ✅ `create_study_directories()` - Standardized directory structure creation
+   - ✅ `generate_config()` - Config.yaml generation with study-specific settings
+   - ✅ `get_study_subjects()` - List subjects ready for processing with filtering
+   - ✅ `print_study_summary()` - Study status overview
+
+2. **CLI Script** (`scripts/init_study.py`):
+   - ✅ Full command-line interface with all options
+   - ✅ `--discover-only` mode for data inventory without directory creation
+   - ✅ `--summary` mode for viewing study status
+   - ✅ `--list-subjects` mode for listing available subjects
+   - ✅ FreeSurfer integration support (`--freesurfer-dir`)
+   - ✅ JSON export (`--output-json`)
+
+3. **Data Discovery Features**:
+   - ✅ BIDS: T1w, T2w, FLAIR, DWI, BOLD, ASL, fieldmap detection
+   - ✅ DICOM: Automatic modality classification from series descriptions
+   - ✅ Multi-session support with subject/session hierarchy
+   - ✅ Issue tracking (missing data, incomplete scans)
+
+4. **Documentation Updates**:
+   - ✅ README.md - Study initialization as first step in Quick Start
+   - ✅ CLAUDE.md - Added study initialization section
+   - ✅ Output structure updated to reflect study init hierarchy
+
+**Files Created**:
+- `neurovrai/study_initialization.py` - Core module
+- `scripts/init_study.py` - CLI script
+
+**Usage**:
+```bash
+# Initialize new study
+uv run python scripts/init_study.py /path/to/study --name "My Study" --code STUDY01
+
+# With existing data
+uv run python scripts/init_study.py /path/to/study --name "My Study" --code STUDY01 \
+    --dicom-root /path/to/dicom --bids-root /path/to/bids
+
+# Just discover data
+uv run python scripts/init_study.py --discover-only /path/to/data
+```
+
+**Impact**: New studies now have a standardized setup workflow that creates directory structure, discovers data, generates configuration, and provides clear next steps for preprocessing.
+
+---
+
+## 📝 Updates (2025-12-16 PM)
 
 ### Structural Connectivity Pipeline Optimization ✅
 **Goal**: Optimize FreeSurfer atlas transformation and resolve probtrackx2_gpu compatibility issues
@@ -287,6 +342,7 @@ structural_connectivity:
 ## ✅ Completed & Production-Ready
 
 ### 1. Core Infrastructure (100%)
+- ✅ **Study Initialization** - Automated setup with DICOM/BIDS discovery
 - ✅ Config-driven architecture (YAML with validation)
 - ✅ DICOM converter with automatic parameter extraction
 - ✅ Transform Registry for spatial transformations
@@ -560,20 +616,26 @@ structural_connectivity:
 ## 📁 Repository Structure
 
 ```
-human-mri-preprocess/
-├── mri_preprocess/          # Production code
-│   ├── workflows/           # Preprocessing workflows (anat, dwi, func, asl)
-│   ├── utils/               # Helper utilities
-│   ├── qc/                  # Quality control modules
-│   └── config.py            # Configuration system
+neurovrai/
+├── neurovrai/               # Main package
+│   ├── config.py            # Configuration loading
+│   ├── study_initialization.py  # Study setup & data discovery
+│   ├── preprocess/          # Preprocessing workflows
+│   │   ├── workflows/       # anat, dwi, func, asl workflows
+│   │   ├── utils/           # Helper utilities
+│   │   └── qc/              # Quality control modules
+│   ├── analysis/            # Group statistics (VBM, TBSS, func)
+│   └── connectome/          # Connectivity analysis
+├── scripts/
+│   ├── init_study.py        # Study initialization CLI
+│   ├── analysis/            # Analysis runners
+│   └── batch/               # Batch processing
 ├── docs/                    # Documentation
-│   ├── status/              # Implementation status tracking
-│   ├── amico/               # AMICO research
-│   └── archive/             # Outdated docs
 ├── archive/                 # Legacy code (reference only)
-├── logs/                    # All log files (gitignored)
-├── config.yaml              # Production config
+├── run_simple_pipeline.py   # Main preprocessing runner
+├── verify_environment.py    # Environment checker
 ├── CLAUDE.md                # AI assistant guidelines
+├── PROJECT_STATUS.md        # This file
 └── README.md                # User documentation
 ```
 
