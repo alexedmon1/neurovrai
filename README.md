@@ -29,6 +29,12 @@ neurovrai/
 
 ---
 
+## AI-Assisted Workflow (IRL)
+
+This repo ships two [IRL](https://github.com/drpedapati/irl-template) plan templates for running neurovrai inside an Idempotent Research Loop: [`irl-template-preprocessing.md`](irl-template-preprocessing.md) (anat/DWI/fMRI/ASL per-subject preproc + QC) and [`irl-template-analysis.md`](irl-template-analysis.md) (VBM, TBSS, resting-state, connectivity, NBS). Initialize a study with `irl init -t neurovrai-preprocessing "<study>"` after dropping the templates into `~/research/_templates/`.
+
+---
+
 ## Installation
 
 ### Prerequisites
