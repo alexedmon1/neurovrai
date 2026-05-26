@@ -23,3 +23,8 @@ xfm_*
 # Archived old code (reference only, no future changes tracked)
 # archive/
 logs/
+
+# Regression contract — frozen fixtures/golden are committed even if they
+# match the data-file patterns above (e.g. *.nii.gz, *.mat).
+!tests/regression/fixtures/**
+!tests/regression/golden/**
