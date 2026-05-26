@@ -35,6 +35,56 @@ uv run neurovrai --help
 
 **IMPORTANT**: Always use `uv run python` instead of activating the venv manually. This ensures consistent dependency resolution.
 
+## Development Loop — The Gate (READ BEFORE CHANGING PACKAGE CODE)
+
+This package uses an **IRL implementation-testing loop** to control the boundary
+of every change before it reaches research. Full spec: [`plans/main-plan.md`](plans/main-plan.md).
+
+**The gate is the only promotion signal.** A change may be merged/tagged only
+when `make check` is green — locally *and* on CI.
+
+```bash
+make check        # THE GATE (blocking): unit tests + regression goldens. Must pass.
+make advisory     # ruff + mypy — informational only, NEVER blocks
+make integration  # SLOW tier: real-tool (FSL/ANTs/MRtrix) end-to-end; run before a release tag
+make sync         # uv sync --extra dev (reproducible env)
+```
+
+**Two test tiers** (markers in `pyproject.toml`; suite in `tests/regression/`):
+- **Gate tier** (hermetic, every change): deterministic boundaries — `connectivity/`
+  (graph metrics, functional connectivity) and preprocessing **workflow assembly**
+  (`preprocess/`, frozen via `tests/regression/_workflow.py` — gates pipeline refactors
+  *without running FSL/ANTs*).
+- **Integration tier** (`@pytest.mark.integration`, local/HPC, NOT in the PR gate): end-to-end
+  tool output compared by **derived metrics** (`_derived.py`: Dice, correlation, summary)
+  within loose tolerance — never raw voxels (not bit-reproducible).
+
+**Regression goldens = the frozen contract.** Inputs come from the canonical registry
+`tests/regression/fixtures.py` (seeded synthetic; only the golden output is committed).
+- NEVER weaken or silently change a golden to make a candidate pass.
+- Changing a golden is a deliberate, separate, reviewed commit:
+  ```bash
+  NEUROVRAI_UPDATE_GOLDEN=1 make regression   # regenerate, then commit golden/ alone with a reason
+  ```
+
+**Comparing competing implementations** (e.g. old vs refactor) — use git worktrees so
+the master checkout stays clean and candidates run against the *same* committed golden:
+```bash
+git worktree add ~/sandbox/.worktrees/neurovrai-<cand> -b loop/<cand>
+cd ~/sandbox/.worktrees/neurovrai-<cand> && make sync && make check   # green = behavior preserved
+# ... pick the green winner, then:
+git -C ~/sandbox/neurovrai merge --ff-only loop/<cand> && make check  # re-verify on master
+git -C ~/sandbox/neurovrai worktree remove ~/sandbox/.worktrees/neurovrai-<cand>
+```
+
+**Promotion boundary = a git tag.** Research projects pin `neurovrai @ git+...@<tag>`;
+they never pin `master`. Untagged work never reaches research. Record each iteration in
+`plans/main-plan-activity.md` + `plans/main-plan-log.csv`.
+
+**Refactoring a module that has no golden yet?** First mint one from the *current trusted*
+implementation (add a `@pytest.mark.regression` test calling it on a `fixtures.py` input,
+run `NEUROVRAI_UPDATE_GOLDEN=1 make regression`, commit the golden), *then* start the refactor.
+
 ## Study Initialization
 
 Initialize a new study with directory structure, data discovery, and configuration:
