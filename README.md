@@ -27,20 +27,6 @@ neurovrai/
 - **Config-Driven**: YAML configuration for reproducible workflows
 - **Quality Control**: Automated QC with HTML reports for all modalities
 
-## Developing the package (the test gate)
-
-Changes to neurovrai itself go through an **implementation-testing loop** so behavior is provably preserved before a change can be used in research:
-
-```bash
-make check        # THE GATE: unit + regression (behavior-preservation) tests — must be green
-make advisory     # ruff + mypy (informational, never blocks)
-make integration  # real-tool (FSL/ANTs/MRtrix) tier — run before tagging a release
-```
-
-A change reaches research only as a **git tag** that research projects pin (`neurovrai @ git+...@<tag>`) — never `master`. Competing implementations are compared in git worktrees against the same frozen regression goldens. Full operating spec: [`plans/main-plan.md`](plans/main-plan.md); Claude-facing summary: [`CLAUDE.md`](CLAUDE.md) → *Development Loop*.
-
----
-
 ## Installation
 
 ### Prerequisites

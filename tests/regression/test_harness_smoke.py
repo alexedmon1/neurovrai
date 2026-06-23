@@ -2,8 +2,8 @@
 
 Keeps `make check` green out of the box and proves the golden mechanism:
 matching arrays pass, drifted arrays fail, and NEUROVRAI_UPDATE_GOLDEN
-writes a fresh golden. Real per-change regression tests are added during a
-loop iteration — see tests/regression/README.md and plans/main-plan.md.
+writes a fresh golden. Real per-change regression tests are added as needed
+— see tests/regression/README.md.
 """
 
 from __future__ import annotations
