@@ -35,6 +35,17 @@ uv run neurovrai --help
 
 **IMPORTANT**: Always use `uv run python` instead of activating the venv manually. This ensures consistent dependency resolution.
 
+**⚠️ Before every commit/push — run the gate.**
+```bash
+make check   # THE GATE — tests + regression; must pass before push/tag/pin
+```
+Note: unlike neurofaune, neurovrai does **not yet** have a capabilities catalog
+(`CAPABILITIES.md` + `make capabilities` + `test_capabilities.py`). When that
+mechanism is ported over (e.g. alongside the EPG MWF port), also run
+`make capabilities` and commit the refreshed catalog before pushing — it goes
+stale whenever an entry point or **config key** changes, and the gate will fail
+on a stale catalog.
+
 ## Study Initialization
 
 Initialize a new study with directory structure, data discovery, and configuration:
