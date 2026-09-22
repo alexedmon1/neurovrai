@@ -13,6 +13,7 @@ Complete list of all dependencies in `pyproject.toml` with their purpose.
 | **tedana** | ≥25.0.1 | Multi-echo fMRI denoising (ICA-based) |
 | **nilearn** | ≥0.10.0,<0.11 | Required by TEDANA (fMRI utilities) |
 | **pydicom** | ≥3.0.1 | DICOM file reading and metadata extraction |
+| **neuroaider** | git | Design matrices and contrasts for FSL randomise (`.mat`/`.con`/`.fts`); see docs/MODALITY_AWARE_DESIGN_GENERATION.md |
 
 ## Scientific Computing
 
@@ -190,6 +191,8 @@ All packages use permissive licenses compatible with academic/commercial use:
 
 ## Total Package Count
 
+19 packages in `[project] dependencies`.
+
 - **Python packages in pyproject.toml:** 17
 - **Including sub-dependencies:** ~103
 - **External system tools required:** 3 (FSL, ANTs, dcm2niix)
@@ -202,4 +205,4 @@ Dependencies are reviewed and updated:
 - Quarterly: Version compatibility checks
 - Annually: Major version upgrades (with testing)
 
-Last updated: 2025-11-16
+Last updated: 2026-09-22

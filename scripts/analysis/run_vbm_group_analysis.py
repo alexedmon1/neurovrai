@@ -255,7 +255,7 @@ NOTE: GLM uses nilearn's SecondLevelModel with FDR and Bonferroni correction.
         logger.info("=" * 80)
 
         # Use pre-generated design matrices from design directory
-        # Design matrices created by generate_design_matrices.py with neuroaider
+        # Design matrices created with neuroaider (see docs/MODALITY_AWARE_DESIGN_GENERATION.md)
         # Contains: design.mat, design.con, participants_matched.tsv
         # For binary mriglu groups: 6 contrasts auto-generated
         #   - mriglu_positive [0, 0, 1, -1]: Controlled > Uncontrolled

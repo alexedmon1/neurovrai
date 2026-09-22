@@ -43,8 +43,13 @@ Implemented modality-aware design matrix generation that:
 ### New Module: `neurovrai/analysis/utils/modality_subjects.py`
 
 **Key Functions**:
-- `find_subjects_for_modality()` - Auto-detect subjects with MRI data
-- `load_participants_for_modality()` - Filter gludata.csv to those subjects
+- `find_subjects_for_modality(study_root, modality, metric=None, subject_prefix=None)` -
+  Auto-detect subjects with MRI data. `subject_prefix` is the study code that
+  prefixes subject ids (`'STUDY'` for `STUDY-0580101`); omit it and any prefix
+  matches, which is what a study whose ids carry none needs.
+- `load_participants_for_modality(participants_file, study_root, modality, metric=None, subject_prefix=None)` -
+  Filter the participants file to those subjects. With a prefix, bare numeric ids
+  in the file are zero-padded and prefixed to match the imaging filenames.
 - `save_subject_list()` - Document subject ordering
 - `get_modality_info()` - Modality metadata
 
@@ -55,30 +60,48 @@ Implemented modality-aware design matrix generation that:
 - `falff`: Fractional ALFF (functional)
 - `tbss`: Tract-Based Spatial Statistics (with metric parameter)
 
-### Updated: `generate_design_matrices.py`
+### Building the design: `neuroaider`
 
-**New Function**: `generate_design_for_modality()`
-- Replaces `generate_design()` and `generate_all_designs()`
-- Requires explicit modality specification
-- Auto-detects subjects from derivatives
+Design matrices and contrasts are **not** built in this repo. They come from
+[neuroaider](https://github.com/alexedmon1/neuroaider), a standalone package
+listed in `pyproject.toml`, which writes FSL-compatible `.mat`, `.con` and
+`.fts` files. neurovrai's job is to decide *which subjects, in which order* go
+into that design; neuroaider's job is to turn a participants table into the
+matrices FSL randomise reads.
 
-**New CLI**:
+The two meet at the filtered participants file: `load_participants_for_modality()`
+returns the rows for subjects that actually have data for the modality, in the
+imaging order, and neuroaider builds the design from that.
+
 ```bash
-# Generate design for VBM
-python generate_design_matrices.py \
-  --modality vbm \
-  --participants /path/to/study/data/gludata.csv \
-  --study-root /path/to/study \
-  --output-dir /path/to/study/data/designs/vbm
+# 1. Filter participants to the subjects with VBM data, in imaging order
+python -c "
+from pathlib import Path
+from neurovrai.analysis.utils.modality_subjects import load_participants_for_modality, save_subject_list
+df, subjects = load_participants_for_modality(
+    Path('/path/to/study/data/participants.csv'),
+    Path('/path/to/study'), 'vbm', subject_prefix='STUDY')
+df.to_csv('/path/to/study/data/designs/vbm/participants_vbm.csv', index=False)
+save_subject_list(subjects, Path('/path/to/study/data/designs/vbm/subject_order.txt'))
+"
 
-# Generate design for TBSS FA
-python generate_design_matrices.py \
-  --modality tbss \
-  --metric FA \
-  --participants /path/to/study/data/gludata.csv \
-  --study-root /path/to/study \
-  --output-dir /path/to/study/data/designs/tbss
+# 2. Build the design and contrasts from that filtered table
+neuroaider /path/to/study/data/designs/vbm/participants_vbm.csv \
+  --output-mat /path/to/study/data/designs/vbm/design.mat \
+  --output-con /path/to/study/data/designs/vbm/design.con \
+  --subject-column participant_id \
+  --covariate age mean_center=True \
+  --categorical group \
+  --contrast "group_A > group_B"
 ```
+
+For TBSS, pass the metric so the subject list matches that metric's inputs:
+`load_participants_for_modality(..., 'tbss', metric='FA', subject_prefix='STUDY')`.
+
+`neuroaider --help` lists the rest: `--interaction`, `--ftest`,
+`--validate-by-dir` (check every subject has an imaging file before writing a
+design), `--output-names` and `--output-summary`. Its `DesignHelper` class is
+the Python entry point to the same thing.
 
 ---
 
@@ -133,58 +156,20 @@ STUDY-1720201
 
 ---
 
-## Next Steps
+## Regenerating designs
 
-### 1. Regenerate All Design Matrices
+For each modality, filter first and build second. The filtering call differs only
+in the modality string (`vbm`, `asl`, `reho`, `falff`, and `tbss` with a metric);
+the neuroaider call is the same shape every time, pointed at that modality's
+filtered participants file and output directory.
 
-Use the new modality-aware approach for all analyses:
+TBSS needs one design per metric, because each metric's subject list can differ:
 
 ```bash
-# VBM
-python generate_design_matrices.py \
-  --modality vbm \
-  --participants /path/to/study/data/gludata.csv \
-  --study-root /path/to/study \
-  --output-dir /path/to/study/data/designs/vbm
-
-# ASL
-python generate_design_matrices.py \
-  --modality asl \
-  --participants /path/to/study/data/gludata.csv \
-  --study-root /path/to/study \
-  --output-dir /path/to/study/data/designs/asl
-
-# ReHo
-python generate_design_matrices.py \
-  --modality reho \
-  --participants /path/to/study/data/gludata.csv \
-  --study-root /path/to/study \
-  --output-dir /path/to/study/data/designs/func_reho
-
-# fALFF
-python generate_design_matrices.py \
-  --modality falff \
-  --participants /path/to/study/data/gludata.csv \
-  --study-root /path/to/study \
-  --output-dir /path/to/study/data/designs/func_falff
-
-# TBSS (for each metric)
 for metric in FA MD AD RD MK AK RK KFA FICVF ODI FISO; do
-  python generate_design_matrices.py \
-    --modality tbss \
-    --metric $metric \
-    --participants /path/to/study/data/gludata.csv \
-    --study-root /path/to/study \
-    --output-dir /path/to/study/data/designs/tbss
+  # load_participants_for_modality(..., 'tbss', metric=$metric, subject_prefix='STUDY')
+  # then neuroaider on the resulting table, writing into designs/tbss/$metric/
 done
-```
-
-### 2. Compare with Old Designs
-
-Use the comparison script to verify results match (accounting for missing subject):
-
-```bash
-python compare_design_matrices.py
 ```
 
 ### 3. Update Refactored Analysis Scripts
@@ -249,12 +234,12 @@ Modality-Aware Subject Detection
 1. `neurovrai/analysis/utils/modality_subjects.py` - Modality-aware utilities
 2. `docs/MODALITY_AWARE_DESIGN_GENERATION.md` - This document
 
-### Modified:
-1. `generate_design_matrices.py` - New `generate_design_for_modality()` function
-2. `generate_design_matrices.py` - Updated CLI to require `--modality`
+### Depends on:
+1. `neuroaider` - builds the `.mat`/`.con`/`.fts` files from the filtered table
 
 ### Removed:
-- `generate_all_designs()` function (replaced with explicit modality specification)
+- `generate_design_matrices.py` and `compare_design_matrices.py` - study-specific
+  scripts, deleted 2026-09-22; design generation is neuroaider's job
 
 ---
 
