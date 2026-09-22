@@ -28,9 +28,9 @@ from mri_preprocess.workflows.asl_preprocess import run_asl_preprocessing
 
 results = run_asl_preprocessing(
     config=config,
-    subject='IRC805-0580101',
+    subject='STUDY-0580101',
     asl_file=Path('asl_source.nii.gz'),
-    output_dir=Path('/mnt/bytopia/IRC805'),
+    output_dir=Path('/path/to/study'),
     dicom_dir=Path('/path/to/dicom/directory'),  # NEW parameter
     # labeling_duration and post_labeling_delay will be overridden by DICOM
 )
@@ -62,9 +62,9 @@ ASL Acquisition Parameters (from config):
 
 ## Validation
 
-### Test Results (IRC805-0580101)
+### Test Results (STUDY-0580101)
 
-**Test Script**: `archive/tests/test_asl_dicom_integration.py`
+**Test Script**: removed with the archive; see git history
 
 **Results**:
 - ✓ DICOM parameter extraction integrated

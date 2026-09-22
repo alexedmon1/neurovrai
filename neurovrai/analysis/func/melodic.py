@@ -366,7 +366,7 @@ def prepare_subjects_for_melodic(
         List of paths to preprocessed functional images
 
     Example:
-        subjects = ['IRC805-0580101', 'IRC805-0590101', ...]
+        subjects = ['STUDY-0580101', 'STUDY-0590101', ...]
         func_files = prepare_subjects_for_melodic(
             Path('/study/derivatives'),
             subjects

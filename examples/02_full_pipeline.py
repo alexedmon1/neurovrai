@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 config = load_config(Path('config.yaml'))
 
 # Define paths
-subject = 'IRC805-0580101'
-study_root = Path('/mnt/bytopia/IRC805')
+subject = 'STUDY-0580101'
+study_root = Path('/path/to/study')
 derivatives_dir = study_root / 'derivatives'
 work_dir = study_root / 'work' / subject
 

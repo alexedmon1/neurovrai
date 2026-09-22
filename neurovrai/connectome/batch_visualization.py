@@ -18,19 +18,19 @@ Outputs are saved to:
 Usage:
     # Visualize individual subject matrices
     uv run python -m neurovrai.connectome.batch_visualization \
-        --study-root /mnt/bytopia/IRC805 \
+        --study-root /path/to/study \
         --atlas schaefer200 \
         --mode individual
 
     # Visualize group averages
     uv run python -m neurovrai.connectome.batch_visualization \
-        --study-root /mnt/bytopia/IRC805 \
+        --study-root /path/to/study \
         --atlas schaefer200 \
         --mode group
 
     # Generate all visualizations
     uv run python -m neurovrai.connectome.batch_visualization \
-        --study-root /mnt/bytopia/IRC805 \
+        --study-root /path/to/study \
         --atlas schaefer200 \
         --mode all
 """

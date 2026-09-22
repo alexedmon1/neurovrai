@@ -348,7 +348,7 @@ from neurovrai.preprocess.utils.transforms import save_transform, find_transform
 
 ## Testing & Development
 
-- **Tests location**: `archive/tests/` (ad-hoc validation scripts)
+- **Tests location**: `tests/`
 - **No formal pytest suite** currently implemented
 - **Environment check**: `uv run python verify_environment.py`
 - **Extensive logging**: Module-level loggers everywhere for debugging

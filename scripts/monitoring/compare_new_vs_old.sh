@@ -1,7 +1,7 @@
 #!/bin/bash
 
-BACKUP_DIR="/mnt/bytopia/IRC805/data/designs_backup_20251205_180011"
-NEW_DIR="/mnt/bytopia/IRC805/data/designs"
+BACKUP_DIR="/path/to/study/data/designs_backup_20251205_180011"
+NEW_DIR="/path/to/study/data/designs"
 
 echo "========================================================================"
 echo "COMPARING NEW VS OLD DESIGN MATRICES"

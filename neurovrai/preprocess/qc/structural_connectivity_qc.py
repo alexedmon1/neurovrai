@@ -569,10 +569,10 @@ class StructuralConnectivityQC:
 
     Usage:
         qc = StructuralConnectivityQC(
-            subject='IRC805-0580101',
+            subject='STUDY-0580101',
             atlas_name='schaefer_200',
-            sc_dir='/study/connectome/structural/schaefer_200/IRC805-0580101',
-            qc_dir='/study/qc/IRC805-0580101/structural_connectivity'
+            sc_dir='/study/connectome/structural/schaefer_200/STUDY-0580101',
+            qc_dir='/study/qc/STUDY-0580101/structural_connectivity'
         )
         results = qc.run_qc()
     """

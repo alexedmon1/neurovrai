@@ -6,7 +6,7 @@ This script demonstrates the complete MRI preprocessing pipeline
 using the test subject data.
 
 Directory Structure:
-    /mnt/bytopia/development/mri-preprocess/
+    /path/to/dev/
     ├── sourcedata/          # DICOM files
     │   └── sub-0580101/
     ├── rawdata/             # Converted NIfTI (BIDS)
@@ -49,8 +49,8 @@ from neurovrai.preprocess.utils.transforms import create_transform_registry
 # =============================================================================
 
 # Test environment paths
-BASE_DIR = Path("/mnt/bytopia/development/mri-preprocess")
-DICOM_DIR = Path("/mnt/bytopia/IRC805/raw/dicom/IRC805-0580101/20220301")
+BASE_DIR = Path("/path/to/dev")
+DICOM_DIR = Path("/path/to/study/raw/dicom/STUDY-0580101/20220301")
 
 # Subject information
 SUBJECT_ID = "0580101"  # Real subject ID
@@ -85,8 +85,8 @@ def step_1_generate_config():
     
     auto_generate_config(
         dicom_dir=DICOM_DIR,
-        study_name="IRC805 Test Data",
-        study_code="IRC805_TEST",
+        study_name="Example Study",
+        study_code="EXAMPLE",
         base_dir=BASE_DIR,
         output_path=CONFIG_FILE
     )

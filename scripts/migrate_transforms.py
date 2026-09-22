@@ -206,7 +206,7 @@ def main():
     if args.subjects:
         subject_dirs = [transforms_dir / s for s in args.subjects]
     else:
-        subject_dirs = sorted(transforms_dir.glob('IRC805-*'))
+        subject_dirs = sorted(transforms_dir.glob('STUDY-*'))
 
     print(f"Transform Migration Tool")
     print(f"Study root: {args.study_root}")

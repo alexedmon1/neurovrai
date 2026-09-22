@@ -5,8 +5,8 @@ Create config.yaml for MRI Preprocessing Pipeline
 This script creates config.yaml in the study root directory by default.
 
 Usage:
-    # Creates /mnt/bytopia/IRC805/config.yaml
-    python create_config.py --study-root /mnt/bytopia/IRC805
+    # Creates /path/to/study/config.yaml
+    python create_config.py --study-root /path/to/study
 
     # Interactive mode
     python create_config.py
@@ -227,11 +227,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Create config for IRC805 study (creates /mnt/bytopia/IRC805/config.yaml)
-    python create_config.py --study-root /mnt/bytopia/IRC805
+    # Create a config for a study (writes <study>/config.yaml)
+    python create_config.py --study-root /path/to/study
 
     # Create with custom location
-    python create_config.py --study-root /mnt/bytopia/IRC805 --output /path/to/my_config.yaml
+    python create_config.py --study-root /path/to/study --output /path/to/my_config.yaml
 
     # Interactive mode
     python create_config.py
@@ -241,7 +241,7 @@ Examples:
     parser.add_argument(
         '--study-root',
         type=Path,
-        help='Study root directory (e.g., /mnt/bytopia/IRC805)'
+        help='Study root directory (e.g., /path/to/study)'
     )
 
     parser.add_argument(
@@ -260,7 +260,7 @@ Examples:
         print("="*70)
         print()
 
-        study_root = input("Enter study root directory (e.g., /mnt/bytopia/IRC805): ").strip()
+        study_root = input("Enter study root directory (e.g., /path/to/study): ").strip()
 
         if not study_root:
             print("Error: Study root is required")

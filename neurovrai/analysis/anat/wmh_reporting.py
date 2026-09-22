@@ -15,6 +15,7 @@ Features:
 import nibabel as nib
 import numpy as np
 import pandas as pd
+import re
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
@@ -193,7 +194,7 @@ def create_subject_scatter_plot(df: pd.DataFrame) -> str:
 
     # Add subject labels
     for _, row in df.iterrows():
-        ax.annotate(row['subject'].replace('IRC805-', ''),
+        ax.annotate(re.sub(r'^[A-Za-z0-9]+-', '', str(row['subject'])),
                    (row['n_lesions'], row['total_volume_mm3']),
                    fontsize=8, alpha=0.7)
 

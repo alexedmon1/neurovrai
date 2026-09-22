@@ -837,7 +837,7 @@ Examples:
   python -m neurovrai.analysis.tbss.prepare_tbss \\
       --config config.yaml \\
       --metric FA \\
-      --subjects IRC805-0580101 IRC805-1230101 \\
+      --subjects STUDY-0580101 STUDY-1230101 \\
       --output-dir /study/analysis/tbss/
 
 Supported Metrics:

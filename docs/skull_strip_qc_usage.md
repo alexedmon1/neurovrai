@@ -19,9 +19,9 @@ from pathlib import Path
 from neurovrai.preprocess.qc.dwi.skull_strip_qc import DWISkullStripQualityControl
 
 # Initialize QC
-subject = "IRC805-0580101"
-dwi_dir = Path("/mnt/bytopia/IRC805/derivatives/IRC805-0580101/dwi")
-qc_dir = Path("/mnt/bytopia/IRC805/qc/dwi/IRC805-0580101/skull_strip")
+subject = "STUDY-0580101"
+dwi_dir = Path("/path/to/study/derivatives/STUDY-0580101/dwi")
+qc_dir = Path("/path/to/study/qc/dwi/STUDY-0580101/skull_strip")
 
 qc = DWISkullStripQualityControl(
     subject=subject,
@@ -62,16 +62,16 @@ from pathlib import Path
 from neurovrai.preprocess.qc.func_qc import compute_skull_strip_qc
 
 # Specify input files
-func_mean_file = Path("/mnt/bytopia/IRC805/derivatives/IRC805-0580101/func/mean_func.nii.gz")
-mask_file = Path("/mnt/bytopia/IRC805/derivatives/IRC805-0580101/func/brain_mask.nii.gz")
-output_dir = Path("/mnt/bytopia/IRC805/qc/func/IRC805-0580101/skull_strip")
+func_mean_file = Path("/path/to/study/derivatives/STUDY-0580101/func/mean_func.nii.gz")
+mask_file = Path("/path/to/study/derivatives/STUDY-0580101/func/brain_mask.nii.gz")
+output_dir = Path("/path/to/study/qc/func/STUDY-0580101/skull_strip")
 
 # Run QC
 results = compute_skull_strip_qc(
     func_mean_file=func_mean_file,
     mask_file=mask_file,
     output_dir=output_dir,
-    subject="IRC805-0580101"
+    subject="STUDY-0580101"
 )
 
 # Access results
@@ -98,16 +98,16 @@ from pathlib import Path
 from neurovrai.preprocess.qc.asl_qc import compute_asl_skull_strip_qc
 
 # Specify input files (use M0 or mean control image)
-asl_mean_file = Path("/mnt/bytopia/IRC805/derivatives/IRC805-0580101/asl/M0.nii.gz")
-mask_file = Path("/mnt/bytopia/IRC805/derivatives/IRC805-0580101/asl/brain_mask.nii.gz")
-output_dir = Path("/mnt/bytopia/IRC805/qc/asl/IRC805-0580101/skull_strip")
+asl_mean_file = Path("/path/to/study/derivatives/STUDY-0580101/asl/M0.nii.gz")
+mask_file = Path("/path/to/study/derivatives/STUDY-0580101/asl/brain_mask.nii.gz")
+output_dir = Path("/path/to/study/qc/asl/STUDY-0580101/skull_strip")
 
 # Run QC
 results = compute_asl_skull_strip_qc(
     asl_mean_file=asl_mean_file,
     mask_file=mask_file,
     output_dir=output_dir,
-    subject="IRC805-0580101"
+    subject="STUDY-0580101"
 )
 
 # Access results
@@ -171,7 +171,7 @@ from neurovrai.preprocess.qc.dwi.skull_strip_qc import DWISkullStripQualityContr
 # Run preprocessing
 results = run_dwi_multishell_topup_preprocessing(
     config=config,
-    subject="IRC805-0580101",
+    subject="STUDY-0580101",
     dwi_files=dwi_files,
     bval_files=bval_files,
     bvec_files=bvec_files,
@@ -179,11 +179,11 @@ results = run_dwi_multishell_topup_preprocessing(
 )
 
 # Run skull strip QC
-dwi_dir = study_root / "derivatives" / "IRC805-0580101" / "dwi"
-qc_dir = study_root / "qc" / "dwi" / "IRC805-0580101" / "skull_strip"
+dwi_dir = study_root / "derivatives" / "STUDY-0580101" / "dwi"
+qc_dir = study_root / "qc" / "dwi" / "STUDY-0580101" / "skull_strip"
 
 qc = DWISkullStripQualityControl(
-    subject="IRC805-0580101",
+    subject="STUDY-0580101",
     dwi_dir=dwi_dir,
     qc_dir=qc_dir
 )
@@ -207,13 +207,13 @@ from neurovrai.preprocess.qc.func_qc import compute_skull_strip_qc, compute_moti
 # Run preprocessing
 results = run_func_preprocessing(
     config=config,
-    subject="IRC805-0580101",
+    subject="STUDY-0580101",
     func_files=func_files,
     output_dir=study_root
 )
 
 # Run comprehensive QC
-qc_dir = study_root / "qc" / "func" / "IRC805-0580101"
+qc_dir = study_root / "qc" / "func" / "STUDY-0580101"
 
 # Motion QC
 motion_qc = compute_motion_qc(
@@ -234,7 +234,7 @@ skull_qc = compute_skull_strip_qc(
     func_mean_file=results['mean_func'],
     mask_file=results['brain_mask'],
     output_dir=qc_dir / "skull_strip",
-    subject="IRC805-0580101"
+    subject="STUDY-0580101"
 )
 
 # Aggregate QC results
@@ -249,8 +249,8 @@ from pathlib import Path
 from neurovrai.preprocess.qc.dwi.skull_strip_qc import DWISkullStripQualityControl
 import pandas as pd
 
-study_root = Path("/mnt/bytopia/IRC805")
-subjects = ["IRC805-0580101", "IRC805-0580102", "IRC805-0580103"]
+study_root = Path("/path/to/study")
+subjects = ["STUDY-0580101", "STUDY-0580102", "STUDY-0580103"]
 
 qc_summary = []
 

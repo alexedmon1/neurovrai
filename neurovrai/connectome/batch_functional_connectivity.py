@@ -6,9 +6,9 @@ Process multiple subjects and atlases to generate functional connectomes.
 
 Usage:
     uv run python neurovrai/connectome/batch_functional_connectivity.py \
-        --study-root /mnt/bytopia/IRC805 \
+        --study-root /path/to/study \
         --atlases schaefer200 schaefer400 aal harvardoxford \
-        --output-dir /mnt/bytopia/IRC805/analysis/func/connectivity
+        --output-dir /path/to/study/analysis/func/connectivity
 """
 
 import argparse

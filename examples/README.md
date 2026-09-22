@@ -15,8 +15,8 @@ Complete end-to-end demonstration of the preprocessing pipeline using test subje
 5. Diffusion preprocessing (reuses transforms from TransformRegistry)
 
 **Requirements:**
-- Test DICOM data at `/mnt/bytopia/IRC805/raw/dicom/IRC805-0580101`
-- Output directory at `/mnt/bytopia/development/mri-preprocess/`
+- Test DICOM data at `/path/to/study/raw/dicom/STUDY-0580101`
+- Output directory at `/path/to/dev/`
 
 **Usage:**
 ```bash
@@ -60,8 +60,8 @@ These can be used in functional preprocessing for ACompCor.
 ```python
 auto_generate_config(
     dicom_dir=DICOM_DIR,
-    study_name="IRC805 Test Data",
-    study_code="IRC805_TEST",
+    study_name="Example Study",
+    study_code="EXAMPLE",
     base_dir=BASE_DIR,
     output_path=CONFIG_FILE
 )

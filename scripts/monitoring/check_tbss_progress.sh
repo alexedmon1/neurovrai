@@ -11,7 +11,7 @@ echo "========================================"
 echo
 
 for metric in $ALL_METRICS; do
-  logfile="/mnt/bytopia/IRC805/analysis/tbss/$metric/randomise_output/randomise.log"
+  logfile="/path/to/study/analysis/tbss/$metric/randomise_output/randomise.log"
 
   if [ -f "$logfile" ]; then
     # Extract current permutation number

@@ -17,7 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$SCRIPT_DIR/logs/parallel_analyses_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$LOG_DIR"
 
-STUDY_ROOT="/mnt/bytopia/IRC805"
+STUDY_ROOT="/path/to/study"
 
 echo "=========================================================================="
 echo "PARALLEL ANALYSIS EXECUTION"

@@ -67,17 +67,17 @@ Implemented modality-aware design matrix generation that:
 # Generate design for VBM
 python generate_design_matrices.py \
   --modality vbm \
-  --participants /mnt/bytopia/IRC805/data/gludata.csv \
-  --study-root /mnt/bytopia/IRC805 \
-  --output-dir /mnt/bytopia/IRC805/data/designs/vbm
+  --participants /path/to/study/data/gludata.csv \
+  --study-root /path/to/study \
+  --output-dir /path/to/study/data/designs/vbm
 
 # Generate design for TBSS FA
 python generate_design_matrices.py \
   --modality tbss \
   --metric FA \
-  --participants /mnt/bytopia/IRC805/data/gludata.csv \
-  --study-root /mnt/bytopia/IRC805 \
-  --output-dir /mnt/bytopia/IRC805/data/designs/tbss
+  --participants /path/to/study/data/gludata.csv \
+  --study-root /path/to/study \
+  --output-dir /path/to/study/data/designs/tbss
 ```
 
 ---
@@ -89,7 +89,7 @@ python generate_design_matrices.py \
 ```
 INFO: Found 23 subjects with vbm data
 INFO: Filtered participants to 22 subjects with vbm data
-WARNING: 1 subjects with MRI data not found in participants file: ['IRC805-0580101']
+WARNING: 1 subjects with MRI data not found in participants file: ['STUDY-0580101']
 
 Design Matrix:
   - Subjects: 22
@@ -116,9 +116,9 @@ Design Matrix:
 #   2. Volumes in 4D merged image
 #   3. Subject order in analysis scripts
 #
-IRC805-1580101
-IRC805-1640101
-IRC805-1720201
+STUDY-1580101
+STUDY-1640101
+STUDY-1720201
 ...
 ```
 
@@ -126,7 +126,7 @@ IRC805-1720201
 
 ## Discovered Data Inconsistency
 
-**Issue**: Subject `IRC805-0580101` has VBM data but is **missing from gludata.csv**
+**Issue**: Subject `STUDY-0580101` has VBM data but is **missing from gludata.csv**
 
 **Impact**: This subject will be excluded from group analysis
 **Resolution**: Investigate why demographic data is missing for this subject
@@ -143,39 +143,39 @@ Use the new modality-aware approach for all analyses:
 # VBM
 python generate_design_matrices.py \
   --modality vbm \
-  --participants /mnt/bytopia/IRC805/data/gludata.csv \
-  --study-root /mnt/bytopia/IRC805 \
-  --output-dir /mnt/bytopia/IRC805/data/designs/vbm
+  --participants /path/to/study/data/gludata.csv \
+  --study-root /path/to/study \
+  --output-dir /path/to/study/data/designs/vbm
 
 # ASL
 python generate_design_matrices.py \
   --modality asl \
-  --participants /mnt/bytopia/IRC805/data/gludata.csv \
-  --study-root /mnt/bytopia/IRC805 \
-  --output-dir /mnt/bytopia/IRC805/data/designs/asl
+  --participants /path/to/study/data/gludata.csv \
+  --study-root /path/to/study \
+  --output-dir /path/to/study/data/designs/asl
 
 # ReHo
 python generate_design_matrices.py \
   --modality reho \
-  --participants /mnt/bytopia/IRC805/data/gludata.csv \
-  --study-root /mnt/bytopia/IRC805 \
-  --output-dir /mnt/bytopia/IRC805/data/designs/func_reho
+  --participants /path/to/study/data/gludata.csv \
+  --study-root /path/to/study \
+  --output-dir /path/to/study/data/designs/func_reho
 
 # fALFF
 python generate_design_matrices.py \
   --modality falff \
-  --participants /mnt/bytopia/IRC805/data/gludata.csv \
-  --study-root /mnt/bytopia/IRC805 \
-  --output-dir /mnt/bytopia/IRC805/data/designs/func_falff
+  --participants /path/to/study/data/gludata.csv \
+  --study-root /path/to/study \
+  --output-dir /path/to/study/data/designs/func_falff
 
 # TBSS (for each metric)
 for metric in FA MD AD RD MK AK RK KFA FICVF ODI FISO; do
   python generate_design_matrices.py \
     --modality tbss \
     --metric $metric \
-    --participants /mnt/bytopia/IRC805/data/gludata.csv \
-    --study-root /mnt/bytopia/IRC805 \
-    --output-dir /mnt/bytopia/IRC805/data/designs/tbss
+    --participants /path/to/study/data/gludata.csv \
+    --study-root /path/to/study \
+    --output-dir /path/to/study/data/designs/tbss
 done
 ```
 
@@ -202,8 +202,8 @@ Run one analysis end-to-end to validate the entire pipeline:
 ```bash
 # VBM test
 python run_vbm_group_analysis.py \
-  --study-root /mnt/bytopia/IRC805 \
-  --design-dir /mnt/bytopia/IRC805/data/designs/vbm \
+  --study-root /path/to/study \
+  --design-dir /path/to/study/data/designs/vbm \
   --tissue GM \
   --method randomise \
   --n-permutations 500  # Quick test
@@ -268,7 +268,7 @@ Modality-Aware Subject Detection
 - [ ] Design matrices match old designs (accounting for missing subjects)
 - [ ] Subject order files are accurate
 - [ ] End-to-end analysis works with new designs
-- [ ] Missing subject issue (IRC805-0580101) investigated
+- [ ] Missing subject issue (STUDY-0580101) investigated
 
 ---
 

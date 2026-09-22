@@ -768,7 +768,7 @@ def run_t1w_preprocessing(
     t1w_file : Path
         Input T1w file
     output_dir : Path
-        Study root directory (e.g., /mnt/bytopia/development/IRC805/)
+        Study root directory (e.g., /path/to/study/)
         Derivatives will be saved to: {output_dir}/derivatives/anat_preproc/{subject}/
     work_dir : Path, optional
         Working directory for temporary Nipype files
@@ -799,7 +799,7 @@ def run_t1w_preprocessing(
     >>> print(results['brain'])
     """
     # Setup directory structure
-    # output_dir is the derivatives base (e.g., /mnt/bytopia/IRC805/derivatives)
+    # output_dir is the derivatives base (e.g., /path/to/study/derivatives)
     # Use standardized hierarchy: {outdir}/{subject}/{modality}/
     outdir = Path(output_dir)
 

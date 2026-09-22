@@ -859,7 +859,7 @@ def run_func_preprocessing(
     func_file : Path or list of Path
         Input functional file(s). If list, treated as multi-echo data
     output_dir : Path
-        Study root directory (e.g., /mnt/bytopia/IRC805/)
+        Study root directory (e.g., /path/to/study/)
         Derivatives will be saved to: {output_dir}/derivatives/func_preproc/{subject}/
     work_dir : Path, optional
         Working directory for temporary Nipype files
@@ -928,7 +928,7 @@ def run_func_preprocessing(
     logger.info(f"Config structure: {'functional' in config and 'full config' or 'functional subsection only (legacy)'}")
 
     # Setup directory structure
-    # output_dir is the derivatives base (e.g., /mnt/bytopia/IRC805/derivatives)
+    # output_dir is the derivatives base (e.g., /path/to/study/derivatives)
     # Use standardized hierarchy: {outdir}/{subject}/{modality}/
     outdir = Path(output_dir)
 

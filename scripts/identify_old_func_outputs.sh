@@ -10,7 +10,7 @@ echo "Scanning for OLD and NEW functional outputs"
 echo "=========================================="
 echo ""
 
-derivatives_dir="/mnt/bytopia/IRC805/derivatives"
+derivatives_dir="/path/to/study/derivatives"
 
 subjects_with_old=()
 subjects_with_new=()
@@ -18,7 +18,7 @@ subjects_with_both=()
 subjects_with_func=()
 
 # Scan all subject directories
-for subject_dir in "$derivatives_dir"/IRC805-*/func; do
+for subject_dir in "$derivatives_dir"/STUDY-*/func; do
     if [ ! -d "$subject_dir" ]; then
         continue
     fi

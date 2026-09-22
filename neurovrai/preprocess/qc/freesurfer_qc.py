@@ -371,10 +371,10 @@ class FreeSurferAlignmentQC:
 
     Usage:
         qc = FreeSurferAlignmentQC(
-            subject='IRC805-0580101',
-            fs_subject_dir='/study/freesurfer/IRC805-0580101',
-            t1w_brain='/study/derivatives/IRC805-0580101/anat/brain.nii.gz',
-            qc_dir='/study/qc/IRC805-0580101/freesurfer'
+            subject='STUDY-0580101',
+            fs_subject_dir='/study/freesurfer/STUDY-0580101',
+            t1w_brain='/study/derivatives/STUDY-0580101/anat/brain.nii.gz',
+            qc_dir='/study/qc/STUDY-0580101/freesurfer'
         )
         results = qc.run_qc()
     """

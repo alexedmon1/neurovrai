@@ -116,7 +116,7 @@ def find_subject_transforms(derivatives_dir: Path, subject: str) -> Tuple[Path, 
     Parameters
     ----------
     derivatives_dir : Path
-        Path to derivatives directory (e.g., /mnt/bytopia/IRC805/derivatives)
+        Path to derivatives directory (e.g., /path/to/study/derivatives)
     subject : str
         Subject ID
 

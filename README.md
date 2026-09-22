@@ -518,7 +518,6 @@ neurovrai/
 │
 ├── examples/                   # Usage examples
 ├── docs/                       # Documentation
-└── archive/                    # Legacy code
 ```
 
 ---

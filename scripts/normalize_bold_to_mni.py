@@ -133,7 +133,7 @@ def find_subjects_with_bold(study_root: Path) -> list:
     subjects = []
     derivatives = study_root / 'derivatives'
 
-    for subj_dir in sorted(derivatives.glob('IRC805-*')):
+    for subj_dir in sorted(derivatives.glob('STUDY-*')):
         bold_file = subj_dir / 'func' / f'{subj_dir.name}_bold_preprocessed.nii.gz'
         if bold_file.exists():
             subjects.append(subj_dir.name)

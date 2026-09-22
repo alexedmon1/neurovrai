@@ -10,7 +10,7 @@ Atlases:
 - AAL3 (Automated Anatomical Labeling v3)
 
 Usage:
-    python run_fc_mni_atlases.py --study-root /mnt/bytopia/IRC805
+    python run_fc_mni_atlases.py --study-root /path/to/study
 
 Output:
     {study_root}/connectome/functional/{subject}/{atlas}/
@@ -86,7 +86,7 @@ def get_subjects(study_root: Path) -> List[str]:
     subjects = []
     derivatives = study_root / 'derivatives'
 
-    for subj_dir in sorted(derivatives.glob('IRC805-*')):
+    for subj_dir in sorted(derivatives.glob('STUDY-*')):
         bold_mni = subj_dir / 'func' / f'{subj_dir.name}_bold_mni.nii.gz'
         if bold_mni.exists():
             subjects.append(subj_dir.name)
@@ -176,7 +176,7 @@ def main():
     parser.add_argument(
         '--study-root',
         type=Path,
-        default=Path('/mnt/bytopia/IRC805'),
+        default=Path('/path/to/study'),
         help='Study root directory'
     )
     parser.add_argument(

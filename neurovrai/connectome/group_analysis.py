@@ -120,7 +120,7 @@ def load_connectivity_with_rois(
         connectivity_dir: Base directory containing subject subdirectories
         matrix_pattern: Glob pattern for matrix files (default: '*_matrix.npy')
         roi_pattern: Glob pattern for ROI name files (default: '*_roi_names.txt')
-        subject_pattern: Optional pattern to filter subjects (e.g., 'IRC805-*')
+        subject_pattern: Optional pattern to filter subjects (e.g., 'STUDY-*')
 
     Returns:
         Dictionary mapping subject_id -> {

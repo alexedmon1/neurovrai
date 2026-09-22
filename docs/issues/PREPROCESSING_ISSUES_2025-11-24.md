@@ -47,7 +47,7 @@ for f in all_dwi_files:
 ```
 
 ### Testing
-✅ Tested on IRC805-2350101: Correctly filtered 4 scanner-processed maps, identified 1 raw DWI file
+✅ Tested on STUDY-2350101: Correctly filtered 4 scanner-processed maps, identified 1 raw DWI file
 
 ---
 
@@ -233,7 +233,7 @@ The preprocessing pipeline reports success even when preprocessing fails interna
 ```bash
 ERROR: ✗ DWI preprocessing failed: 'logs'
 ...
-✓ IRC805-2350101 completed successfully  # <-- Wrong!
+✓ STUDY-2350101 completed successfully  # <-- Wrong!
 ```
 
 This is because:
@@ -289,7 +289,7 @@ WARNING: Inconsistent orientations for individual images when attempting to merg
          Merge will use voxel-based orientation which is probably incorrect - *PLEASE CHECK*!
 ```
 
-**Example**: IRC805-3580101 has 2 b=800 acquisitions (likely one truncated/repeated)
+**Example**: STUDY-3580101 has 2 b=800 acquisitions (likely one truncated/repeated)
 
 ### Current Behavior
 FSL's `fslmerge` continues with voxel-based orientation, which may produce incorrect results.
@@ -357,7 +357,7 @@ Some subjects have multiple acquisitions with different matrix sizes that cannot
 Error in size-match along non-concatenated dimension for input file
 ```
 
-**Example**: IRC805-4960101 has 3 separate b=800 acquisitions with incompatible dimensions
+**Example**: STUDY-4960101 has 3 separate b=800 acquisitions with incompatible dimensions
 
 ### Current Behavior
 FSL's `fslmerge` fails, pipeline returns error.
@@ -402,12 +402,12 @@ def validate_dwi_dimensions(dwi_files: List[Path]) -> Dict:
 
 | Subject | Data Type | Status | Issue |
 |---------|-----------|--------|-------|
-| IRC805-2350101 | Single-shell b=800 | ⚠️ Has data | Needs eddy-without-TOPUP fix |
-| IRC805-2990202 | None | ❌ No data | No DTI acquisition |
-| IRC805-3280201 | Single-shell b=800 | ⚠️ Has data | Needs eddy-without-TOPUP fix |
-| IRC805-3580101 | 2x b=800 | ⚠️ Has data | Orientation mismatch, eddy fix needed |
-| IRC805-3840101 | Multi-shell + TOPUP | ✅ Ready | Should work after paths.logs fix |
-| IRC805-4960101 | 3x b=800 | ❌ Incompatible | Size mismatch, cannot merge |
+| STUDY-2350101 | Single-shell b=800 | ⚠️ Has data | Needs eddy-without-TOPUP fix |
+| STUDY-2990202 | None | ❌ No data | No DTI acquisition |
+| STUDY-3280201 | Single-shell b=800 | ⚠️ Has data | Needs eddy-without-TOPUP fix |
+| STUDY-3580101 | 2x b=800 | ⚠️ Has data | Orientation mismatch, eddy fix needed |
+| STUDY-3840101 | Multi-shell + TOPUP | ✅ Ready | Should work after paths.logs fix |
+| STUDY-4960101 | 3x b=800 | ❌ Incompatible | Size mismatch, cannot merge |
 
 ---
 
@@ -422,12 +422,12 @@ def validate_dwi_dimensions(dwi_files: List[Path]) -> Dict:
 ### Phase 2: Eddy Without TOPUP
 1. ⬜ Implement `create_eddy_files_single_direction()`
 2. ⬜ Add eddy-without-TOPUP branch to `dwi_preprocess.py`
-3. ⬜ Test on IRC805-2350101 (single-shell, no reverse PE)
-4. ⬜ Test on IRC805-3280201 (single-shell, no reverse PE)
+3. ⬜ Test on STUDY-2350101 (single-shell, no reverse PE)
+4. ⬜ Test on STUDY-3280201 (single-shell, no reverse PE)
 5. ⬜ Verify FA maps are created and look reasonable
 
 ### Phase 3: TOPUP Path
-1. ⬜ Test IRC805-3840101 (multi-shell + TOPUP)
+1. ⬜ Test STUDY-3840101 (multi-shell + TOPUP)
 2. ⬜ Verify TOPUP distortion correction works
 3. ⬜ Verify eddy with TOPUP integration works
 4. ⬜ Compare FA maps with/without TOPUP
@@ -435,8 +435,8 @@ def validate_dwi_dimensions(dwi_files: List[Path]) -> Dict:
 ### Phase 4: Edge Cases
 1. ⬜ Add orientation validation
 2. ⬜ Add dimension validation
-3. ⬜ Test IRC805-3580101 with orientation check
-4. ⬜ Document IRC805-4960101 as unprocessable
+3. ⬜ Test STUDY-3580101 with orientation check
+4. ⬜ Document STUDY-4960101 as unprocessable
 
 ### Phase 5: Integration
 1. ⬜ Run batch processing with all fixes

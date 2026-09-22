@@ -5,7 +5,7 @@ All preprocessing workflows now use a standardized directory hierarchy with clea
 ## Standard Structure
 
 ```
-{study_root}/                          # e.g., /mnt/bytopia/development/IRC805/
+{study_root}/                          # e.g., /path/to/study/
 ├── dicoms/                            # Raw DICOM files
 │   └── {subject}/
 │       ├── scan_001/
@@ -130,17 +130,17 @@ from pathlib import Path
 from mri_preprocess.workflows.anat_preprocess import run_anat_preprocessing
 
 # Study root directory
-study_root = Path('/mnt/bytopia/development/IRC805')
+study_root = Path('/path/to/study')
 
 results = run_anat_preprocessing(
     config=config,
-    subject='IRC805-0580101',
+    subject='STUDY-0580101',
     t1w_file=Path('/path/to/T1w.nii.gz'),
     output_dir=study_root,  # Study root
     work_dir=None  # Auto: {study_root}/work/{subject}/anat_preproc/
 )
 
-# Outputs in: {study_root}/derivatives/anat_preproc/IRC805-0580101/anat/
+# Outputs in: {study_root}/derivatives/anat_preproc/STUDY-0580101/anat/
 ```
 
 ### DWI Preprocessing with TOPUP
@@ -150,11 +150,11 @@ from pathlib import Path
 from mri_preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
 
 # Study root directory
-study_root = Path('/mnt/bytopia/development/IRC805')
+study_root = Path('/path/to/study')
 
 results = run_dwi_multishell_topup_preprocessing(
     config=config,
-    subject='IRC805-0580101',
+    subject='STUDY-0580101',
     dwi_files=[...],
     bval_files=[...],
     bvec_files=[...],
@@ -163,7 +163,7 @@ results = run_dwi_multishell_topup_preprocessing(
     work_dir=None  # Auto: {study_root}/work/{subject}/dwi_topup/
 )
 
-# Outputs in: {study_root}/derivatives/dwi_topup/IRC805-0580101/
+# Outputs in: {study_root}/derivatives/dwi_topup/STUDY-0580101/
 ```
 
 ## Benefits
@@ -182,14 +182,14 @@ results = run_dwi_multishell_topup_preprocessing(
 
 Old structure used:
 ```
-/mnt/bytopia/IRC805/
+/path/to/study/
 ├── subjects/{subject}/nifti/...
 └── derivatives/mri-preprocess/sub-{subject}/...
 ```
 
 New structure uses:
 ```
-/mnt/bytopia/development/IRC805/
+/path/to/study/
 ├── nifti/{subject}/...
 └── derivatives/{workflow}/{subject}/...
 ```

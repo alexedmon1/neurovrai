@@ -12,7 +12,7 @@ Usage:
 
 Or for specific subjects:
     python scripts/normalize_existing_func_data.py --config config.yaml \
-        --subjects IRC805-0580101 IRC805-1580101
+        --subjects STUDY-0580101 STUDY-1580101
 """
 
 import sys
@@ -211,7 +211,7 @@ def main():
     else:
         # Find all subjects with preprocessed functional data
         subjects = []
-        for subject_dir in sorted(derivatives_dir.glob('IRC805-*')):
+        for subject_dir in sorted(derivatives_dir.glob('STUDY-*')):
             func_dir = subject_dir / 'func'
             if func_dir.exists():
                 # Check for preprocessed data

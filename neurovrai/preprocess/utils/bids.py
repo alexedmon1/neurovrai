@@ -420,8 +420,8 @@ def sanitize_subject_id(subject: str) -> str:
     --------
     >>> sanitize_subject_id("sub-001")
     '001'
-    >>> sanitize_subject_id("IRC805-0580101")
-    'IRC805-0580101'
+    >>> sanitize_subject_id("STUDY-0580101")
+    'STUDY-0580101'
     >>> sanitize_subject_id("subject_123")
     'subject-123'
     """

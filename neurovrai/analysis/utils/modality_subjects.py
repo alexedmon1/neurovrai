@@ -20,35 +20,43 @@ logger = logging.getLogger(__name__)
 def find_subjects_for_modality(
     study_root: Path,
     modality: str,
-    metric: str = None
+    metric: str = None,
+    subject_prefix: str = None
 ) -> List[str]:
     """
     Find all subjects that have MRI data for a specific modality
 
     Args:
-        study_root: Study root directory (e.g., /mnt/bytopia/IRC805)
+        study_root: Study root directory (e.g., /path/to/study)
         modality: Modality type ('vbm', 'asl', 'reho', 'falff', 'tbss')
         metric: For TBSS, specify metric (e.g., 'FA', 'MD', 'MK', etc.)
+        subject_prefix: Study code prefixing subject ids (e.g. 'STUDY' for
+            'STUDY-0580101'). None matches any prefix, which is what a study
+            whose ids carry none needs.
 
     Returns:
         Sorted list of subject IDs with data for this modality
 
     Examples:
-        >>> find_subjects_for_modality(Path('/mnt/bytopia/IRC805'), 'vbm')
-        ['IRC805-0580101', 'IRC805-1580101', ...]
+        >>> find_subjects_for_modality(Path('/path/to/study'), 'vbm')
+        ['STUDY-0580101', 'STUDY-1580101', ...]
 
-        >>> find_subjects_for_modality(Path('/mnt/bytopia/IRC805'), 'tbss', 'FA')
-        ['IRC805-0580101', 'IRC805-1640101', ...]
+        >>> find_subjects_for_modality(Path('/path/to/study'), 'tbss', 'FA')
+        ['STUDY-0580101', 'STUDY-1640101', ...]
     """
     study_root = Path(study_root)
+    # Empty prefix matches whatever the study names its subjects. Hard-coding one
+    # study's code here is what made this function silently return nothing for
+    # every other study.
+    pre = f"{subject_prefix}-" if subject_prefix else ""
     subjects = []
 
     if modality == 'vbm':
         # Look for VBM smoothed GM files
         vbm_subjects_dir = study_root / 'analysis' / 'anat' / 'vbm' / 'subjects'
         if vbm_subjects_dir.exists():
-            for subj_file in vbm_subjects_dir.glob('IRC805-*_GM_mni_smooth.nii.gz'):
-                # Extract subject ID: IRC805-XXXXXXX from IRC805-XXXXXXX_GM_mni_smooth.nii.gz
+            for subj_file in vbm_subjects_dir.glob(f'{pre}*_GM_mni_smooth.nii.gz'):
+                # Extract subject ID: STUDY-XXXXXXX from STUDY-XXXXXXX_GM_mni_smooth.nii.gz
                 subject_id = subj_file.name.split('_GM_mni_smooth')[0]
                 subjects.append(subject_id)
         else:
@@ -57,7 +65,7 @@ def find_subjects_for_modality(
     elif modality == 'asl':
         # Look for ASL CBF MNI files
         derivatives_dir = study_root / 'derivatives'
-        for subj_dir in sorted(derivatives_dir.glob('IRC805-*/asl')):
+        for subj_dir in sorted(derivatives_dir.glob(f'{pre}*/asl')):
             subject_id = subj_dir.parent.name
             cbf_file = subj_dir / f'{subject_id}_cbf_mni.nii.gz'
             if cbf_file.exists():
@@ -66,7 +74,7 @@ def find_subjects_for_modality(
     elif modality == 'reho':
         # Look for ReHo MNI files
         derivatives_dir = study_root / 'derivatives'
-        for subj_dir in sorted(derivatives_dir.glob('IRC805-*/func')):
+        for subj_dir in sorted(derivatives_dir.glob(f'{pre}*/func')):
             subject_id = subj_dir.parent.name
             reho_file = subj_dir / 'reho' / 'reho_mni_zscore_masked.nii.gz'
             if reho_file.exists():
@@ -75,7 +83,7 @@ def find_subjects_for_modality(
     elif modality == 'falff':
         # Look for fALFF MNI files
         derivatives_dir = study_root / 'derivatives'
-        for subj_dir in sorted(derivatives_dir.glob('IRC805-*/func')):
+        for subj_dir in sorted(derivatives_dir.glob(f'{pre}*/func')):
             subject_id = subj_dir.parent.name
             falff_file = subj_dir / 'falff' / 'falff_mni_zscore_masked.nii.gz'
             if falff_file.exists():
@@ -88,8 +96,8 @@ def find_subjects_for_modality(
 
         tbss_metric_dir = study_root / 'analysis' / 'tbss' / metric
         if tbss_metric_dir.exists():
-            for metric_file in sorted(tbss_metric_dir.glob(f'IRC805-*_{metric}.nii.gz')):
-                # Extract subject ID: IRC805-XXXXXXX from IRC805-XXXXXXX_FA.nii.gz
+            for metric_file in sorted(tbss_metric_dir.glob(f'{pre}*_{metric}.nii.gz')):
+                # Extract subject ID: STUDY-XXXXXXX from STUDY-XXXXXXX_FA.nii.gz
                 subject_id = metric_file.name.split(f'_{metric}.nii.gz')[0]
                 subjects.append(subject_id)
         else:
@@ -109,7 +117,8 @@ def load_participants_for_modality(
     participants_file: Path,
     study_root: Path,
     modality: str,
-    metric: str = None
+    metric: str = None,
+    subject_prefix: str = None
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
     Load participants data and filter to subjects with MRI data for modality
@@ -126,16 +135,16 @@ def load_participants_for_modality(
     Examples:
         >>> df, subjects = load_participants_for_modality(
         ...     Path('gludata.csv'),
-        ...     Path('/mnt/bytopia/IRC805'),
+        ...     Path('/path/to/study'),
         ...     'vbm'
         ... )
         >>> len(df)
         23
         >>> subjects[:3]
-        ['IRC805-0580101', 'IRC805-1580101', 'IRC805-1640101']
+        ['STUDY-0580101', 'STUDY-1580101', 'STUDY-1640101']
     """
     # Find subjects with MRI data for this modality
-    subjects_with_data = find_subjects_for_modality(study_root, modality, metric)
+    subjects_with_data = find_subjects_for_modality(study_root, modality, metric, subject_prefix)
 
     if len(subjects_with_data) == 0:
         raise ValueError(
@@ -156,7 +165,10 @@ def load_participants_for_modality(
         if 'Subject' in df.columns:
             # gludata.csv format: Subject column with numeric IDs
             # IMPORTANT: Pad with zeros to 7 digits (e.g., 580101 -> 0580101)
-            df['participant_id'] = 'IRC805-' + df['Subject'].astype(str).str.zfill(7)
+            padded = df['Subject'].astype(str).str.zfill(7)
+            df['participant_id'] = (
+                subject_prefix + '-' + padded if subject_prefix else padded
+            )
         else:
             raise ValueError(
                 "Participants file must have 'participant_id' or 'Subject' column"
@@ -214,9 +226,9 @@ def save_subject_list(
         # Subject order for VBM analysis
         # N=23 subjects
         # Generated: 2025-12-05
-        IRC805-0580101
-        IRC805-1580101
-        IRC805-1640101
+        STUDY-0580101
+        STUDY-1580101
+        STUDY-1640101
         ...
     """
     from datetime import datetime
@@ -290,7 +302,7 @@ def get_modality_info(modality: str) -> dict:
             'short_name': 'TBSS',
             'data_type': 'diffusion',
             'typical_n': '15-25',
-            'file_pattern': 'IRC805-*_{metric}.nii.gz'
+            'file_pattern': '*_{metric}.nii.gz'
         }
     }
 

@@ -218,7 +218,7 @@ neurovrai/connectome/
 ## Data Flow
 
 ```
-Subject: IRC805-0580101
+Subject: STUDY-0580101
 
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. neurovrai.preprocess (Subject-Level)                    │
@@ -295,7 +295,7 @@ neurovrai/
 **Extended Config Structure**:
 ```yaml
 # Project paths (shared across all modules)
-project_dir: /mnt/bytopia/IRC805
+project_dir: /path/to/study
 rawdata_dir: ${project_dir}/subjects
 derivatives_dir: ${project_dir}/derivatives
 work_dir: ${project_dir}/work

@@ -119,9 +119,9 @@ class FuncAtlasTransformer:
     Examples
     --------
     >>> transformer = FuncAtlasTransformer(
-    ...     subject='IRC805-0580101',
-    ...     derivatives_dir=Path('/mnt/bytopia/IRC805/derivatives'),
-    ...     fs_subjects_dir=Path('/mnt/bytopia/IRC805/freesurfer')
+    ...     subject='STUDY-0580101',
+    ...     derivatives_dir=Path('/path/to/study/derivatives'),
+    ...     fs_subjects_dir=Path('/path/to/study/freesurfer')
     ... )
     >>> atlas_func = transformer.transform_atlas_to_func(
     ...     atlas_name='desikan_killiany',

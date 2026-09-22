@@ -7,9 +7,9 @@ using probabilistic tractography (FSL probtrackx2).
 
 Usage:
     uv run python neurovrai/connectome/batch_structural_connectivity.py \
-        --study-root /mnt/bytopia/IRC805 \
+        --study-root /path/to/study \
         --atlases schaefer_200 desikan_killiany \
-        --output-dir /mnt/bytopia/IRC805/connectome/structural
+        --output-dir /path/to/study/connectome/structural
 """
 
 import argparse
@@ -619,18 +619,18 @@ def main():
 Examples:
     # Process all subjects with BEDPOSTX using Schaefer 200 and Desikan-Killiany
     uv run python neurovrai/connectome/batch_structural_connectivity.py \\
-        --study-root /mnt/bytopia/IRC805 \\
+        --study-root /path/to/study \\
         --atlases schaefer_200 desikan_killiany
 
     # Run BEDPOSTX first for subjects without it
     uv run python neurovrai/connectome/batch_structural_connectivity.py \\
-        --study-root /mnt/bytopia/IRC805 \\
+        --study-root /path/to/study \\
         --run-bedpostx --use-gpu
 
     # Process specific subjects
     uv run python neurovrai/connectome/batch_structural_connectivity.py \\
-        --study-root /mnt/bytopia/IRC805 \\
-        --subjects IRC805-0580101 IRC805-1720201 \\
+        --study-root /path/to/study \\
+        --subjects STUDY-0580101 STUDY-1720201 \\
         --atlases schaefer_200
         """
     )

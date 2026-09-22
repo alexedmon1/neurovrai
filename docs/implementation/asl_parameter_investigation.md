@@ -24,7 +24,7 @@ From IRC805 Philips Ingenia Elition X 3T scanner:
 
 ## Analysis of Elevated CBF Values
 
-### Current CBF Statistics (IRC805-0580101)
+### Current CBF Statistics (STUDY-0580101)
 
 - **Mean CBF**: 158.90 ml/100g/min
 - **Median CBF**: 116.90 ml/100g/min

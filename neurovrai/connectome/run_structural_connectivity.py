@@ -522,14 +522,14 @@ def main():
 Examples:
   # Standard analysis with MNI atlas (auto-transformed to DWI space)
   python -m neurovrai.connectome.run_structural_connectivity \\
-      --subject IRC805-0580101 \\
+      --subject STUDY-0580101 \\
       --derivatives-dir /study/derivatives \\
       --atlas schaefer_200 \\
       --output-dir /study/connectome/structural
 
   # Using FreeSurfer atlas (requires FS subjects dir)
   python -m neurovrai.connectome.run_structural_connectivity \\
-      --subject IRC805-0580101 \\
+      --subject STUDY-0580101 \\
       --derivatives-dir /study/derivatives \\
       --atlas desikan_killiany \\
       --fs-subjects-dir /study/freesurfer \\
@@ -537,14 +537,14 @@ Examples:
 
   # With pre-computed atlas in DWI space
   python -m neurovrai.connectome.run_structural_connectivity \\
-      --subject IRC805-0580101 \\
-      --bedpostx-dir /study/derivatives/IRC805-0580101/dwi.bedpostX \\
+      --subject STUDY-0580101 \\
+      --bedpostx-dir /study/derivatives/STUDY-0580101/dwi.bedpostX \\
       --atlas-file /study/atlases/schaefer_200_dwi.nii.gz \\
       --output-dir /study/connectome/structural
 
   # High-resolution tractography with GPU
   python -m neurovrai.connectome.run_structural_connectivity \\
-      --subject IRC805-0580101 \\
+      --subject STUDY-0580101 \\
       --derivatives-dir /study/derivatives \\
       --atlas schaefer_400 \\
       --use-gpu \\

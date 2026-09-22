@@ -45,7 +45,6 @@ Each main module has its own README:
 - `examples/` - Example configurations
 - `implementation/` - Technical implementation details
 - `issues/` - Known issues and workarounds
-- `archive/` - Archived documentation
 
 ## For Users
 

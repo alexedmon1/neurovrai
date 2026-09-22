@@ -3,6 +3,7 @@
 Batch Cluster Analysis for Functional/Anatomical Analyses
 Generates enhanced cluster reports for ASL, ReHo, fALFF, and VBM results
 """
+import os
 import sys
 from pathlib import Path
 import json
@@ -26,10 +27,14 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+# Named per run: a report carrying the wrong study's name is worse than one
+# carrying none. Set STUDY_NAME in the environment for the study being run.
+STUDY_NAME = os.environ.get('STUDY_NAME', 'Study')
+
 logger = logging.getLogger(__name__)
 
 # Configuration
-ANALYSIS_DIR = Path('/mnt/bytopia/IRC805/analysis')
+ANALYSIS_DIR = Path('/path/to/study/analysis')
 OUTPUT_BASE = ANALYSIS_DIR / 'cluster_reports'
 P_THRESHOLD = 0.05  # Standard p-value threshold
 
@@ -167,7 +172,7 @@ def analyze_contrast(analysis_name, config, contrast_num, contrast_name, mni_tem
                 stat_file=tstat_file,
                 atlas_type=config['atlas'],
                 analysis_type=analysis_name,
-                study_name='IRC805',
+                study_name=STUDY_NAME,
                 threshold_p=P_THRESHOLD
             )
 
@@ -200,7 +205,7 @@ def analyze_contrast(analysis_name, config, contrast_num, contrast_name, mni_tem
     <p><strong>Analysis:</strong> {analysis_name} - {config['description']}</p>
     <p><strong>Contrast:</strong> {contrast_name}</p>
     <p><strong>Threshold:</strong> p &lt; {P_THRESHOLD}</p>
-    <p><strong>Study:</strong> IRC805</p>
+    <p><strong>Study:</strong> {STUDY_NAME}</p>
 </body>
 </html>
 """)

@@ -37,7 +37,7 @@ def main():
     config = load_config(config_file)
 
     # Study directory
-    study_dir = Path('/mnt/bytopia/IRC805')
+    study_dir = Path('/path/to/study')
     subjects_dir = study_dir / 'subjects'
 
     # Get subject list

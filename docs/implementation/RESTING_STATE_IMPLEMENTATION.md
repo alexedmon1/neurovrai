@@ -80,7 +80,7 @@ Successfully implemented a complete resting state fMRI preprocessing pipeline wi
 #### 3. Test Script (`test_rest_preprocessing.py`)
 
 **Features**:
-- Tests on IRC805-0580101 multi-echo data
+- Tests on STUDY-0580101 multi-echo data
 - Verified echo times: 10, 30, 50 ms
 - Complete configuration with all parameters
 - QC summary in output
@@ -169,8 +169,8 @@ config = {
 }
 
 # Paths
-study_root = Path('/mnt/bytopia/IRC805')
-subject = 'IRC805-0580101'
+study_root = Path('/path/to/study')
+subject = 'STUDY-0580101'
 rest_dir = study_root / f'subjects/{subject}/nifti/rest'
 
 # Multi-echo files
@@ -242,7 +242,7 @@ print(f"Mean tSNR: {results['tsnr_qc']['mean_tsnr']:.2f}")
 
 ## Expected Runtime
 
-### Per Subject (IRC805-0580101)
+### Per Subject (STUDY-0580101)
 - TEDANA: ~5-10 minutes
 - Motion correction: ~5 minutes
 - ICA-AROMA: ~15-20 minutes
@@ -308,7 +308,7 @@ source .venv/bin/activate
 python test_rest_preprocessing.py
 
 # Check outputs
-firefox /mnt/bytopia/IRC805/derivatives/func_preproc/IRC805-0580101/qc/IRC805-0580101_func_qc_report.html
+firefox /path/to/study/derivatives/func_preproc/STUDY-0580101/qc/STUDY-0580101_func_qc_report.html
 ```
 
 ## Dependencies
@@ -353,4 +353,4 @@ Implemented based on best practices from:
 
 **Implementation Date**: 2025-11-12
 **Status**: Production Ready
-**Tested On**: IRC805-0580101 (multi-echo resting state)
+**Tested On**: STUDY-0580101 (multi-echo resting state)

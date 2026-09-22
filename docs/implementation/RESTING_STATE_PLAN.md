@@ -15,14 +15,14 @@
 - **Total scan time**: ~7.7 minutes
 
 ### Data Location
-- **Subject**: IRC805-0580101
-- **Path**: `/mnt/bytopia/IRC805/subjects/IRC805-0580101/nifti/rest/`
+- **Subject**: STUDY-0580101
+- **Path**: `/path/to/study/subjects/STUDY-0580101/nifti/rest/`
 - **Files**:
-  - `501_IRC805-0580101_WIP_RESTING_ME3_MB3_SENSE3_e1.nii.gz` (296 MB)
-  - `501_IRC805-0580101_WIP_RESTING_ME3_MB3_SENSE3_e2.nii.gz` (266 MB)
-  - `501_IRC805-0580101_WIP_RESTING_ME3_MB3_SENSE3_e3.nii.gz` (251 MB)
+  - `501_STUDY-0580101_WIP_RESTING_ME3_MB3_SENSE3_e1.nii.gz` (296 MB)
+  - `501_STUDY-0580101_WIP_RESTING_ME3_MB3_SENSE3_e2.nii.gz` (266 MB)
+  - `501_STUDY-0580101_WIP_RESTING_ME3_MB3_SENSE3_e3.nii.gz` (251 MB)
 - **Field map correction scans** (also multi-echo):
-  - `301/401_IRC805-0580101_WIP_fMRI_CORRECTION_MB3_ME3_SENSE3_3mm_TR1104_TE15_DTE20_e[1-3].nii.gz`
+  - `301/401_STUDY-0580101_WIP_fMRI_CORRECTION_MB3_ME3_SENSE3_3mm_TR1104_TE15_DTE20_e[1-3].nii.gz`
 
 ## Preprocessing Pipeline Overview
 
@@ -100,8 +100,8 @@ aroma = Node(fsl.ICA_AROMA(
 
 ```python
 # Extract tissue masks
-csf_mask = derivatives/anat_preproc/IRC805-0580101/fast_seg_0.nii.gz
-wm_mask = derivatives/anat_preproc/IRC805-0580101/fast_seg_2.nii.gz
+csf_mask = derivatives/anat_preproc/STUDY-0580101/fast_seg_0.nii.gz
+wm_mask = derivatives/anat_preproc/STUDY-0580101/fast_seg_2.nii.gz
 
 # Combine and erode for motion mask
 motion_mask = ImageMaths(op_string='-add').run(
@@ -174,7 +174,7 @@ For comparison with existing processed data or if TEDANA fails:
 
 **Pipeline**: MCFLIRT on middle echo → ICA-AROMA → Coregister to T1w → Warp to MNI → ACompCor → Bandpass → Smooth
 
-This is the approach in `archive/rest/rest-preproc-dev.py` but without multi-echo advantages.
+This was the approach in the old single-echo prototype (removed; see git history), without multi-echo advantages.
 
 ## Implementation Steps
 
@@ -242,8 +242,8 @@ config = {
 }
 
 # Paths
-study_root = Path('/mnt/bytopia/IRC805')
-subject = 'IRC805-0580101'
+study_root = Path('/path/to/study')
+subject = 'STUDY-0580101'
 
 # Multi-echo functional files
 func_files = [
@@ -277,15 +277,15 @@ After preprocessing, perform QC:
 
 ```bash
 # 1. Check TEDANA reports
-firefox derivatives/func_preproc/IRC805-0580101/tedana/report.html
+firefox derivatives/func_preproc/STUDY-0580101/tedana/report.html
 
 # 2. Check motion parameters
-fsleyes derivatives/func_preproc/IRC805-0580101/mcflirt_motion.par
+fsleyes derivatives/func_preproc/STUDY-0580101/mcflirt_motion.par
 
 # 3. Visualize preprocessed data
 fsleyes \
   $FSLDIR/data/standard/MNI152_T1_2mm_brain.nii.gz \
-  derivatives/func_preproc/IRC805-0580101/func_mni.nii.gz &
+  derivatives/func_preproc/STUDY-0580101/func_mni.nii.gz &
 
 # 4. Compute tSNR
 fslmaths func_mni.nii.gz -Tmean mean_func
@@ -308,7 +308,7 @@ After preprocessing, can perform:
 3. **Graph theory analysis**
 4. **Dynamic functional connectivity**
 
-Utilities exist in `archive/rest/`:
+Utilities existed in the removed prototype (see git history):
 - `rest_dualregress.py`: Dual regression with spatial maps
 - `rest_corrmat_generation.py`: Connectivity matrix generation
 
@@ -343,7 +343,7 @@ Utilities exist in `archive/rest/`:
 2. 🔧 Implement TEDANA integration in `func_preprocess.py`
 3. 🔧 Add MCFLIRT, ICA-AROMA, ACompCor nodes
 4. 🔧 Implement registration to MNI with TransformRegistry
-5. 🧪 Test on IRC805-0580101
+5. 🧪 Test on STUDY-0580101
 6. 📊 Create QC report generation
 7. 🚀 Deploy to full IRC805 cohort
 

@@ -39,17 +39,17 @@ def main():
         epilog="""
 Examples:
   # Run analysis with randomise (recommended - TFCE correction)
-  python run_vbm_group_analysis.py --study-root /mnt/bytopia/IRC805
+  python run_vbm_group_analysis.py --study-root /path/to/study
 
   # Run with nilearn GLM (faster, parametric statistics with FDR/Bonferroni correction)
-  python run_vbm_group_analysis.py --study-root /mnt/bytopia/IRC805 --method glm
+  python run_vbm_group_analysis.py --study-root /path/to/study --method glm
 
   # Run both methods for comparison
-  python run_vbm_group_analysis.py --study-root /mnt/bytopia/IRC805 --method both
+  python run_vbm_group_analysis.py --study-root /path/to/study --method both
 
   # Custom parameters
   python run_vbm_group_analysis.py \\
-    --study-root /mnt/bytopia/IRC805 \\
+    --study-root /path/to/study \\
     --method both \\
     --tissue GM \\
     --smooth-fwhm 6.0 \\
@@ -64,7 +64,7 @@ NOTE: GLM uses nilearn's SecondLevelModel with FDR and Bonferroni correction.
         '--study-root',
         type=Path,
         required=True,
-        help='Study root directory (e.g., /mnt/bytopia/IRC805)'
+        help='Study root directory (e.g., /path/to/study)'
     )
     parser.add_argument(
         '--tissue',
@@ -179,7 +179,7 @@ NOTE: GLM uses nilearn's SecondLevelModel with FDR and Bonferroni correction.
     if not participants_file.exists():
         logger.error(f"Participants file not found: {participants_file}")
         logger.info("\nPlease create a participants file with columns:")
-        logger.info("  - participant_id: Subject ID (e.g., IRC805-0580101)")
+        logger.info("  - participant_id: Subject ID (e.g., STUDY-0580101)")
         logger.info("  - age: Age in years")
         logger.info("  - sex: 0 or 1")
         logger.info("  - group: 0 or 1 (optional)")
@@ -187,7 +187,7 @@ NOTE: GLM uses nilearn's SecondLevelModel with FDR and Bonferroni correction.
 
     # Find subjects with anatomical data
     subjects = []
-    for subject_dir in sorted(derivatives_dir.glob('IRC805-*/anat')):
+    for subject_dir in sorted(derivatives_dir.glob('STUDY-*/anat')):
         subject_id = subject_dir.parent.name
         seg_dir = subject_dir / 'segmentation'
         if not seg_dir.exists():

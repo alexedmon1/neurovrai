@@ -9,12 +9,12 @@ set -e
 
 if [ $# -ne 1 ]; then
     echo "Usage: $0 <subject_id>"
-    echo "Example: $0 IRC805-0580101"
+    echo "Example: $0 STUDY-0580101"
     exit 1
 fi
 
 subject="$1"
-func_dir="/mnt/bytopia/IRC805/derivatives/${subject}/func"
+func_dir="/path/to/study/derivatives/${subject}/func"
 
 echo "=========================================="
 echo "Verifying NEW pipeline output for $subject"
@@ -74,7 +74,7 @@ done
 
 echo ""
 echo "Checking TransformRegistry..."
-transform_file="/mnt/bytopia/IRC805/transforms/${subject}/func_to_T1w_0GenericAffine.mat"
+transform_file="/path/to/study/transforms/${subject}/func_to_T1w_0GenericAffine.mat"
 if [ -f "$transform_file" ]; then
     echo "  ✓ Transform registered: $transform_file"
 else

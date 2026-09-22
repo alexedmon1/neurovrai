@@ -5,8 +5,8 @@
 set -e
 
 CONFIG="/home/edm9fd/sandbox/neurovrai/config.yaml"
-FA_SKELETON="/mnt/bytopia/IRC805/analysis/tbss/FA"
-OUTPUT_BASE="/mnt/bytopia/IRC805/analysis/tbss"
+FA_SKELETON="/path/to/study/analysis/tbss/FA"
+OUTPUT_BASE="/path/to/study/analysis/tbss"
 LOG_DIR="logs/tbss_prep_$(date +%Y%m%d_%H%M%S)"
 
 mkdir -p "$LOG_DIR"

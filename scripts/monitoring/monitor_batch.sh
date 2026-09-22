@@ -4,8 +4,8 @@
 #
 # Usage: bash monitor_batch.sh
 
-LOG="/mnt/bytopia/IRC805/logs/batch_func_processing.log"
-BATCH_LOG_DIR="/mnt/bytopia/IRC805/logs/batch_func"
+LOG="/path/to/study/logs/batch_func_processing.log"
+BATCH_LOG_DIR="/path/to/study/logs/batch_func"
 
 echo "========================================================================"
 echo "Batch Functional Preprocessing Monitor"

@@ -52,7 +52,7 @@ def find_ready_subjects(derivatives_dir: Path, freesurfer_dir: Path) -> list:
 
     # Get subjects with FreeSurfer
     freesurfer_subjects = set()
-    for fs_path in freesurfer_dir.glob('IRC805-*'):
+    for fs_path in freesurfer_dir.glob('STUDY-*'):
         if fs_path.is_dir():
             freesurfer_subjects.add(fs_path.name)
 
@@ -62,7 +62,7 @@ def find_ready_subjects(derivatives_dir: Path, freesurfer_dir: Path) -> list:
 
 def main():
     # Load study config
-    config_path = Path('/mnt/bytopia/IRC805/config.yaml')
+    config_path = Path('/path/to/study/config.yaml')
     if not config_path.exists():
         logger.error(f"Config file not found: {config_path}")
         sys.exit(1)
@@ -70,7 +70,7 @@ def main():
     config = load_config(config_path)
 
     # Study paths
-    study_root = Path('/mnt/bytopia/IRC805')
+    study_root = Path('/path/to/study')
     derivatives_dir = study_root / 'derivatives'
     freesurfer_dir = Path(config.get('freesurfer', {}).get('subjects_dir', study_root / 'freesurfer'))
     connectome_dir = study_root / 'connectome' / 'structural'

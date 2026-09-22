@@ -10,13 +10,13 @@ set -e
 
 if [ $# -ne 1 ]; then
     echo "Usage: $0 <subject_id>"
-    echo "Example: $0 IRC805-2350101"
+    echo "Example: $0 STUDY-2350101"
     exit 1
 fi
 
 subject="$1"
-func_dir="/mnt/bytopia/IRC805/derivatives/${subject}/func"
-archive_dir="/mnt/bytopia/IRC805/archive/old_func_outputs/${subject}"
+func_dir="/path/to/study/derivatives/${subject}/func"
+archive_dir="/path/to/study/archive/old_func_outputs/${subject}"
 
 echo "=========================================="
 echo "Archiving OLD functional outputs for $subject"

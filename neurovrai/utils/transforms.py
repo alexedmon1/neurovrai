@@ -759,8 +759,8 @@ def get_transform_path(
 
     Examples
     --------
-    >>> path = get_transform_path(study_root, 'IRC805-0580101', 'func', 'mni', 'composite')
-    >>> # Returns: {study_root}/transforms/IRC805-0580101/func-mni-composite.h5
+    >>> path = get_transform_path(study_root, 'STUDY-0580101', 'func', 'mni', 'composite')
+    >>> # Returns: {study_root}/transforms/STUDY-0580101/func-mni-composite.h5
     """
     # Auto-detect extension based on transform type
     if extension is None:
@@ -811,7 +811,7 @@ def find_transform(
 
     Examples
     --------
-    >>> transform = find_transform(study_root, 'IRC805-0580101', 'func', 'mni')
+    >>> transform = find_transform(study_root, 'STUDY-0580101', 'func', 'mni')
     >>> if transform:
     ...     print(f"Found: {transform}")
     """

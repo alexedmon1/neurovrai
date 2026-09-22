@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 
 
 # Configuration
-ANALYSIS_ROOT = Path('/mnt/bytopia/IRC805/analysis')
-DESIGN_ROOT = Path('/mnt/bytopia/IRC805/data/designs')
+ANALYSIS_ROOT = Path('/path/to/study/analysis')
+DESIGN_ROOT = Path('/path/to/study/data/designs')
 N_PERM = 5000
 
 # Analysis configurations
@@ -253,7 +253,7 @@ def main():
         logger.info("")
         logger.info("Next steps:")
         logger.info("  1. Run cluster analysis: python batch_functional_cluster_analysis.py")
-        logger.info("  2. View reports in /mnt/bytopia/IRC805/analysis/cluster_reports/")
+        logger.info("  2. View reports in /path/to/study/analysis/cluster_reports/")
 
 
 if __name__ == '__main__':

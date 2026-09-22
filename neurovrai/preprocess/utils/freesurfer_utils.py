@@ -47,8 +47,8 @@ def detect_freesurfer_subject(
 
     Examples
     --------
-    >>> fs_dir = detect_freesurfer_subject('IRC805-0580101',
-    ...                                      subjects_dir=Path('/mnt/bytopia/IRC805/freesurfer'))
+    >>> fs_dir = detect_freesurfer_subject('STUDY-0580101',
+    ...                                      subjects_dir=Path('/path/to/study/freesurfer'))
     >>> if fs_dir:
     ...     print(f"Found FreeSurfer outputs: {fs_dir}")
     """
@@ -120,7 +120,7 @@ def get_freesurfer_files(fs_subject_dir: Path) -> Dict[str, Optional[Path]]:
 
     Examples
     --------
-    >>> fs_dir = Path('/mnt/bytopia/IRC805/freesurfer/IRC805-0580101')
+    >>> fs_dir = Path('/path/to/study/freesurfer/STUDY-0580101')
     >>> files = get_freesurfer_files(fs_dir)
     >>> if files['aparc_aseg']:
     ...     print(f"Parcellation available: {files['aparc_aseg']}")
@@ -248,7 +248,7 @@ def get_freesurfer_rois_for_tractography(
 
     Examples
     --------
-    >>> fs_dir = Path('/mnt/bytopia/IRC805/freesurfer/IRC805-0580101')
+    >>> fs_dir = Path('/path/to/study/freesurfer/STUDY-0580101')
     >>> rois = get_freesurfer_rois_for_tractography(
     ...     fs_subject_dir=fs_dir,
     ...     roi_names=['hippocampus_l', 'hippocampus_r', 'thalamus_l'],

@@ -140,7 +140,7 @@ WARNING: Consider disabling AROMA to reduce processing time
 
 ### Data Quality Metrics
 
-From internal testing on IRC805-0580101:
+From internal testing on STUDY-0580101:
 
 | Metric | TEDANA | TEDANA + AROMA | Single-echo + AROMA |
 |--------|--------|----------------|---------------------|

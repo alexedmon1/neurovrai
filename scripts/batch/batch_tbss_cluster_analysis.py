@@ -3,6 +3,7 @@
 Batch TBSS Cluster Analysis
 Generates enhanced cluster reports for all TBSS metrics and contrasts
 """
+import os
 import sys
 from pathlib import Path
 import json
@@ -26,10 +27,14 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+# Named per run: a report carrying the wrong study's name is worse than one
+# carrying none. Set STUDY_NAME in the environment for the study being run.
+STUDY_NAME = os.environ.get('STUDY_NAME', 'Study')
+
 logger = logging.getLogger(__name__)
 
 # Configuration
-TBSS_DIR = Path('/mnt/bytopia/IRC805/analysis/tbss')
+TBSS_DIR = Path('/path/to/study/analysis/tbss')
 OUTPUT_BASE = TBSS_DIR / 'cluster_reports'
 P_THRESHOLD = 0.05  # Standard p-value threshold
 
@@ -133,7 +138,7 @@ def analyze_contrast(metric, contrast_num, contrast_name, mean_fa_skeleton):
                 stat_file=tstat_file,
                 atlas_type='jhu',
                 analysis_type='TBSS',
-                study_name='IRC805',
+                study_name=STUDY_NAME,
                 threshold_p=P_THRESHOLD
             )
 
@@ -166,7 +171,7 @@ def analyze_contrast(metric, contrast_num, contrast_name, mean_fa_skeleton):
     <p><strong>Metric:</strong> {metric}</p>
     <p><strong>Contrast:</strong> {contrast_name}</p>
     <p><strong>Threshold:</strong> p &lt; {P_THRESHOLD}</p>
-    <p><strong>Study:</strong> IRC805</p>
+    <p><strong>Study:</strong> {STUDY_NAME}</p>
 </body>
 </html>
 """)

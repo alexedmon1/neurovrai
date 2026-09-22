@@ -167,7 +167,7 @@ derivatives/{subject}/asl/
 
 ## Testing Plan
 
-**Test Subject**: IRC805-0580101
+**Test Subject**: STUDY-0580101
 
 1. Run basic preprocessing on SOURCE file
 2. Verify motion correction quality
@@ -191,4 +191,4 @@ derivatives/{subject}/asl/
 1. Create `mri_preprocess/workflows/asl_preprocess.py`
 2. Create `mri_preprocess/utils/asl_cbf.py` for CBF quantification
 3. Extract Philips-specific pCASL parameters from DICOM
-4. Implement and test basic preprocessing on IRC805-0580101
+4. Implement and test basic preprocessing on STUDY-0580101

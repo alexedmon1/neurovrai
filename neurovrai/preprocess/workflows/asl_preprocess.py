@@ -85,7 +85,7 @@ def run_asl_preprocessing(
     asl_file : Path
         4D ASL time series (label-control pairs)
     output_dir : Path
-        Study root directory (e.g., /mnt/bytopia/IRC805)
+        Study root directory (e.g., /path/to/study)
         Derivatives will be saved to: {output_dir}/derivatives/{subject}/asl/
     t1w_brain : Path, optional
         Brain-extracted T1w for registration
@@ -119,9 +119,9 @@ def run_asl_preprocessing(
     >>> from pathlib import Path
     >>> results = run_asl_preprocessing(
     ...     config=config,
-    ...     subject='IRC805-0580101',
+    ...     subject='STUDY-0580101',
     ...     asl_file=Path('asl_source.nii.gz'),
-    ...     output_dir=Path('/mnt/bytopia/IRC805'),
+    ...     output_dir=Path('/path/to/study'),
     ...     labeling_duration=1.8,
     ...     post_labeling_delay=1.8
     ... )
@@ -135,7 +135,7 @@ def run_asl_preprocessing(
     logger.info("")
 
     # Setup directory structure
-    # output_dir is the derivatives base (e.g., /mnt/bytopia/IRC805/derivatives)
+    # output_dir is the derivatives base (e.g., /path/to/study/derivatives)
     # Use standardized hierarchy: {outdir}/{subject}/{modality}/
     outdir = Path(output_dir)
     derivatives_dir = outdir / subject / 'asl'

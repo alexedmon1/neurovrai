@@ -19,8 +19,8 @@ from neurovrai.preprocess.workflows.anat_preprocess import run_anat_preprocessin
 config = load_config(Path('config.yaml'))
 
 # Define paths
-subject = 'IRC805-0580101'
-study_root = Path('/mnt/bytopia/IRC805')
+subject = 'STUDY-0580101'
+study_root = Path('/path/to/study')
 nifti_dir = study_root / 'bids' / subject / 'anat'
 
 # Find T1w file

@@ -86,19 +86,19 @@ For production use, the pipeline provides command-line tools in the root directo
 Simple CLI for single subjects:
 \`\`\`bash
 # Run anatomical
-python run_preprocessing.py --subject IRC805-0580101 --modality anat
+python run_preprocessing.py --subject STUDY-0580101 --modality anat
 
 # Run DWI
-python run_preprocessing.py --subject IRC805-0580101 --modality dwi
+python run_preprocessing.py --subject STUDY-0580101 --modality dwi
 
 # Run functional
-python run_preprocessing.py --subject IRC805-0580101 --modality func
+python run_preprocessing.py --subject STUDY-0580101 --modality func
 
 # Run ASL
-python run_preprocessing.py --subject IRC805-0580101 --modality asl
+python run_preprocessing.py --subject STUDY-0580101 --modality asl
 
 # Run all modalities
-python run_preprocessing.py --subject IRC805-0580101 --modality all
+python run_preprocessing.py --subject STUDY-0580101 --modality all
 \`\`\`
 
 ### run_full_pipeline.py
@@ -106,14 +106,14 @@ Complete orchestrator from DICOM to outputs:
 \`\`\`bash
 # From DICOM directory
 python run_full_pipeline.py \\
-    --subject IRC805-0580101 \\
-    --dicom-dir /mnt/bytopia/IRC805/dicoms/IRC805-0580101 \\
+    --subject STUDY-0580101 \\
+    --dicom-dir /path/to/study/dicoms/STUDY-0580101 \\
     --config config.yaml
 
 # From NIfTI directory (skip DICOM conversion)
 python run_full_pipeline.py \\
-    --subject IRC805-0580101 \\
-    --nifti-dir /mnt/bytopia/IRC805/bids/IRC805-0580101 \\
+    --subject STUDY-0580101 \\
+    --nifti-dir /path/to/study/bids/STUDY-0580101 \\
     --config config.yaml
 \`\`\`
 
@@ -121,8 +121,8 @@ python run_full_pipeline.py \\
 Advanced streaming pipeline:
 \`\`\`bash
 python run_continuous_pipeline.py \\
-    --subject IRC805-0580101 \\
-    --dicom-dir /mnt/bytopia/IRC805/dicoms/IRC805-0580101 \\
+    --subject STUDY-0580101 \\
+    --dicom-dir /path/to/study/dicoms/STUDY-0580101 \\
     --config config.yaml
 \`\`\`
 

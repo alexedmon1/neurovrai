@@ -200,7 +200,7 @@ wf.connect(nonlinear_reg, 'fieldcoeff_file', datasink, 'transforms.@warp')
 **Test**:
 ```bash
 # After fix, verify warp is saved
-ls -lh /mnt/bytopia/IRC805/derivatives/IRC805-0580101/anat/transforms/*_warp.nii.gz
+ls -lh /path/to/study/derivatives/STUDY-0580101/anat/transforms/*_warp.nii.gz
 ```
 
 ---
@@ -230,7 +230,7 @@ derivatives/{subject}/dwi/
     └── ... (all available metrics)
 ```
 
-**Tested**: IRC805-0580101 - Successfully normalized 12 metrics (FA + 4 DTI + 4 DKI + 3 NODDI)
+**Tested**: STUDY-0580101 - Successfully normalized 12 metrics (FA + 4 DTI + 4 DKI + 3 NODDI)
 
 ---
 
@@ -260,13 +260,13 @@ derivatives/{subject}/func/
     └── bold_normalized.nii.gz                # MNI152 space
 ```
 
-**Status**: Implemented, ready for testing on IRC805-0580101
+**Status**: Implemented, ready for testing on STUDY-0580101
 
 ---
 
 ## Testing Strategy
 
-### Test Subject: IRC805-0580101
+### Test Subject: STUDY-0580101
 
 **Anatomical** (already preprocessed):
 1. Verify warp file copied to derivatives after fix

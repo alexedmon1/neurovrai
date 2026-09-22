@@ -10,7 +10,7 @@
 
 set -e
 
-STUDY_ROOT="/mnt/bytopia/IRC805"
+STUDY_ROOT="/path/to/study"
 PARTICIPANTS="$STUDY_ROOT/data/gludata.csv"
 DESIGNS_DIR="$STUDY_ROOT/data/designs"
 FORMULA="mriglu+sex+age"

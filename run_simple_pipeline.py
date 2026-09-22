@@ -6,10 +6,10 @@ A straightforward, human-readable pipeline that processes MRI data.
 
 Usage:
     # Sequential execution (default)
-    python run_simple_pipeline.py --subject IRC805-0580101 --dicom-dir /path/to/dicom --config config.yaml
+    python run_simple_pipeline.py --subject STUDY-0580101 --dicom-dir /path/to/dicom --config config.yaml
 
     # Parallel execution (faster, more resource intensive)
-    python run_simple_pipeline.py --subject IRC805-0580101 --dicom-dir /path/to/dicom --config config.yaml --parallel-modalities
+    python run_simple_pipeline.py --subject STUDY-0580101 --dicom-dir /path/to/dicom --config config.yaml --parallel-modalities
 
 Steps:
     1. Convert DICOM to NIfTI (if needed)
@@ -424,7 +424,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
-    parser.add_argument('--subject', required=True, help='Subject ID (e.g., IRC805-0580101)')
+    parser.add_argument('--subject', required=True, help='Subject ID (e.g., STUDY-0580101)')
     parser.add_argument('--config', type=Path, default=Path('config.yaml'), help='Config file')
     parser.add_argument('--dicom-dir', type=Path, help='DICOM directory (if converting from DICOM)')
     parser.add_argument('--nifti-dir', type=Path, help='NIfTI directory (if already converted)')

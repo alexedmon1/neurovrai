@@ -47,7 +47,7 @@ def run_cluster_analysis(
     randomise_dir: Path,
     output_dir: Path,
     threshold: float = 0.30,
-    study_name: str = 'IRC805',
+    study_name: str = 'Study',
     analysis_type: str = 'ASL-CBF'
 ) -> List[Dict]:
     """
@@ -384,7 +384,7 @@ def main():
     parser.add_argument(
         '--study-name',
         type=str,
-        default='IRC805',
+        required=True,
         help='Study name for reports'
     )
     parser.add_argument(

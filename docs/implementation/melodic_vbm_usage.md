@@ -36,9 +36,9 @@ MELODIC performs group-level Independent Component Analysis to identify spatial 
 ```bash
 # Create subject list file
 cat > subjects.txt <<EOF
-/study/derivatives/IRC805-0580101/func/preprocessed_bold_mni.nii.gz
-/study/derivatives/IRC805-0590101/func/preprocessed_bold_mni.nii.gz
-/study/derivatives/IRC805-0600101/func/preprocessed_bold_mni.nii.gz
+/study/derivatives/STUDY-0580101/func/preprocessed_bold_mni.nii.gz
+/study/derivatives/STUDY-0590101/func/preprocessed_bold_mni.nii.gz
+/study/derivatives/STUDY-0600101/func/preprocessed_bold_mni.nii.gz
 EOF
 
 # Run MELODIC
@@ -54,7 +54,7 @@ python neurovrai/analysis/func/melodic.py \
 ```bash
 python neurovrai/analysis/func/melodic.py \
     --derivatives-dir /study/derivatives \
-    --subjects IRC805-0580101 IRC805-0590101 IRC805-0600101 \
+    --subjects STUDY-0580101 STUDY-0590101 STUDY-0600101 \
     --output-dir /study/analysis/melodic \
     --n-components auto \
     --approach concat
@@ -71,9 +71,9 @@ from neurovrai.analysis.func.melodic import (
 
 # Option 1: Manually specify subject files
 subject_files = [
-    Path('/study/derivatives/IRC805-0580101/func/preprocessed_bold_mni.nii.gz'),
-    Path('/study/derivatives/IRC805-0590101/func/preprocessed_bold_mni.nii.gz'),
-    Path('/study/derivatives/IRC805-0600101/func/preprocessed_bold_mni.nii.gz'),
+    Path('/study/derivatives/STUDY-0580101/func/preprocessed_bold_mni.nii.gz'),
+    Path('/study/derivatives/STUDY-0590101/func/preprocessed_bold_mni.nii.gz'),
+    Path('/study/derivatives/STUDY-0600101/func/preprocessed_bold_mni.nii.gz'),
 ]
 
 results = run_melodic_group_ica(
@@ -85,7 +85,7 @@ results = run_melodic_group_ica(
 )
 
 # Option 2: Auto-discover from derivatives
-subjects = ['IRC805-0580101', 'IRC805-0590101', 'IRC805-0600101']
+subjects = ['STUDY-0580101', 'STUDY-0590101', 'STUDY-0600101']
 
 subject_files = prepare_subjects_for_melodic(
     derivatives_dir=Path('/study/derivatives'),
@@ -188,7 +188,7 @@ VBM is a **two-step process**:
 ```bash
 python neurovrai/analysis/anat/vbm_workflow.py prepare \
     --derivatives-dir /study/derivatives \
-    --subjects IRC805-0580101 IRC805-0590101 IRC805-0600101 \
+    --subjects STUDY-0580101 STUDY-0590101 STUDY-0600101 \
     --output-dir /study/analysis/vbm \
     --tissue GM \
     --smooth-fwhm 4.0
@@ -200,7 +200,7 @@ python neurovrai/analysis/anat/vbm_workflow.py prepare \
 from pathlib import Path
 from neurovrai.analysis.anat.vbm_workflow import prepare_vbm_data
 
-subjects = ['IRC805-0580101', 'IRC805-0590101', 'IRC805-0600101']
+subjects = ['STUDY-0580101', 'STUDY-0590101', 'STUDY-0600101']
 
 results = prepare_vbm_data(
     subjects=subjects,
@@ -229,8 +229,8 @@ print(f"Merged data: {results['merged_file']}")
 ```
 {output_dir}/
 ├── subjects/
-│   ├── IRC805-0580101_GM_mni.nii.gz         # Normalized tissue maps
-│   ├── IRC805-0580101_GM_mni_smooth.nii.gz  # Smoothed normalized maps
+│   ├── STUDY-0580101_GM_mni.nii.gz         # Normalized tissue maps
+│   ├── STUDY-0580101_GM_mni_smooth.nii.gz  # Smoothed normalized maps
 │   └── ...
 ├── merged_GM.nii.gz          # 4D merged volume (all subjects)
 ├── group_mask.nii.gz         # Group mask
@@ -246,9 +246,9 @@ Create a TSV file with participant demographics:
 
 ```tsv
 participant_id	age	sex	group
-IRC805-0580101	45.2	1	patient
-IRC805-0590101	38.7	0	control
-IRC805-0600101	52.1	1	patient
+STUDY-0580101	45.2	1	patient
+STUDY-0590101	38.7	0	control
+STUDY-0600101	52.1	1	patient
 ```
 
 Where:
@@ -371,15 +371,15 @@ from pathlib import Path
 from neurovrai.analysis.func.melodic import prepare_subjects_for_melodic, run_melodic_group_ica
 
 # Study paths
-derivatives_dir = Path('/mnt/bytopia/IRC805/derivatives')
-analysis_dir = Path('/mnt/bytopia/IRC805/analysis')
+derivatives_dir = Path('/path/to/study/derivatives')
+analysis_dir = Path('/path/to/study/analysis')
 melodic_dir = analysis_dir / 'melodic'
 
 # Get list of subjects with preprocessed data
 # (Assuming preprocessing is complete)
 subjects = [
-    'IRC805-0580101', 'IRC805-0590101', 'IRC805-0600101',
-    'IRC805-0610101', 'IRC805-0620101', 'IRC805-0630101',
+    'STUDY-0580101', 'STUDY-0590101', 'STUDY-0600101',
+    'STUDY-0610101', 'STUDY-0620101', 'STUDY-0630101',
     # Add all subjects...
 ]
 
@@ -421,14 +421,14 @@ import pandas as pd
 from neurovrai.analysis.anat.vbm_workflow import prepare_vbm_data, run_vbm_analysis
 
 # Study paths
-derivatives_dir = Path('/mnt/bytopia/IRC805/derivatives')
-analysis_dir = Path('/mnt/bytopia/IRC805/analysis')
+derivatives_dir = Path('/path/to/study/derivatives')
+analysis_dir = Path('/path/to/study/analysis')
 vbm_dir = analysis_dir / 'vbm'
 
 # Get subjects with anatomical preprocessing
 subjects = [
-    'IRC805-0580101', 'IRC805-0590101', 'IRC805-0600101',
-    'IRC805-0610101', 'IRC805-0620101', 'IRC805-0630101',
+    'STUDY-0580101', 'STUDY-0590101', 'STUDY-0600101',
+    'STUDY-0610101', 'STUDY-0620101', 'STUDY-0630101',
     # Add all subjects...
 ]
 
@@ -498,11 +498,11 @@ from neurovrai.analysis.func.melodic import prepare_subjects_for_melodic, run_me
 from neurovrai.analysis.anat.vbm_workflow import prepare_vbm_data, run_vbm_analysis
 
 # Configuration
-study_root = Path('/mnt/bytopia/IRC805')
+study_root = Path('/path/to/study')
 derivatives_dir = study_root / 'derivatives'
 analysis_dir = study_root / 'analysis'
 
-subjects = list(derivatives_dir.glob('IRC805-*'))
+subjects = list(derivatives_dir.glob('STUDY-*'))
 subject_ids = [s.name for s in subjects]
 
 print(f"Found {len(subject_ids)} subjects")

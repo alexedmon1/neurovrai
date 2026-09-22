@@ -115,9 +115,9 @@ class DWIAtlasTransformer:
     Examples
     --------
     >>> transformer = DWIAtlasTransformer(
-    ...     subject='IRC805-0580101',
-    ...     derivatives_dir=Path('/mnt/bytopia/IRC805/derivatives'),
-    ...     fs_subjects_dir=Path('/mnt/bytopia/IRC805/freesurfer')
+    ...     subject='STUDY-0580101',
+    ...     derivatives_dir=Path('/path/to/study/derivatives'),
+    ...     fs_subjects_dir=Path('/path/to/study/freesurfer')
     ... )
     >>> atlas_dwi = transformer.transform_atlas_to_dwi(
     ...     atlas_name='schaefer_200',

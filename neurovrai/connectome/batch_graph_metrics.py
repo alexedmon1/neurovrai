@@ -17,16 +17,16 @@ Outputs are saved to:
 Usage:
     # Process all subjects and atlases
     uv run python -m neurovrai.connectome.batch_graph_metrics \
-        --study-root /mnt/bytopia/IRC805
+        --study-root /path/to/study
 
     # Specific atlas only
     uv run python -m neurovrai.connectome.batch_graph_metrics \
-        --study-root /mnt/bytopia/IRC805 \
+        --study-root /path/to/study \
         --atlases schaefer200 aal2
 
     # Custom threshold
     uv run python -m neurovrai.connectome.batch_graph_metrics \
-        --study-root /mnt/bytopia/IRC805 \
+        --study-root /path/to/study \
         --threshold 0.3
 """
 

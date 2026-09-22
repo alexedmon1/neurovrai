@@ -109,7 +109,7 @@ def extract_asl_parameters(dicom_file: Union[Path, pydicom.Dataset]) -> Dict[str
 
     # Check Philips private tags for ASL parameters
     # Philips uses (2005,xxxx) for private tags
-    # Validated tags from IRC805 Philips Ingenia Elition X 3T
+    # Validated tags from a Philips Ingenia Elition X 3T
     try:
         # Specific ASL parameter tags (validated on Philips Ingenia Elition X)
         if (0x2005, 0x140a) in dcm:  # Labeling duration (τ)

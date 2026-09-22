@@ -92,7 +92,7 @@ uv run python scripts/init_study.py --discover-only /path/to/data
    - ✅ Verified ventricle avoidance and white matter waypoints working correctly
 
 4. **Successful Test Run**:
-   - ✅ IRC805-0580101 structural connectivity running with probtrackx2_gpu
+   - ✅ STUDY-0580101 structural connectivity running with probtrackx2_gpu
    - ✅ Desikan-Killiany atlas (107 ROIs) successfully transformed to DWI space
    - ✅ Ventricle avoidance mask active
    - ✅ White matter waypoints enabled
@@ -174,7 +174,7 @@ structural_connectivity:
 - `neurovrai/connectome/run_structural_connectivity.py` - CLI runner
 - `neurovrai/connectome/graph_metrics.py` - Added `compute_graph_metrics()` wrapper
 - `configs/config.yaml` - Added structural_connectivity section
-- `/mnt/bytopia/IRC805/config.yaml` - Study-specific config with FreeSurfer enabled
+- `/path/to/study/config.yaml` - Study-specific config with FreeSurfer enabled
 
 **Documentation Updated**:
 - `README.md` - Added Structural Connectivity section
@@ -205,9 +205,9 @@ structural_connectivity:
      - File discovery pattern matched ALL files, tried to process maps without bval/bvec → failures
    - ✅ **Fix implemented**: Added scanner-processed map filtering in `run_simple_pipeline.py`
    - ✅ **Subject analysis completed**:
-     - IRC805-2990202: No DTI data exists (exclude)
-     - IRC805-4960101: 3 incompatible acquisitions, size mismatch (exclude)
-     - IRC805-2350101, 3280201, 3580101, 3840101: Have recoverable raw DWI data (4 subjects)
+     - STUDY-2990202: No DTI data exists (exclude)
+     - STUDY-4960101: 3 incompatible acquisitions, size mismatch (exclude)
+     - STUDY-2350101, 3280201, 3580101, 3840101: Have recoverable raw DWI data (4 subjects)
    - ✅ **Config issues fixed**: Added required `paths.logs` to config.yaml
 
 3. **Preprocessing Workflow Issues Documented**:
@@ -317,8 +317,7 @@ structural_connectivity:
    - AMICO model parameters (NODDI, SANDI, ActiveAx diffusivities)
 
 4. **Project Cleanup**:
-   - ✅ Archived old runner scripts → `archive/runners/`
-   - ✅ Archived old documentation → `docs/archive/`
+   - ✅ Old runner scripts and documentation removed (2026-09-22; see git history)
    - ✅ Clean root directory with only current production files
    - ✅ Updated README with current Quick Start and project structure
 
@@ -631,7 +630,6 @@ neurovrai/
 │   ├── analysis/            # Analysis runners
 │   └── batch/               # Batch processing
 ├── docs/                    # Documentation
-├── archive/                 # Legacy code (reference only)
 ├── run_simple_pipeline.py   # Main preprocessing runner
 ├── verify_environment.py    # Environment checker
 ├── CLAUDE.md                # AI assistant guidelines

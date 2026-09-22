@@ -13,7 +13,7 @@ Test each development step with real data to ensure:
 ## Directory Structure
 
 ```
-/mnt/bytopia/development/mri-preprocess/
+/path/to/dev/
 ├── test-data/              # Input data for testing
 │   └── sub-0580101/        # Test subject
 │       ├── sourcedata/     # Original DICOM data (symlinked)
@@ -33,7 +33,7 @@ Test each development step with real data to ensure:
 
 ## Test Subject: sub-0580101
 
-**Source**: `/mnt/bytopia/IRC805/raw/dicom/IRC805-0580101`
+**Source**: `/path/to/study/raw/dicom/STUDY-0580101`
 
 **Available Modalities**:
 - T1w: 3D_T1_TFE_SAG_CS3
@@ -62,7 +62,7 @@ Test each development step with real data to ensure:
 - **Folder names CAN use**: `sub-0580101` (generic code, non-identifying)
 - **File names MUST be generic**:
   - ✅ `sub-0580101_T1w.nii.gz`
-  - ❌ `IRC805-0580101_...` or patient name
+  - ❌ `STUDY-0580101_...` or patient name
 
 ### Implementation
 - Add `--anonymize` flag to DICOM converter (Step 4.1)
@@ -79,39 +79,39 @@ After completing each phase, test with sub-0580101:
 ```bash
 cd ~/sandbox/human-mri-preprocess
 mri-preprocess convert \
-  --dicom-dir /mnt/bytopia/development/mri-preprocess/test-data/sub-0580101/sourcedata/dicom \
-  --output-dir /mnt/bytopia/development/mri-preprocess/test-data/sub-0580101/rawdata \
+  --dicom-dir /path/to/dev/test-data/sub-0580101/sourcedata/dicom \
+  --output-dir /path/to/dev/test-data/sub-0580101/rawdata \
   --anonymize
 ```
 
 **Phase 5 (Anatomical)**:
 ```bash
 mri-preprocess anat \
-  --bids-dir /mnt/bytopia/development/mri-preprocess/test-data/sub-0580101/rawdata \
+  --bids-dir /path/to/dev/test-data/sub-0580101/rawdata \
   --subject 0580101 \
-  --output-dir /mnt/bytopia/development/mri-preprocess/outputs/phase05-anatomical
+  --output-dir /path/to/dev/outputs/phase05-anatomical
 ```
 
 **Phase 6 (Diffusion)**:
 ```bash
 mri-preprocess dwi \
-  --bids-dir /mnt/bytopia/development/mri-preprocess/test-data/sub-0580101/rawdata \
+  --bids-dir /path/to/dev/test-data/sub-0580101/rawdata \
   --subject 0580101 \
-  --output-dir /mnt/bytopia/development/mri-preprocess/outputs/phase06-diffusion
+  --output-dir /path/to/dev/outputs/phase06-diffusion
 ```
 
 **Phase 7 (Functional - Multi-echo with TEDANA)**:
 ```bash
 mri-preprocess func \
-  --bids-dir /mnt/bytopia/development/mri-preprocess/test-data/sub-0580101/rawdata \
+  --bids-dir /path/to/dev/test-data/sub-0580101/rawdata \
   --subject 0580101 \
-  --output-dir /mnt/bytopia/development/mri-preprocess/outputs/phase07-functional
+  --output-dir /path/to/dev/outputs/phase07-functional
 ```
 
 **Full Pipeline Test**:
 ```bash
 mri-preprocess run \
-  --config /mnt/bytopia/development/mri-preprocess/configs/test_subject.yaml \
+  --config /path/to/dev/configs/test_subject.yaml \
   --subject 0580101 \
   --steps all
 ```

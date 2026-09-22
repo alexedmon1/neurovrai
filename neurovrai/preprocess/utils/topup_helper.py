@@ -293,9 +293,9 @@ def create_topup_files_for_multishell(
 if __name__ == '__main__':
     import sys
 
-    # Example: Create files for IRC805 study
-    study_dir = Path('/mnt/bytopia/IRC805')
-    dwi_dir = study_dir / 'subjects' / 'IRC805_001' / 'nifti' / 'dwi'
+    # Example: create files for a study
+    study_dir = Path('/path/to/study')
+    dwi_dir = study_dir / 'subjects' / 'STUDY_001' / 'nifti' / 'dwi'
 
     if dwi_dir.exists():
         # Find DWI files

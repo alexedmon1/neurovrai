@@ -26,7 +26,7 @@ from neurovrai.analysis.stats.enhanced_cluster_report import create_enhanced_clu
 def discover_subjects_with_func_data(derivatives_dir: Path):
     """Discover subjects with preprocessed functional data"""
     subjects = []
-    for subj_dir in sorted(derivatives_dir.glob("IRC805-*")):
+    for subj_dir in sorted(derivatives_dir.glob("STUDY-*")):
         func_dir = subj_dir / "func"
         if func_dir.exists():
             # Look for preprocessed BOLD file
@@ -246,8 +246,8 @@ def main():
     print("="*80)
 
     # Configuration
-    derivatives_dir = Path('/mnt/bytopia/IRC805/derivatives')
-    analysis_dir = Path('/mnt/bytopia/IRC805/analysis/resting_state')
+    derivatives_dir = Path('/path/to/study/derivatives')
+    analysis_dir = Path('/path/to/study/analysis/resting_state')
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

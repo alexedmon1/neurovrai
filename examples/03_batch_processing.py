@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 config = load_config(Path('config.yaml'))
 
 # Study paths
-study_root = Path('/mnt/bytopia/IRC805')
+study_root = Path('/path/to/study')
 bids_root = study_root / 'bids'
 derivatives_dir = study_root / 'derivatives'
 work_root = study_root / 'work'
@@ -65,7 +65,7 @@ def save_progress(progress: Dict):
 def find_subjects() -> List[str]:
     """Find all subjects with NIfTI data."""
     subjects = []
-    for subject_dir in sorted(bids_root.glob('IRC805-*')):
+    for subject_dir in sorted(bids_root.glob('STUDY-*')):
         if subject_dir.is_dir():
             subjects.append(subject_dir.name)
     return subjects
@@ -218,7 +218,7 @@ def process_functional(subject: str, progress: Dict) -> bool:
 
 def main():
     logger.info("="*70)
-    logger.info("BATCH PREPROCESSING - IRC805 STUDY")
+    logger.info("BATCH PREPROCESSING")
     logger.info("="*70)
     logger.info(f"Study root: {study_root}")
     logger.info(f"Progress file: {status_file}")

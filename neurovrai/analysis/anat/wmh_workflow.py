@@ -14,18 +14,18 @@ Workflow:
 Usage:
     # Process single subject
     python -m neurovrai.analysis.anat.wmh_workflow single \
-        --subject IRC805-0580101 \
-        --study-root /mnt/bytopia/IRC805 \
-        --output-dir /mnt/bytopia/IRC805/hyperintensities
+        --subject STUDY-0580101 \
+        --study-root /path/to/study \
+        --output-dir /path/to/study/hyperintensities
 
     # Batch process all subjects
     python -m neurovrai.analysis.anat.wmh_workflow batch \
-        --study-root /mnt/bytopia/IRC805 \
-        --output-dir /mnt/bytopia/IRC805/hyperintensities
+        --study-root /path/to/study \
+        --output-dir /path/to/study/hyperintensities
 
     # Generate group report
     python -m neurovrai.analysis.anat.wmh_workflow report \
-        --hyperintensities-dir /mnt/bytopia/IRC805/hyperintensities
+        --hyperintensities-dir /path/to/study/hyperintensities
 """
 
 import nibabel as nib

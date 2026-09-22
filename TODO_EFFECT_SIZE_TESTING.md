@@ -64,4 +64,4 @@ python scripts/analysis/calculate_effect_sizes.py \
 
 ---
 
-Once tested, move this to archive/ and update docs/implementation/effect_size_maps.md with test results.
+Once tested, delete this file and update docs/implementation/effect_size_maps.md with the results.

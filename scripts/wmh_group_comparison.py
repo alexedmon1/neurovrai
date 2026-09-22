@@ -39,8 +39,8 @@ def load_wmh_data(hyperintensities_dir: Path) -> pd.DataFrame:
         wmh_summary = metrics.get('wmh_summary', {})
         size_dist = metrics.get('size_distribution', {})
 
-        # Extract subject ID without IRC805- prefix
-        subject_id = subj_dir.name.replace('IRC805-', '')
+        # Extract subject ID without STUDY- prefix
+        subject_id = subj_dir.name.replace('STUDY-', '')
 
         data.append({
             'subject_id': int(subject_id),

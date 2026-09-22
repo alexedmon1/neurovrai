@@ -405,7 +405,7 @@ def run_dwi_multishell_topup_preprocessing(
         Reverse phase-encoding SE_EPI files (one per shell, in same order)
         If not provided or empty, TOPUP will be skipped and eddy will run without it
     output_dir : Path
-        Study root directory (e.g., /mnt/bytopia/development/IRC805/)
+        Study root directory (e.g., /path/to/study/)
         Derivatives will be saved to: {output_dir}/derivatives/dwi_topup/{subject}/
     work_dir : Path
         Working directory for temporary Nipype files
@@ -501,7 +501,7 @@ def run_dwi_multishell_topup_preprocessing(
     logger.info("")
 
     # Setup directory structure
-    # output_dir is the derivatives base (e.g., /mnt/bytopia/IRC805/derivatives)
+    # output_dir is the derivatives base (e.g., /path/to/study/derivatives)
     # Use standardized hierarchy: {outdir}/{subject}/{modality}/
     outdir = Path(output_dir)
 

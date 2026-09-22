@@ -4,10 +4,10 @@
 
 set -e
 
-STATS_DIR="/mnt/bytopia/IRC805/analysis/tbss/stats"
-DESIGN_DIR="/mnt/bytopia/IRC805/data/designs/tbss"
-OUTPUT_BASE="/mnt/bytopia/IRC805/analysis/tbss"
-SKELETON_MASK="/mnt/bytopia/IRC805/analysis/tbss/FA/stats/mean_FA_skeleton_mask.nii.gz"
+STATS_DIR="/path/to/study/analysis/tbss/stats"
+DESIGN_DIR="/path/to/study/data/designs/tbss"
+OUTPUT_BASE="/path/to/study/analysis/tbss"
+SKELETON_MASK="/path/to/study/analysis/tbss/FA/stats/mean_FA_skeleton_mask.nii.gz"
 N_PERM=5000
 
 echo "========================================="

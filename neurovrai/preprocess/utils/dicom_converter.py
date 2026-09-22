@@ -467,12 +467,12 @@ def convert_subject_dicoms(
 
     Example:
         >>> results = convert_subject_dicoms(
-        ...     subject='IRC805-1580101',
-        ...     dicom_dir=Path('/mnt/bytopia/IRC805/raw/dicom/IRC805-1580101'),
-        ...     output_dir=Path('/mnt/bytopia/IRC805/nifti')
+        ...     subject='STUDY-1580101',
+        ...     dicom_dir=Path('/path/to/study/raw/dicom/STUDY-1580101'),
+        ...     output_dir=Path('/path/to/study/nifti')
         ... )
         >>> print(results['anat'])
-        [PosixPath('/mnt/bytopia/IRC805/nifti/IRC805-1580101/anat/t1w.nii.gz')]
+        [PosixPath('/path/to/study/nifti/STUDY-1580101/anat/t1w.nii.gz')]
     """
     logger.info("="*70)
     logger.info(f"CONVERTING DICOMS FOR {subject}")
@@ -497,8 +497,8 @@ if __name__ == '__main__':
     )
 
     # Convert a subject
-    subject = 'IRC805-1580101'
-    dicom_dir = Path(f'/mnt/bytopia/IRC805/raw/dicom/{subject}')
-    output_dir = Path('/mnt/bytopia/IRC805/nifti')
+    subject = 'STUDY-1580101'
+    dicom_dir = Path(f'/path/to/study/raw/dicom/{subject}')
+    output_dir = Path('/path/to/study/nifti')
 
     results = convert_subject_dicoms(subject, dicom_dir, output_dir)

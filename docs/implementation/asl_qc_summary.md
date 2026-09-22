@@ -27,7 +27,7 @@ Updated `mri_preprocess/workflows/asl_preprocess.py`:
 - Fixed MCFLIRT parameter file path (`asl_mcf.nii.par`)
 - Generates comprehensive QC reports automatically
 
-### 3. Testing Results (IRC805-0580101)
+### 3. Testing Results (STUDY-0580101)
 
 **Motion Quality: EXCELLENT**
 - Mean FD: 0.148mm (< 0.2mm threshold)
@@ -48,8 +48,8 @@ Updated `mri_preprocess/workflows/asl_preprocess.py`:
 
 **QC Outputs Generated:**
 ```
-/mnt/bytopia/IRC805/derivatives/IRC805-0580101/asl/qc/
-├── IRC805-0580101_asl_qc_report.html  # HTML report
+/path/to/study/derivatives/STUDY-0580101/asl/qc/
+├── STUDY-0580101_asl_qc_report.html  # HTML report
 ├── motion_parameters.png              # Motion time series
 ├── framewise_displacement.png         # FD plot
 ├── cbf_histogram.png                  # CBF distribution
@@ -77,7 +77,7 @@ asl:
 
 ### Extracted from JSON Sidecar
 
-From `1104_IRC805-0580101_WIP_SOURCE_-_DelRec_-_pCASL1.json`:
+From `1104_STUDY-0580101_WIP_SOURCE_-_DelRec_-_pCASL1.json`:
 - **TR**: 4.32 seconds
 - **TE**: 15.82 ms
 - **Flip Angle**: 90°
@@ -196,7 +196,7 @@ Combined effects could easily account for 2-3x elevation in CBF values.
 
 1. `mri_preprocess/qc/asl_qc.py` - QC module (completed)
 2. `mri_preprocess/utils/dicom_asl_params.py` - Parameter extraction utility (created, untested)
-3. `archive/tests/test_asl_qc.py` - QC test script (validated)
+3. QC test script - removed with the archive; see git history
 4. Integration in `asl_preprocess.py` (completed)
 
 ## Status

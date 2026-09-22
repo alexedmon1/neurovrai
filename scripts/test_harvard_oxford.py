@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from neurovrai.analysis.stats.enhanced_cluster_report import create_enhanced_cluster_report
 
 # Paths
-stats_dir = Path('/mnt/bytopia/IRC805/analysis/vbm/GM/stats')
+stats_dir = Path('/path/to/study/analysis/vbm/GM/stats')
 randomise_dir = stats_dir / 'randomise_output'
 output_dir = stats_dir / 'cluster_reports_harvard_oxford'
 output_dir.mkdir(exist_ok=True)

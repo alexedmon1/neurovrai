@@ -62,7 +62,7 @@ def gather_subject_maps(
     subject_ids = []
 
     # Search for subjects
-    for subject_dir in sorted(derivatives_dir.glob('IRC805-*/func')):
+    for subject_dir in sorted(derivatives_dir.glob('STUDY-*/func')):
         subject_id = subject_dir.parent.name
         map_file = subject_dir / metric / map_name
 

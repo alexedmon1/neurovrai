@@ -6,7 +6,7 @@ This script finds all bedpostx.bedpostX folders in the work directory and copies
 to the appropriate location in derivatives for use by structural connectivity analysis.
 
 Usage:
-    python scripts/migrate_bedpostx_to_derivatives.py --study-root /mnt/bytopia/IRC805
+    python scripts/migrate_bedpostx_to_derivatives.py --study-root /path/to/study
 """
 
 import argparse
@@ -42,7 +42,7 @@ def find_bedpostx_in_work(work_dir: Path):
     for bedpostx_path in work_dir.glob('*/dwi_preprocess/bedpostx/bedpostx.bedpostX'):
         # Extract subject from path
         subject = bedpostx_path.parts[-4]  # work/{SUBJECT}/dwi_preprocess/bedpostx/bedpostx.bedpostX
-        if subject.startswith('IRC805-'):
+        if subject.startswith('STUDY-'):
             bedpostx_dirs.append((subject, bedpostx_path))
 
     return bedpostx_dirs
@@ -184,7 +184,7 @@ def main():
         '--study-root',
         type=Path,
         required=True,
-        help='Path to study root directory (e.g., /mnt/bytopia/IRC805)'
+        help='Path to study root directory (e.g., /path/to/study)'
     )
 
     parser.add_argument(

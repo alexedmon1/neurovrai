@@ -31,13 +31,13 @@ Outputs are saved to:
 Usage:
     # Group averaging
     uv run python -m neurovrai.connectome.batch_group_statistics \
-        --study-root /mnt/bytopia/IRC805 \
+        --study-root /path/to/study \
         --atlas schaefer200 \
         --analysis group_average
 
     # Two-sample comparison
     uv run python -m neurovrai.connectome.batch_group_statistics \
-        --study-root /mnt/bytopia/IRC805 \
+        --study-root /path/to/study \
         --atlas schaefer200 \
         --analysis group_comparison \
         --group1 control_subjects.txt \
@@ -45,7 +45,7 @@ Usage:
 
     # Network-Based Statistic
     uv run python -m neurovrai.connectome.batch_group_statistics \
-        --study-root /mnt/bytopia/IRC805 \
+        --study-root /path/to/study \
         --atlas schaefer200 \
         --analysis nbs \
         --group1 control_subjects.txt \
@@ -125,7 +125,8 @@ def extract_groups_from_csv(
     group_column: str,
     group1_value: str,
     group2_value: str,
-    logger: logging.Logger
+    logger: logging.Logger,
+    subject_prefix: str = None
 ) -> Tuple[List[str], List[str]]:
     """
     Extract two groups of subjects from CSV file based on group column values
@@ -133,6 +134,8 @@ def extract_groups_from_csv(
     Args:
         csv_file: Path to CSV file
         subject_column: Column name containing subject IDs
+        subject_prefix: Study code to prefix bare numeric ids with (e.g. 'STUDY').
+            None leaves the ids as the CSV gave them.
         group_column: Column name containing group assignments
         group1_value: Value that identifies Group 1
         group2_value: Value that identifies Group 2
@@ -169,7 +172,7 @@ def extract_groups_from_csv(
     group1_subjects = group1_df[subject_column].astype(str).tolist()
     group2_subjects = group2_df[subject_column].astype(str).tolist()
 
-    # Format subject IDs to match connectivity matrix filenames (add IRC805- prefix if needed)
+    # Format subject IDs to match connectivity matrix filenames.
     def format_subject_id(subj_id):
         subj_id = str(subj_id).strip()
 
@@ -183,14 +186,15 @@ def extract_groups_from_csv(
         except:
             pass
 
-        # Add IRC805- prefix if not present
-        if not subj_id.startswith('IRC805'):
-            # Pad to 7 digits if it's all numeric
+        # Add the study's prefix only when one was given and the id lacks it.
+        # This used to hard-code one study's code, which mislabelled every other.
+        if subject_prefix and not subj_id.startswith(f'{subject_prefix}-'):
             if subj_id.replace('-', '').isdigit():
-                numeric_part = subj_id.replace('-', '')
-                subj_id = f'IRC805-{numeric_part.zfill(7)}'
+                subj_id = f"{subject_prefix}-{subj_id.replace('-', '').zfill(7)}"
             else:
-                subj_id = f'IRC805-{subj_id}'
+                subj_id = f'{subject_prefix}-{subj_id}'
+        elif subj_id.isdigit():
+            subj_id = subj_id.zfill(7)
 
         return subj_id
 
