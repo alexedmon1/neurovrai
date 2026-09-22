@@ -257,4 +257,4 @@ config = {
 
 **Last Updated**: 2025-11-12
 **Decision**: AROMA disabled by default for multi-echo preprocessing
-**Status**: Implemented in `mri_preprocess/workflows/func_preprocess.py`
+**Status**: Implemented in `neurovrai/preprocess/workflows/func_preprocess.py`

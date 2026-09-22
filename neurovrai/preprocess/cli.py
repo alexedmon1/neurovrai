@@ -3,12 +3,12 @@
 Command-line interface for MRI preprocessing pipeline.
 
 Usage:
-    mri-preprocess config init --dicom-dir /data/DICOM --study-name "My Study" --study-code STUDY01
-    mri-preprocess convert --config study.yaml --subject sub-001
-    mri-preprocess run anatomical --config study.yaml --subject sub-001
-    mri-preprocess run diffusion --config study.yaml --subject sub-001
-    mri-preprocess run functional --config study.yaml --subject sub-001
-    mri-preprocess run all --config study.yaml --subject sub-001
+    neurovrai config init --dicom-dir /data/DICOM --study-name "My Study" --study-code STUDY01
+    neurovrai convert --config study.yaml --subject sub-001
+    neurovrai run anatomical --config study.yaml --subject sub-001
+    neurovrai run diffusion --config study.yaml --subject sub-001
+    neurovrai run functional --config study.yaml --subject sub-001
+    neurovrai run all --config study.yaml --subject sub-001
 """
 
 import click
@@ -60,7 +60,7 @@ def config_init(dicom_dir, study_name, study_code, base_dir, output):
     Scans DICOM headers to detect sequences and create a study-specific config file.
     
     Example:
-        mri-preprocess config init --dicom-dir /data/DICOM/sub-001 \
+        neurovrai config init --dicom-dir /data/DICOM/sub-001 \
                                     --study-name "My Study" \
                                     --study-code STUDY01 \
                                     --output configs/study01.yaml
@@ -81,7 +81,7 @@ def config_init(dicom_dir, study_name, study_code, base_dir, output):
         click.echo(f"\n✓ Configuration generated: {output}")
         click.echo("\nNext steps:")
         click.echo(f"  1. Review and edit: {output}")
-        click.echo(f"  2. Run: mri-preprocess config validate --config {output}")
+        click.echo(f"  2. Run: neurovrai config validate --config {output}")
         
     except Exception as e:
         click.echo(f"Error generating config: {e}", err=True)
@@ -96,7 +96,7 @@ def config_validate(config):
     Validate configuration file.
     
     Example:
-        mri-preprocess config validate --config configs/study01.yaml
+        neurovrai config validate --config configs/study01.yaml
     """
     click.echo(f"Validating configuration: {config}")
     
@@ -126,7 +126,7 @@ def convert(config, subject, session, dicom_dir):
     Convert DICOM to BIDS-organized NIfTI.
     
     Example:
-        mri-preprocess convert --config configs/study01.yaml --subject sub-001
+        neurovrai convert --config configs/study01.yaml --subject sub-001
     """
     click.echo(f"Converting DICOM to NIfTI for {subject}")
     
@@ -190,7 +190,7 @@ def run_anatomical(config, subject, session, t1w_file):
       - Saves transforms to TransformRegistry
     
     Example:
-        mri-preprocess run anatomical --config configs/study01.yaml --subject sub-001
+        neurovrai run anatomical --config configs/study01.yaml --subject sub-001
     """
     click.echo(f"Running anatomical preprocessing for {subject}")
     
@@ -260,7 +260,7 @@ def run_diffusion(config, subject, session, bedpostx):
       - Warps to MNI using transforms from TransformRegistry
     
     Example:
-        mri-preprocess run diffusion --config configs/study01.yaml --subject sub-001
+        neurovrai run diffusion --config configs/study01.yaml --subject sub-001
     """
     click.echo(f"Running diffusion preprocessing for {subject}")
     
@@ -333,7 +333,7 @@ def run_all(config, subject, session, bedpostx):
     Runs anatomical, diffusion, and functional preprocessing in sequence.
     
     Example:
-        mri-preprocess run all --config configs/study01.yaml --subject sub-001
+        neurovrai run all --config configs/study01.yaml --subject sub-001
     """
     click.echo(f"Running complete preprocessing pipeline for {subject}")
     

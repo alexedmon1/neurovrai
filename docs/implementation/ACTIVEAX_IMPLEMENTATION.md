@@ -92,7 +92,7 @@ activeax/
 ## Implementation
 
 ### Location
-`mri_preprocess/workflows/amico_models.py:425-594`
+`neurovrai/preprocess/workflows/amico_models.py:425-594`
 
 ### Function
 `fit_activeax_amico()` - Now uses CylinderZeppelinBall model
@@ -107,7 +107,7 @@ activeax/
 
 ```python
 from pathlib import Path
-from mri_preprocess.workflows.advanced_diffusion import run_advanced_diffusion_models
+from neurovrai.preprocess.workflows.advanced_diffusion import run_advanced_diffusion_models
 
 results = run_advanced_diffusion_models(
     dwi_file=Path('dwi_eddy_corrected.nii.gz'),

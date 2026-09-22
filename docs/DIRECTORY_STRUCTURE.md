@@ -127,12 +127,12 @@ All preprocessing workflows now use a standardized directory hierarchy with clea
 
 ```python
 from pathlib import Path
-from mri_preprocess.workflows.anat_preprocess import run_anat_preprocessing
+from neurovrai.preprocess.workflows.t1w_preprocess import run_t1w_preprocessing
 
 # Study root directory
 study_root = Path('/path/to/study')
 
-results = run_anat_preprocessing(
+results = run_t1w_preprocessing(
     config=config,
     subject='STUDY-0580101',
     t1w_file=Path('/path/to/T1w.nii.gz'),
@@ -147,7 +147,7 @@ results = run_anat_preprocessing(
 
 ```python
 from pathlib import Path
-from mri_preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
+from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
 
 # Study root directory
 study_root = Path('/path/to/study')

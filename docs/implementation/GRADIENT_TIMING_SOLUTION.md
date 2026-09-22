@@ -75,14 +75,14 @@ For our data:
 
 ## Implementation
 
-### Module: `mri_preprocess/utils/gradient_timing.py`
+### Module: `neurovrai/preprocess/utils/gradient_timing.py`
 
 **Key Functions:**
 
 #### 1. `get_gradient_timing()`
 Main interface - tries all extraction methods:
 ```python
-from mri_preprocess.utils.gradient_timing import get_gradient_timing
+from neurovrai.preprocess.utils.gradient_timing import get_gradient_timing
 
 TE, delta, Delta = get_gradient_timing(
     bids_json=Path('sub-001_dwi.json'),
@@ -96,7 +96,7 @@ TE, delta, Delta = get_gradient_timing(
 #### 2. `create_amico_scheme_with_timing()`
 Creates AMICO STEJSKALTANNER scheme file:
 ```python
-from mri_preprocess.utils.gradient_timing import create_amico_scheme_with_timing
+from neurovrai.preprocess.utils.gradient_timing import create_amico_scheme_with_timing
 
 scheme_file = create_amico_scheme_with_timing(
     bval_file=Path('dwi.bval'),
@@ -171,7 +171,7 @@ Where:
 Replace `amico.util.fsl2scheme()` with custom scheme generation:
 
 ```python
-from mri_preprocess.utils.gradient_timing import (
+from neurovrai.preprocess.utils.gradient_timing import (
     get_gradient_timing,
     create_amico_scheme_with_timing
 )

@@ -7,7 +7,7 @@ Automated DICOM parameter extraction has been integrated into the ASL preprocess
 ## Implementation
 
 ### Location
-`mri_preprocess/workflows/asl_preprocess.py`
+`neurovrai/preprocess/workflows/asl_preprocess.py`
 
 ### Features
 
@@ -24,7 +24,7 @@ Automated DICOM parameter extraction has been integrated into the ASL preprocess
 ### Usage
 
 ```python
-from mri_preprocess.workflows.asl_preprocess import run_asl_preprocessing
+from neurovrai.preprocess.workflows.asl_preprocess import run_asl_preprocessing
 
 results = run_asl_preprocessing(
     config=config,
@@ -116,7 +116,7 @@ This ensures the workflow always completes successfully, even if DICOM extractio
 
 - Philips pCASL DICOM specification (private tags group 2005)
 - Alsop et al. (2015). Recommended implementation of arterial spin-labeled perfusion MRI. *MRM*, 73(1)
-- `mri_preprocess/utils/dicom_asl_params.py`: DICOM extraction utility
+- `neurovrai/preprocess/utils/dicom_asl_params.py`: DICOM extraction utility
 - `docs/implementation/asl_parameter_investigation.md`: Parameter validation study
 
 ## Maintenance Notes

@@ -8,7 +8,7 @@ Successfully implemented a complete resting state fMRI preprocessing pipeline wi
 
 ### Completed Components
 
-#### 1. Core Preprocessing Pipeline (`mri_preprocess/workflows/func_preprocess.py`)
+#### 1. Core Preprocessing Pipeline (`neurovrai/preprocess/workflows/func_preprocess.py`)
 
 **Main Function**: `run_func_preprocessing()`
 
@@ -50,7 +50,7 @@ Successfully implemented a complete resting state fMRI preprocessing pipeline wi
    - Temporal SNR calculation
    - HTML report generation
 
-#### 2. Quality Control Module (`mri_preprocess/qc/func_qc.py`)
+#### 2. Quality Control Module (`neurovrai/preprocess/qc/func_qc.py`)
 
 **Function**: `compute_motion_qc()`
 - Framewise displacement (FD) calculation
@@ -89,7 +89,7 @@ Successfully implemented a complete resting state fMRI preprocessing pipeline wi
 ## File Structure
 
 ```
-mri_preprocess/
+neurovrai/
 ├── workflows/
 │   └── func_preprocess.py          # Main preprocessing workflow
 ├── qc/
@@ -153,7 +153,7 @@ The pipeline generates the following outputs in `{study_root}/derivatives/func_p
 
 ```python
 from pathlib import Path
-from mri_preprocess.workflows.func_preprocess import run_func_preprocessing
+from neurovrai.preprocess.workflows.func_preprocess import run_func_preprocessing
 
 # Configuration
 config = {
@@ -316,7 +316,7 @@ firefox /path/to/study/derivatives/func_preproc/STUDY-0580101/qc/STUDY-0580101_f
 ### Python Packages (from pyproject.toml)
 - nipype ≥1.10.0
 - nibabel ≥5.3.2
-- tedana ≥23.0.2
+- tedana ≥25.0.1
 - numpy
 - pandas
 - matplotlib

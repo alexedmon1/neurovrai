@@ -243,7 +243,7 @@ datasink = Node(DataSink(base_directory='/derivatives/sub-001/anat/', container=
 ### Atropos Tissue Standardization
 **Atropos + K-means produces arbitrary tissue ordering** - MUST standardize:
 ```python
-from neurovrai.preprocess.utils.standardize_atropos_tissues import standardize_atropos_tissues
+from neurovrai.preprocess.workflows.t1w_preprocess import standardize_atropos_tissues
 standardize_atropos_tissues(derivatives_dir)  # Called after workflow
 ```
 - Identifies tissues by intensity: CSF (lowest) → GM (middle) → WM (highest)
@@ -349,7 +349,7 @@ from neurovrai.preprocess.utils.transforms import save_transform, find_transform
 ## Testing & Development
 
 - **Tests location**: `tests/`
-- **No formal pytest suite** currently implemented
+- **pytest suite**: `tests/unit/` and `tests/regression/`, gated by `make check`
 - **Environment check**: `uv run python verify_environment.py`
 - **Extensive logging**: Module-level loggers everywhere for debugging
 

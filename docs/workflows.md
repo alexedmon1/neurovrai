@@ -70,18 +70,18 @@ See `docs/configuration.md` under "Anatomical Preprocessing"
 
 **CLI:**
 ```bash
-mri-preprocess run anatomical \
+neurovrai run anatomical \
   --config configs/my_study.yaml \
   --subject sub-001
 ```
 
 **Python API:**
 ```python
-from mri_preprocess.config import load_config
-from mri_preprocess.workflows.anat_preprocess import run_anat_preprocessing
+from neurovrai.config import load_config
+from neurovrai.preprocess.workflows.t1w_preprocess import run_t1w_preprocessing
 
 config = load_config('configs/my_study.yaml')
-results = run_anat_preprocessing(
+results = run_t1w_preprocessing(
     config=config,
     subject='sub-001',
     t1w_file=Path('rawdata/sub-001/anat/sub-001_T1w.nii.gz'),
@@ -154,12 +154,12 @@ See `docs/configuration.md` under "Diffusion Preprocessing"
 **CLI:**
 ```bash
 # Basic DTI preprocessing
-mri-preprocess run diffusion \
+neurovrai run diffusion \
   --config configs/my_study.yaml \
   --subject sub-001
 
 # With BEDPOSTX for tractography
-mri-preprocess run diffusion \
+neurovrai run diffusion \
   --config configs/my_study.yaml \
   --subject sub-001 \
   --bedpostx
@@ -167,8 +167,8 @@ mri-preprocess run diffusion \
 
 **Python API:**
 ```python
-from mri_preprocess.config import load_config
-from mri_preprocess.workflows.dwi_preprocess import run_dwi_preprocessing
+from neurovrai.config import load_config
+from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_preprocessing
 
 config = load_config('configs/my_study.yaml')
 results = run_dwi_preprocessing(
@@ -254,7 +254,7 @@ Similar but skips TEDANA (steps 1-4, 6-11)
 
 **CLI (when implemented):**
 ```bash
-mri-preprocess run functional \
+neurovrai run functional \
   --config configs/my_study.yaml \
   --subject sub-001
 ```
@@ -298,7 +298,7 @@ Minimal parameters needed (uses anatomical defaults)
 ### Usage
 
 ```bash
-mri-preprocess myelin \
+neurovrai myelin \
   --config configs/my_study.yaml \
   --subject sub-001 \
   --bids-dir /path/to/rawdata \
@@ -313,14 +313,14 @@ mri-preprocess myelin \
 
 Run anatomical preprocessing (required first):
 ```bash
-mri-preprocess run anatomical \
+neurovrai run anatomical \
   --config configs/my_study.yaml \
   --subject sub-001
 ```
 
 Run diffusion preprocessing (reuses anatomical transforms):
 ```bash
-mri-preprocess run diffusion \
+neurovrai run diffusion \
   --config configs/my_study.yaml \
   --subject sub-001
 ```
@@ -328,9 +328,9 @@ mri-preprocess run diffusion \
 **Sequential Processing:**
 ```bash
 # Anatomical must run first to create transforms
-mri-preprocess run anatomical --config configs/study.yaml --subject sub-001
+neurovrai run anatomical --config configs/study.yaml --subject sub-001
 # Then diffusion can reuse those transforms
-mri-preprocess run diffusion --config configs/study.yaml --subject sub-001
+neurovrai run diffusion --config configs/study.yaml --subject sub-001
 ```
 
 ---

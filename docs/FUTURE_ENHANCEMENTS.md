@@ -7,7 +7,7 @@ This document tracks planned improvements to make additional parameters configur
 ### 1. Tractography Parameters
 
 **Status**: Partially implemented (hardcoded defaults)
-**Files**: `mri_preprocess/workflows/tractography.py`
+**Files**: `neurovrai/preprocess/workflows/tractography.py`
 **Priority**: Medium (useful for advanced users)
 
 **Current State**: All parameters are hardcoded as function defaults (lines 56-59):
@@ -45,7 +45,7 @@ diffusion:
 ### 2. AMICO Model Parameters
 
 **Status**: Not implemented (hardcoded in model functions)
-**Files**: `mri_preprocess/workflows/amico_models.py`
+**Files**: `neurovrai/preprocess/workflows/amico_models.py`
 **Priority**: Low-Medium (expert users only)
 
 #### 2a. NODDI Parameters

@@ -165,7 +165,7 @@ print(f"Quality flags: {results['quality_flags']}")
 ### DWI Workflow Integration
 
 ```python
-from neurovrai.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
+from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
 from neurovrai.preprocess.qc.dwi.skull_strip_qc import DWISkullStripQualityControl
 
 # Run preprocessing
@@ -201,7 +201,7 @@ if not qc_results['quality']['quality_pass']:
 ### Functional Workflow Integration
 
 ```python
-from neurovrai.workflows.func_preprocess import run_func_preprocessing
+from neurovrai.preprocess.workflows.func_preprocess import run_func_preprocessing
 from neurovrai.preprocess.qc.func_qc import compute_skull_strip_qc, compute_motion_qc, compute_tsnr
 
 # Run preprocessing

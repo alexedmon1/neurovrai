@@ -69,11 +69,11 @@ ASL is a non-invasive perfusion imaging technique that measures cerebral blood f
 
 ### Workflow Architecture
 
-**Location**: `mri_preprocess/workflows/asl_preprocess.py`
+**Location**: `neurovrai/preprocess/workflows/asl_preprocess.py`
 
 **Main function**: `run_asl_preprocessing()`
 
-**Utilities**: `mri_preprocess/utils/asl_cbf.py` for CBF quantification
+**Utilities**: `neurovrai/preprocess/utils/asl_cbf.py` for CBF quantification
 
 ---
 
@@ -188,7 +188,7 @@ derivatives/{subject}/asl/
 
 ## Next Steps
 
-1. Create `mri_preprocess/workflows/asl_preprocess.py`
-2. Create `mri_preprocess/utils/asl_cbf.py` for CBF quantification
+1. Create `neurovrai/preprocess/workflows/asl_preprocess.py`
+2. Create `neurovrai/preprocess/utils/asl_cbf.py` for CBF quantification
 3. Extract Philips-specific pCASL parameters from DICOM
 4. Implement and test basic preprocessing on STUDY-0580101

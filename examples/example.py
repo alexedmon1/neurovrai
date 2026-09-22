@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 
 # Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'human-mri-preprocess'))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from neurovrai.config import load_config
 from neurovrai.preprocess.config_generator import auto_generate_config

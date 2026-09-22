@@ -107,12 +107,12 @@ For most clinical/research questions:
 
 ### File Locations
 
-- **Main implementation**: `mri_preprocess/workflows/amico_models.py`
+- **Main implementation**: `neurovrai/preprocess/workflows/amico_models.py`
   - `fit_noddi_amico()` (lines 158-308) - ✅ WORKING
   - `fit_sandi_amico()` (lines 310-478) - ❌ NOT WORKING
   - `fit_activeax_amico()` (lines 528-696) - ❌ NOT WORKING
 
-- **Gradient timing**: `mri_preprocess/utils/gradient_timing.py`
+- **Gradient timing**: `neurovrai/preprocess/utils/gradient_timing.py`
   - `create_amico_scheme_with_timing()` (lines 266-340)
   - Generates STEJSKALTANNER scheme files
 

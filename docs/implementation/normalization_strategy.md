@@ -187,7 +187,7 @@ derivatives/{subject}/anat/transforms/
 
 ### Phase 1: Fix Anatomical Warp Saving (Immediate)
 
-**File**: `mri_preprocess/workflows/anat_preprocess.py`
+**File**: `neurovrai/preprocess/workflows/t1w_preprocess.py`
 
 **Current Issue**: Warp coefficient generated but not saved to derivatives
 
@@ -207,13 +207,13 @@ ls -lh /path/to/study/derivatives/STUDY-0580101/anat/transforms/*_warp.nii.gz
 
 ### Phase 2: Implement DWI Normalization (✅ COMPLETED)
 
-**File**: `mri_preprocess/utils/dwi_normalization.py` (NEW)
+**File**: `neurovrai/preprocess/utils/dwi_normalization.py` (NEW)
 
 **Functions implemented**:
 - `normalize_dwi_to_fmrib58()`: Main normalization function
 - `apply_warp_to_metrics()`: Apply warp to all DWI metrics
 
-**Integration**: `mri_preprocess/workflows/dwi_preprocess.py` lines 940-1008
+**Integration**: `neurovrai/preprocess/workflows/dwi_preprocess.py` lines 940-1008
 
 **Outputs**:
 ```
@@ -236,11 +236,11 @@ derivatives/{subject}/dwi/
 
 ### Phase 3: Implement Functional Normalization (✅ COMPLETED)
 
-**File**: `mri_preprocess/utils/func_normalization.py` (NEW)
+**File**: `neurovrai/preprocess/utils/func_normalization.py` (NEW)
 
 **Function implemented**: `normalize_func_to_mni152()`
 
-**Integration**: `mri_preprocess/workflows/func_preprocess.py` lines 834-890
+**Integration**: `neurovrai/preprocess/workflows/func_preprocess.py` lines 834-890
 
 **Transform Reuse Strategy** (zero redundant computation):
 1. BBR (func→anat) - REUSED from ACompCor step

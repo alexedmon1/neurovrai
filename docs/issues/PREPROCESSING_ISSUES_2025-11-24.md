@@ -64,7 +64,7 @@ KeyError: 'logs'
 
 **Affected Files**:
 - `neurovrai/preprocess/workflows/dwi_preprocess.py` line 1055
-- `neurovrai/preprocess/workflows/anat_preprocess.py` line 440
+- `neurovrai/preprocess/workflows/t1w_preprocess.py` line 440
 - Likely all preprocessing workflows
 
 ### Fix Applied

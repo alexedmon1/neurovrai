@@ -9,12 +9,12 @@ This document describes the command-line interface for the MRI preprocessing pip
 ## Installation
 
 ```bash
-cd human-mri-preprocess
+cd neurovrai
 uv sync
 source .venv/bin/activate
 ```
 
-The CLI tool `mri-preprocess` will be available after installation.
+The CLI tool `neurovrai` will be available after installation.
 
 ---
 
@@ -33,14 +33,14 @@ Available for all commands:
 
 ## Commands
 
-### `mri-preprocess config`
+### `neurovrai config`
 
 Configuration management commands.
 
 #### `config init` - Auto-generate configuration from DICOMs
 
 ```bash
-mri-preprocess config init \
+neurovrai config init \
   --dicom-dir /path/to/subject/dicoms \
   --output configs/my_study.yaml \
   --study-name "My Study" \
@@ -59,7 +59,7 @@ mri-preprocess config init \
 #### `config validate` - Validate configuration file
 
 ```bash
-mri-preprocess config validate --config configs/my_study.yaml
+neurovrai config validate --config configs/my_study.yaml
 ```
 
 **Checks**:
@@ -71,12 +71,12 @@ mri-preprocess config validate --config configs/my_study.yaml
 
 ---
 
-### `mri-preprocess convert`
+### `neurovrai convert`
 
 Convert DICOM to NIfTI (BIDS format).
 
 ```bash
-mri-preprocess convert \
+neurovrai convert \
   --config configs/my_study.yaml \
   --dicom-dir /path/to/dicom \
   --output-dir /path/to/rawdata \
@@ -94,14 +94,14 @@ mri-preprocess convert \
 
 ---
 
-### `mri-preprocess run`
+### `neurovrai run`
 
 Main preprocessing command group for running workflows.
 
 #### `run anatomical` - Anatomical preprocessing (T1w)
 
 ```bash
-mri-preprocess run anatomical \
+neurovrai run anatomical \
   --config configs/my_study.yaml \
   --subject sub-001
 ```
@@ -125,7 +125,7 @@ mri-preprocess run anatomical \
 #### `run diffusion` - Diffusion preprocessing (DWI/DTI)
 
 ```bash
-mri-preprocess run diffusion \
+neurovrai run diffusion \
   --config configs/my_study.yaml \
   --subject sub-001 \
   --bedpostx
@@ -155,7 +155,7 @@ mri-preprocess run diffusion \
 
 1. **Generate config from DICOMs**:
    ```bash
-   mri-preprocess config init \
+   neurovrai config init \
      --dicom-dir /data/pilot/sub-001/dicom \
      --output configs/my_study.yaml \
      --study-name "My Study" \
@@ -166,19 +166,19 @@ mri-preprocess run diffusion \
 
 3. **Validate config**:
    ```bash
-   mri-preprocess config validate --config configs/my_study.yaml
+   neurovrai config validate --config configs/my_study.yaml
    ```
 
 4. **Run anatomical preprocessing** (required first):
    ```bash
-   mri-preprocess run anatomical \
+   neurovrai run anatomical \
      --config configs/my_study.yaml \
      --subject sub-001
    ```
 
 5. **Run diffusion preprocessing** (optional, reuses anatomical transforms):
    ```bash
-   mri-preprocess run diffusion \
+   neurovrai run diffusion \
      --config configs/my_study.yaml \
      --subject sub-001
    ```
@@ -187,7 +187,7 @@ mri-preprocess run diffusion \
 
 1. **Convert DICOMs** (if starting from DICOM):
    ```bash
-   mri-preprocess convert \
+   neurovrai convert \
      --config configs/study.yaml \
      --subject sub-001 \
      --anonymize
@@ -195,14 +195,14 @@ mri-preprocess run diffusion \
 
 2. **Anatomical preprocessing** (runs first - creates transforms):
    ```bash
-   mri-preprocess run anatomical \
+   neurovrai run anatomical \
      --config configs/study.yaml \
      --subject sub-001
    ```
 
 3. **Diffusion preprocessing** (reuses T1w→MNI transforms):
    ```bash
-   mri-preprocess run diffusion \
+   neurovrai run diffusion \
      --config configs/study.yaml \
      --subject sub-001
    ```
@@ -215,8 +215,8 @@ For multiple subjects, use a shell loop:
 # Process multiple subjects
 for subject in sub-001 sub-002 sub-003; do
   echo "Processing ${subject}..."
-  mri-preprocess run anatomical --config configs/study.yaml --subject ${subject}
-  mri-preprocess run diffusion --config configs/study.yaml --subject ${subject}
+  neurovrai run anatomical --config configs/study.yaml --subject ${subject}
+  neurovrai run diffusion --config configs/study.yaml --subject ${subject}
 done
 ```
 
@@ -227,11 +227,11 @@ echo -e "sub-001\nsub-002\nsub-003" > subjects.txt
 
 # Parallel anatomical preprocessing (run first for all subjects)
 cat subjects.txt | parallel -j 4 \
-  mri-preprocess run anatomical --config configs/study.yaml --subject {}
+  neurovrai run anatomical --config configs/study.yaml --subject {}
 
 # Then parallel diffusion preprocessing
 cat subjects.txt | parallel -j 4 \
-  mri-preprocess run diffusion --config configs/study.yaml --subject {}
+  neurovrai run diffusion --config configs/study.yaml --subject {}
 ```
 
 ---
@@ -247,7 +247,7 @@ cat subjects.txt | parallel -j 4 \
 ## Logging
 
 Logs are saved to `{output_dir}/logs/{subject}/`:
-- `mri-preprocess.log` - Main log file
+- Logs go to stderr; redirect if you want a file
 - `workflow_*.log` - Nipype workflow logs
 - `crash_*.pklz` - Crash dumps (for debugging)
 
@@ -259,7 +259,7 @@ logging:
 
 Or via CLI:
 ```bash
-mri-preprocess run anatomical --config ... --verbose
+neurovrai run anatomical --config ... --verbose
 ```
 
 ---

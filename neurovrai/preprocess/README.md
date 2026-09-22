@@ -68,7 +68,7 @@ preprocess/
 
 ```python
 from pathlib import Path
-from neurovrai.preprocess.workflows.anat_preprocess import run_anatomical_preprocessing
+from neurovrai.preprocess.workflows.t1w_preprocess import run_anatomical_preprocessing
 
 results = run_anatomical_preprocessing(
     config=config,
@@ -224,10 +224,10 @@ results = fit_noddi_amico(
 
 ```python
 from pathlib import Path
-from neurovrai.preprocess.workflows.func_preprocess import run_functional_preprocessing
+from neurovrai.preprocess.workflows.func_preprocess import run_func_preprocessing
 
 # Multi-echo (auto-detected)
-results = run_functional_preprocessing(
+results = run_func_preprocessing(
     config=config,
     subject='sub-001',
     func_files=[
@@ -241,7 +241,7 @@ results = run_functional_preprocessing(
 )
 
 # Single-echo
-results = run_functional_preprocessing(
+results = run_func_preprocessing(
     config=config,
     subject='sub-001',
     func_files=[Path('bold.nii.gz')],

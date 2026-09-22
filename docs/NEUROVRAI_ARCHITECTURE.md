@@ -5,7 +5,7 @@
 
 ## Project Rename
 
-**Current Name**: `human-mri-preprocess`
+**Current Name**: `neurovrai`
 **New Name**: `neurovrai`
 
 The project is being renamed to better reflect its comprehensive scope beyond just preprocessing. "neurovrai" (French: "true neuro") emphasizes the complete, accurate neuroimaging analysis pipeline.
@@ -37,7 +37,7 @@ neurovrai will be organized as a **single integrated package** with three main s
 
 **Status**: Production-ready for all modalities
 
-**Current Location**: `mri_preprocess/` (will be renamed to `neurovrai/preprocess/`)
+**Current Location**: `neurovrai/` (will be renamed to `neurovrai/preprocess/`)
 
 ---
 
@@ -524,8 +524,8 @@ from neurovrai.connectome.structural import matrix_builder
 - 🔄 Final testing and bug fixes (in progress)
 
 ### Phase 2: Project Rename & Restructure (Next - Est. 1 week)
-1. Rename repository: `human-mri-preprocess` → `neurovrai`
-2. Restructure package: `mri_preprocess/` → `neurovrai/preprocess/`
+1. Rename repository: `neurovrai` → `neurovrai`
+2. Restructure package: `neurovrai/` → `neurovrai/preprocess/`
 3. Update all imports and documentation
 4. Extend `config.yaml` with analysis/connectome sections (with defaults)
 5. Update README, CLAUDE.md, all docs
@@ -594,7 +594,7 @@ neurofaune/
 ## Development Guidelines
 
 ### Code Organization
-- **Preprocessing**: `neurovrai/preprocess/` (current `mri_preprocess/`)
+- **Preprocessing**: `neurovrai/preprocess/` (current `neurovrai/`)
 - **Analysis**: `neurovrai/analysis/` (new)
 - **Connectomics**: `neurovrai/connectome/` (new)
 - **Shared**: `neurovrai/utils/`, `neurovrai/config.py`
@@ -631,7 +631,7 @@ neurofaune/
 ## Tractography Migration Plan
 
 ### Current State
-**File**: `mri_preprocess/workflows/tractography.py`
+**File**: `neurovrai/preprocess/workflows/tractography.py`
 **Status**: Implemented but not production-ready for connectomics
 
 **Current Implementation**:
@@ -656,7 +656,7 @@ neurofaune/
 ### Migration Strategy
 
 **Phase 1: Preserve Current Functionality** (During restructure to neurovrai)
-- Mark `mri_preprocess/workflows/tractography.py` as **deprecated**
+- Mark `neurovrai/preprocess/workflows/tractography.py` as **deprecated**
 - Add warning message when imported
 - Keep functional for backward compatibility
 - Document migration path in deprecation notice
@@ -676,12 +676,12 @@ neurofaune/
 
 ### Deprecation Notice (to be added)
 ```python
-# mri_preprocess/workflows/tractography.py
+# neurovrai/preprocess/workflows/tractography.py
 
 import warnings
 
 warnings.warn(
-    "tractography.py in mri_preprocess.workflows is deprecated and will be "
+    "tractography.py in neurovrai.preprocess.workflows is deprecated and will be "
     "removed in v3.0.0. Use neurovrai.connectome.structural for connectomics-ready "
     "tractography with anatomical constraints and NxN matrix generation. "
     "See migration guide: docs/TRACTOGRAPHY_MIGRATION.md",

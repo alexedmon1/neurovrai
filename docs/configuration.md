@@ -21,7 +21,7 @@ Study-specific configs inherit from defaults and override only what's needed.
 The easiest way to create a study configuration is to auto-generate it from DICOM headers:
 
 ```bash
-mri-preprocess config init \
+neurovrai config init \
   --dicom-dir /path/to/subject/dicoms \
   --output configs/my_study.yaml \
   --study-name "My Study" \
@@ -303,7 +303,7 @@ fsl:
 You can override parameters for specific subjects by passing them via CLI:
 
 ```bash
-mri-preprocess anat \
+neurovrai anat \
   --config configs/my_study.yaml \
   --subject sub-001 \
   --override anatomical.skull_strip.frac=0.3
@@ -316,7 +316,7 @@ mri-preprocess anat \
 Validate your configuration before running:
 
 ```bash
-mri-preprocess config validate --config configs/my_study.yaml
+neurovrai config validate --config configs/my_study.yaml
 ```
 
 This checks:
@@ -448,7 +448,7 @@ execution:
 
 ### Config not loading?
 - Check YAML syntax (indentation matters!)
-- Validate with: `mri-preprocess config validate`
+- Validate with: `neurovrai config validate`
 - Look for tabs (use spaces only)
 
 ### Sequences not detected?
@@ -496,7 +496,7 @@ Eddy correction requires acquisition parameters:
 2 2 2 2 2 ... (for all PA volumes)
 ```
 
-Generate these with: `mri-preprocess dwi create-acqp --help`
+Generate these with: `neurovrai dwi create-acqp --help`
 
 ---
 

@@ -20,7 +20,7 @@ Complete end-to-end demonstration of the preprocessing pipeline using test subje
 
 **Usage:**
 ```bash
-cd /path/to/mri-preprocess
+cd /path/to/neurovrai
 python examples/example.py
 ```
 
@@ -86,7 +86,7 @@ To process your own data:
 
 1. **Create a config file:**
 ```bash
-mri-preprocess config init \
+neurovrai config init \
     --dicom-dir /your/dicom/path \
     --study-name "My Study" \
     --study-code MYSTUDY \
@@ -100,7 +100,7 @@ vi configs/mystudy.yaml
 
 3. **Convert DICOM to BIDS:**
 ```bash
-mri-preprocess convert \
+neurovrai convert \
     --config configs/mystudy.yaml \
     --subject sub-001
 ```
@@ -108,17 +108,17 @@ mri-preprocess convert \
 4. **Run preprocessing:**
 ```bash
 # Just anatomical
-mri-preprocess run anatomical \
+neurovrai run anatomical \
     --config configs/mystudy.yaml \
     --subject sub-001
 
 # Just diffusion (after anatomical)
-mri-preprocess run diffusion \
+neurovrai run diffusion \
     --config configs/mystudy.yaml \
     --subject sub-001
 
 # Complete pipeline
-mri-preprocess run all \
+neurovrai run all \
     --config configs/mystudy.yaml \
     --subject sub-001
 ```
@@ -129,15 +129,15 @@ You can also use the Python API directly:
 
 ```python
 from pathlib import Path
-from mri_preprocess.config import load_config
-from mri_preprocess.workflows.anat_preprocess import run_anat_preprocessing
-from mri_preprocess.workflows.dwi_preprocess import run_dwi_preprocessing
+from neurovrai.config import load_config
+from neurovrai.preprocess.workflows.t1w_preprocess import run_t1w_preprocessing
+from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_preprocessing
 
 # Load config
 config = load_config("configs/mystudy.yaml")
 
 # Run anatomical (computes transforms)
-anat_results = run_anat_preprocessing(
+anat_results = run_t1w_preprocessing(
     config=config,
     subject="sub-001",
     t1w_file=Path("/data/rawdata/sub-001/anat/sub-001_T1w.nii.gz"),
@@ -158,7 +158,7 @@ dwi_results = run_dwi_preprocessing(
 )
 
 # Use tissue masks for functional preprocessing
-from mri_preprocess.workflows.func_preprocess import run_func_preprocessing
+from neurovrai.preprocess.workflows.func_preprocess import run_func_preprocessing
 
 func_results = run_func_preprocessing(
     config=config,

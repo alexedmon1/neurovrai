@@ -64,7 +64,7 @@ The pipeline requires `acqparams.txt` and `index.txt` for TOPUP/eddy:
 
 ```python
 from pathlib import Path
-from mri_preprocess.utils.topup_helper import create_topup_files_for_multishell
+from neurovrai.preprocess.utils.topup_helper import create_topup_files_for_multishell
 
 # Example: Two-shell DWI with AP phase encoding
 dwi_files = [
@@ -95,8 +95,8 @@ acqparams, index = create_topup_files_for_multishell(
 
 ```python
 from pathlib import Path
-from mri_preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
-from mri_preprocess.utils.workflow import load_config
+from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_multishell_topup_preprocessing
+from neurovrai.preprocess.utils.workflow import load_config
 
 config = load_config('configs/default.yaml')
 
@@ -133,7 +133,7 @@ print(f"Eddy-corrected: {results['eddy_corrected']}")
 
 ```python
 from pathlib import Path
-from mri_preprocess.workflows.advanced_diffusion import run_advanced_diffusion_models
+from neurovrai.preprocess.workflows.advanced_diffusion import run_advanced_diffusion_models
 
 # Run after eddy correction
 advanced_results = run_advanced_diffusion_models(
@@ -161,7 +161,7 @@ print(f"Free Water (FISO): {advanced_results['noddi']['fiso']}")
 
 ```python
 from pathlib import Path
-from mri_preprocess.workflows.tractography import run_atlas_based_tractography
+from neurovrai.preprocess.workflows.tractography import run_atlas_based_tractography
 
 # Run after BEDPOSTX completes
 tract_results = run_atlas_based_tractography(
@@ -357,6 +357,6 @@ This will provide:
 ## Support
 
 For questions or issues:
-- Check existing code in `mri_preprocess/workflows/`
+- Check existing code in `neurovrai/preprocess/workflows/`
 - Review FSL documentation: https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/
 - DIPY documentation: https://dipy.org/

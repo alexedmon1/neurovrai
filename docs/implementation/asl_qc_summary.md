@@ -2,7 +2,7 @@
 
 ## Completed Work
 
-### 1. ASL QC Module (`mri_preprocess/qc/asl_qc.py`)
+### 1. ASL QC Module (`neurovrai/preprocess/qc/asl_qc.py`)
 
 Implemented comprehensive quality control for ASL preprocessing:
 
@@ -21,7 +21,7 @@ Implemented comprehensive quality control for ASL preprocessing:
 
 ### 2. Integration with ASL Workflow
 
-Updated `mri_preprocess/workflows/asl_preprocess.py`:
+Updated `neurovrai/preprocess/workflows/asl_preprocess.py`:
 - Integrated QC module into preprocessing pipeline (Step 8)
 - Saves 4D perfusion-weighted signal for tSNR calculation
 - Fixed MCFLIRT parameter file path (`asl_mcf.nii.par`)
@@ -194,8 +194,8 @@ Combined effects could easily account for 2-3x elevation in CBF values.
 
 ## Files Created
 
-1. `mri_preprocess/qc/asl_qc.py` - QC module (completed)
-2. `mri_preprocess/utils/dicom_asl_params.py` - Parameter extraction utility (created, untested)
+1. `neurovrai/preprocess/qc/asl_qc.py` - QC module (completed)
+2. `neurovrai/preprocess/utils/dicom_asl_params.py` - Parameter extraction utility (created, untested)
 3. QC test script - removed with the archive; see git history
 4. Integration in `asl_preprocess.py` (completed)
 

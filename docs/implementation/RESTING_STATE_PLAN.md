@@ -198,7 +198,7 @@ fsleyes 501_*_e1.nii.gz &
 
 ### Phase 2: Update func_preprocess.py 🔧
 
-**File**: `mri_preprocess/workflows/func_preprocess.py`
+**File**: `neurovrai/preprocess/workflows/func_preprocess.py`
 
 Add implementations for:
 1. Multi-echo detection and TEDANA integration
@@ -217,7 +217,7 @@ Add implementations for:
 test_rest_preprocessing.py - Test resting state fMRI preprocessing
 """
 from pathlib import Path
-from mri_preprocess.workflows.func_preprocess import run_func_preprocessing
+from neurovrai.preprocess.workflows.func_preprocess import run_func_preprocessing
 
 # Configuration
 config = {

@@ -245,9 +245,9 @@ results = run_dwi_multishell_topup_preprocessing(
 **Pipeline**: MCFLIRT motion correction → TEDANA (multi-echo) or ICA-AROMA (single-echo) → ACompCor → Bandpass filtering → Smoothing
 
 ```python
-from neurovrai.preprocess.workflows.func_preprocess import run_functional_preprocessing
+from neurovrai.preprocess.workflows.func_preprocess import run_func_preprocessing
 
-results = run_functional_preprocessing(
+results = run_func_preprocessing(
     config=config,
     subject='sub-001',
     func_files=[Path('bold.nii.gz')],  # Single or multi-echo
@@ -315,16 +315,16 @@ run_vbm_analysis(
 White matter analysis using diffusion tensor metrics.
 
 ```python
-from neurovrai.analysis.tbss.prepare_tbss import prepare_tbss_data
-from neurovrai.analysis.tbss.run_tbss_stats import run_tbss_statistics
+from neurovrai.analysis.tbss.prepare_tbss import prepare_tbss_analysis
+from neurovrai.analysis.tbss.run_tbss_stats import run_tbss_statistical_analysis
 
-prepare_tbss_data(
+prepare_tbss_analysis(
     derivatives_dir=Path('/derivatives'),
     output_dir=Path('/analysis/tbss'),
     subjects=['sub-001', 'sub-002']
 )
 
-run_tbss_statistics(
+run_tbss_statistical_analysis(
     tbss_dir=Path('/analysis/tbss'),
     participants_file=Path('participants.csv'),
     n_permutations=5000
@@ -342,8 +342,8 @@ results = run_resting_state_analysis(
     func_file=Path('preprocessed_bold.nii.gz'),
     mask_file=Path('brain_mask.nii.gz'),
     output_dir=Path('/derivatives/sub-001/func'),
-    compute_reho=True,
-    compute_falff=True
+    compute_reho_map=True,
+    compute_falff_map=True
 )
 ```
 
@@ -352,9 +352,9 @@ results = run_resting_state_analysis(
 Group-level independent component analysis.
 
 ```python
-from neurovrai.analysis.func.melodic import run_melodic_group_analysis
+from neurovrai.analysis.func.melodic import run_melodic_group_ica
 
-run_melodic_group_analysis(
+run_melodic_group_ica(
     derivatives_dir=Path('/derivatives'),
     output_dir=Path('/analysis/melodic'),
     subjects=['sub-001', 'sub-002'],

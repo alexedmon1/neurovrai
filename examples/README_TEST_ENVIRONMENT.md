@@ -1,6 +1,6 @@
 # MRI Preprocessing Development & Testing Environment
 
-This directory contains the development testing environment for the `human-mri-preprocess` refactoring project.
+This directory contains the development testing environment for the `neurovrai` refactoring project.
 
 ## Purpose
 
@@ -77,8 +77,8 @@ After completing each phase, test with sub-0580101:
 
 **Phase 4 (DICOM Conversion)**:
 ```bash
-cd ~/sandbox/human-mri-preprocess
-mri-preprocess convert \
+cd ~/sandbox/neurovrai
+neurovrai convert \
   --dicom-dir /path/to/dev/test-data/sub-0580101/sourcedata/dicom \
   --output-dir /path/to/dev/test-data/sub-0580101/rawdata \
   --anonymize
@@ -86,7 +86,7 @@ mri-preprocess convert \
 
 **Phase 5 (Anatomical)**:
 ```bash
-mri-preprocess anat \
+neurovrai anat \
   --bids-dir /path/to/dev/test-data/sub-0580101/rawdata \
   --subject 0580101 \
   --output-dir /path/to/dev/outputs/phase05-anatomical
@@ -94,7 +94,7 @@ mri-preprocess anat \
 
 **Phase 6 (Diffusion)**:
 ```bash
-mri-preprocess dwi \
+neurovrai dwi \
   --bids-dir /path/to/dev/test-data/sub-0580101/rawdata \
   --subject 0580101 \
   --output-dir /path/to/dev/outputs/phase06-diffusion
@@ -102,7 +102,7 @@ mri-preprocess dwi \
 
 **Phase 7 (Functional - Multi-echo with TEDANA)**:
 ```bash
-mri-preprocess func \
+neurovrai func \
   --bids-dir /path/to/dev/test-data/sub-0580101/rawdata \
   --subject 0580101 \
   --output-dir /path/to/dev/outputs/phase07-functional
@@ -110,7 +110,7 @@ mri-preprocess func \
 
 **Full Pipeline Test**:
 ```bash
-mri-preprocess run \
+neurovrai run \
   --config /path/to/dev/configs/test_subject.yaml \
   --subject 0580101 \
   --steps all

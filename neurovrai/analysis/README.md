@@ -408,12 +408,12 @@ White matter analysis using DTI metrics projected onto a skeleton.
 ### Python API
 
 ```python
-from neurovrai.analysis.tbss.prepare_tbss import prepare_tbss_data
-from neurovrai.analysis.tbss.run_tbss_stats import run_tbss_statistics
+from neurovrai.analysis.tbss.prepare_tbss import prepare_tbss_analysis
+from neurovrai.analysis.tbss.run_tbss_stats import run_tbss_statistical_analysis
 from pathlib import Path
 
 # Stage 1: Prepare TBSS data
-prepare_tbss_data(
+prepare_tbss_analysis(
     derivatives_dir=Path('/derivatives'),
     output_dir=Path('/analysis/tbss'),
     subjects=['sub-001', 'sub-002'],  # or None for auto-discovery
@@ -421,7 +421,7 @@ prepare_tbss_data(
 )
 
 # Stage 2: Run statistics
-run_tbss_statistics(
+run_tbss_statistical_analysis(
     tbss_dir=Path('/analysis/tbss'),
     design_dir=Path('/data/designs/tbss'),  # Pre-generated designs
     n_permutations=5000
@@ -476,8 +476,8 @@ Compute regional homogeneity and fractional amplitude of low-frequency fluctuati
 
 ```python
 from neurovrai.analysis.func.resting_workflow import run_resting_state_analysis
-from neurovrai.analysis.func.reho import compute_reho
-from neurovrai.analysis.func.falff import compute_falff
+from neurovrai.analysis.func.reho import compute_reho_map
+from neurovrai.analysis.func.falff import compute_falff_map
 from pathlib import Path
 
 # Combined workflow
@@ -485,20 +485,20 @@ results = run_resting_state_analysis(
     func_file=Path('preprocessed_bold.nii.gz'),
     mask_file=Path('brain_mask.nii.gz'),
     output_dir=Path('/derivatives/sub-001/func'),
-    compute_reho=True,
-    compute_falff=True,
+    compute_reho_map=True,
+    compute_falff_map=True,
     neighborhood=27,        # ReHo: 7, 19, or 27 voxels
     freq_range=(0.01, 0.08) # fALFF frequency band
 )
 
 # Individual metrics
-reho_map = compute_reho(
+reho_map = compute_reho_map(
     func_file=Path('preprocessed_bold.nii.gz'),
     mask_file=Path('brain_mask.nii.gz'),
     neighborhood=27
 )
 
-falff_map = compute_falff(
+falff_map = compute_falff_map(
     func_file=Path('preprocessed_bold.nii.gz'),
     mask_file=Path('brain_mask.nii.gz'),
     tr=2.0,
@@ -532,12 +532,12 @@ Group-level independent component analysis for resting-state networks.
 ### Python API
 
 ```python
-from neurovrai.analysis.func.melodic import run_melodic_group_analysis
+from neurovrai.analysis.func.melodic import run_melodic_group_ica
 from neurovrai.analysis.func.dual_regression import run_dual_regression
 from pathlib import Path
 
 # Group ICA
-run_melodic_group_analysis(
+run_melodic_group_ica(
     derivatives_dir=Path('/derivatives'),
     output_dir=Path('/analysis/melodic'),
     subjects=['sub-001', 'sub-002', 'sub-003'],

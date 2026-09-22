@@ -270,8 +270,8 @@ structural_connectivity:
    - See `docs/NEUROVRAI_ARCHITECTURE.md` for detailed plan
 
 **Files Modified**:
-- `mri_preprocess/workflows/anat_preprocess.py` - Fixed QC path (line 672)
-- `mri_preprocess/workflows/dwi_preprocess.py` - Fixed QC param, added BEDPOSTX config reading
+- `neurovrai/preprocess/workflows/t1w_preprocess.py` - Fixed QC path (line 672)
+- `neurovrai/preprocess/workflows/dwi_preprocess.py` - Fixed QC param, added BEDPOSTX config reading
 - `run_simple_pipeline.py` - Fixed file finding with rglob
 - `create_config.py` - Added BEDPOSTX config section
 - `configs/config.yaml` - Added BEDPOSTX defaults
@@ -324,10 +324,10 @@ structural_connectivity:
 **Files Modified**:
 - `config.yaml` - Added all new config sections
 - `create_config.py` - Auto-populates all defaults
-- `mri_preprocess/workflows/dwi_preprocess.py` - Reads BET frac from config
-- `mri_preprocess/workflows/func_preprocess.py` - Reads BET frac from config (2 locations)
-- `mri_preprocess/workflows/asl_preprocess.py` - Reads BET frac from config
-- `mri_preprocess/workflows/anat_preprocess.py` - Reads N4 and Atropos params from config
+- `neurovrai/preprocess/workflows/dwi_preprocess.py` - Reads BET frac from config
+- `neurovrai/preprocess/workflows/func_preprocess.py` - Reads BET frac from config (2 locations)
+- `neurovrai/preprocess/workflows/asl_preprocess.py` - Reads BET frac from config
+- `neurovrai/preprocess/workflows/t1w_preprocess.py` - Reads N4 and Atropos params from config
 - `README.md` - Updated Quick Start, added Project Structure
 - `QUICKSTART.md` - Updated with config location
 - `docs/FUTURE_ENHANCEMENTS.md` - Created for Option 2 parameters
