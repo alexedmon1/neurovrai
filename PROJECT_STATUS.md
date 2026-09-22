@@ -10,7 +10,6 @@ Production-ready MRI preprocessing pipeline for anatomical, diffusion, functiona
 - `neurovrai.analysis` ✅ (complete - VBM, TBSS, ReHo/fALFF, MELODIC)
 - `neurovrai.connectome` ✅ (complete - functional & structural connectivity, graph metrics, NBS)
 
-See `docs/NEUROVRAI_ARCHITECTURE.md` for complete roadmap.
 
 ---
 
@@ -267,7 +266,6 @@ structural_connectivity:
    - Current `tractography.py` marked for migration to `neurovrai.connectome`
    - BEDPOSTX stays in preprocessing (orientation estimation)
    - Tractography moves to connectome (streamline generation with anatomical constraints)
-   - See `docs/NEUROVRAI_ARCHITECTURE.md` for detailed plan
 
 **Files Modified**:
 - `neurovrai/preprocess/workflows/t1w_preprocess.py` - Fixed QC path (line 672)
@@ -645,17 +643,13 @@ neurovrai/
 - `README.md` - Installation, usage, configuration
 - `docs/configuration.md` - Config file reference
 - `docs/workflows.md` - Workflow details
-- `docs/DIRECTORY_STRUCTURE.md` - Output organization
+- `CLAUDE.md` and `README.md` - Output organization
 
 ### Developer Documentation
 - `CLAUDE.md` - AI assistant context
-- `docs/status/IMPLEMENTATION_STATUS.md` - Development tracking
 - `docs/DWI_PROCESSING_GUIDE.md` - DWI pipeline details
-- `PIPELINE_VERIFICATION_REPORT.md` - Single/multi-shell verification
 
 ### Testing & Validation
-- `TESTING_RESULTS.md` - Test outcomes
-- `OVERNIGHT_RUN_STATUS.md` - Latest overnight run results
 
 ---
 

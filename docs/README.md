@@ -14,7 +14,6 @@
 - [configuration.md](configuration.md) - Configuration file reference
 - [workflows.md](workflows.md) - Preprocessing workflow details
 - [cli.md](cli.md) - Command-line interface reference
-- [DIRECTORY_STRUCTURE.md](DIRECTORY_STRUCTURE.md) - Output directory organization
 
 ### Processing Guides
 - [DWI_PROCESSING_GUIDE.md](DWI_PROCESSING_GUIDE.md) - Diffusion preprocessing guide
@@ -28,7 +27,6 @@
 
 ### Reference
 - [DEPENDENCIES.md](DEPENDENCIES.md) - Package dependencies
-- [NEUROVRAI_ARCHITECTURE.md](NEUROVRAI_ARCHITECTURE.md) - System architecture
 - [FUTURE_ENHANCEMENTS.md](FUTURE_ENHANCEMENTS.md) - Planned features
 
 ## Module Documentation
@@ -57,5 +55,4 @@ Start with:
 
 Technical implementation:
 1. `implementation/` - Feature implementation details
-2. `NEUROVRAI_ARCHITECTURE.md` - System architecture
 3. `../CLAUDE.md` - AI-assisted development guidelines

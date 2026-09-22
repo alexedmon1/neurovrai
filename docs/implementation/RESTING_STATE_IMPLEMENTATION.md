@@ -98,7 +98,6 @@ neurovrai/
     └── workflow.py                  # Shared workflow utilities
 
 test_rest_preprocessing.py           # Test script
-RESTING_STATE_PLAN.md               # Planning document
 RESTING_STATE_IMPLEMENTATION.md     # This file
 ```
 
