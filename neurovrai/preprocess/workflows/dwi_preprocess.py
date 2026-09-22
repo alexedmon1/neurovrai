@@ -36,7 +36,10 @@ from neurovrai.utils.workflow import (
 )
 from neurovrai.utils.transforms import TransformRegistry, create_transform_registry
 from neurovrai.preprocess.utils.bids import get_derivatives_dir
-from neurovrai.preprocess.utils.topup_helper import create_topup_files_for_multishell
+from neurovrai.preprocess.utils.topup_helper import (
+    create_topup_files_for_multishell,
+    ensure_eddy_acqparams,
+)
 from neurovrai.preprocess.utils.dwi_normalization import (
     normalize_dwi_to_fmrib58,
     apply_warp_to_metrics
@@ -237,9 +240,11 @@ def create_eddy_node(
     )
 
     # Set parameters from config
-    if 'acqp_file' in eddy_config:
+    # Truthiness, not presence: configs/default.yaml ships both keys as null, so
+    # `in eddy_config` was true with nothing behind it and eddy got in_acqp=None.
+    if eddy_config.get('acqp_file'):
         eddy.inputs.in_acqp = eddy_config['acqp_file']
-    if 'index_file' in eddy_config:
+    if eddy_config.get('index_file'):
         eddy.inputs.in_index = eddy_config['index_file']
 
     eddy.inputs.method = eddy_config.get('method', 'jac')
@@ -685,6 +690,12 @@ def run_dwi_multishell_topup_preprocessing(
         logger.info("Skipping TOPUP - running eddy without distortion correction")
         topup_fieldcoef = None
         topup_movpar = None
+
+        # eddy still needs --acqp and --index. Only the TOPUP branch above ever
+        # wrote them, so this path used to hand eddy a config with neither set.
+        acqparams_file, index_file = ensure_eddy_acqparams(config, merged_dwi, work_dir)
+        logger.info(f"  Generated: {acqparams_file}")
+        logger.info(f"  Generated: {index_file}")
 
     # Step N: Run eddy correction
     step_num = 7 if use_topup else 3

@@ -85,7 +85,7 @@ Update `CLAUDE.md` and example configs to include `paths.logs` as a required fie
 
 ---
 
-## Issue 3: Eddy Without TOPUP - Missing acqparams.txt ❌ NEEDS FIX
+## Issue 3: Eddy Without TOPUP - Missing acqparams.txt ✅ FIXED 2026-09-22
 
 ### Problem
 When running eddy correction **without** TOPUP (no reverse phase-encoding images), the workflow fails:

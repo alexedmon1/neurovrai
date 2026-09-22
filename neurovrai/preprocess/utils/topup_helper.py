@@ -325,3 +325,64 @@ if __name__ == '__main__':
         print("  Edit this script to set your study directory and DWI files")
         print("  Or import functions in your own script:")
         print("    from neurovrai.preprocess.utils.topup_helper import create_topup_files_for_multishell")
+
+
+def ensure_eddy_acqparams(
+    config: dict,
+    dwi_file: Path,
+    work_dir: Path
+) -> Tuple[Path, Path]:
+    """Write acqparams.txt and index.txt for an eddy run without TOPUP.
+
+    eddy requires --acqp and --index whether or not TOPUP ran, but only the
+    TOPUP path ever produced them: the no-TOPUP branch set neither, so
+    `create_eddy_node` left both flags off the command line and eddy failed.
+    Single-shell preprocessing had always written its own, and neurofaune writes
+    them unconditionally; this is the multi-shell path catching up.
+
+    One acquisition, so acqparams.txt is a single line and every volume in
+    index.txt maps to it. Direction and readout time come from the study config;
+    the defaults match `run_dwi_singleshell_preprocessing`'s signature. The
+    readout time only scales the off-resonance field, and with no fieldmap to
+    apply there is nothing for it to scale -- but it is recorded rather than
+    invented silently, because a wrong value that never mattered here would
+    matter if these files were reused with TOPUP.
+
+    Returns (acqparams_file, index_file), and writes both paths into
+    `config['diffusion']['eddy']`, which is where `create_eddy_node` reads them.
+    """
+    import nibabel as nib
+
+    diffusion = config.get('diffusion', {})
+    eddy_config = diffusion.get('eddy', {}) or {}
+    topup_config = diffusion.get('topup', {}) or {}
+
+    pe_direction = (
+        eddy_config.get('phase_encoding_direction')
+        or topup_config.get('pe_direction')
+        or 'AP'
+    )
+    readout_time = (
+        eddy_config.get('readout_time')
+        or topup_config.get('readout_time')
+        or 0.05
+    )
+
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    acqparams_file = create_acqparams_file(
+        pe_directions=[pe_direction],
+        readout_times=[float(readout_time)],
+        output_file=work_dir / 'acqparams.txt'
+    )
+
+    n_volumes = nib.load(str(dwi_file)).shape[3]
+    index_file = work_dir / 'index.txt'
+    index_file.write_text(' '.join(['1'] * n_volumes) + '\n')
+
+    config.setdefault('diffusion', {}).setdefault('eddy', {})
+    config['diffusion']['eddy']['acqp_file'] = str(acqparams_file)
+    config['diffusion']['eddy']['index_file'] = str(index_file)
+
+    return acqparams_file, index_file
