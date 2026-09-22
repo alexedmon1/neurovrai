@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from neurovrai.config import load_config
-from neurovrai.config_generator import auto_generate_config
+from neurovrai.preprocess.config_generator import auto_generate_config
 from neurovrai.preprocess.dicom.bids_converter import convert_and_organize
 from neurovrai.preprocess.workflows.t1w_preprocess import run_t1w_preprocessing
 from neurovrai.preprocess.workflows.dwi_preprocess import run_dwi_preprocessing
