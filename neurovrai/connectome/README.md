@@ -314,6 +314,27 @@ t_matrix, p_matrix = compute_group_difference(
 )
 ```
 
+### Statistical Power (Minimum Detectable Effect)
+
+`compute_group_difference` also writes, next to `{prefix}_t_matrix.npy`:
+
+- `{prefix}_se_matrix.npy`: standard error of each edge's difference
+  (group1 - group2), from the same test as the t-statistics: pooled (Student)
+  SE with df = n1 + n2 - 2 for independent groups, SD of the paired differences
+  / sqrt(n) with df = n - 1 for `paired=True`.
+- `{prefix}_mde_matrix.npy`: the minimum detectable difference per edge, at 80%
+  power and two-sided alpha 0.05, in the connectivity units. The alpha is
+  nominal: the FDR correction applied to the p-values is not applied here, so
+  the corrected test's MDE is larger. NaN on the diagonal and where an edge has
+  no variance.
+
+`{prefix}_summary.json` records `mde_power`, `mde_alpha`, `mde_df`, `mde_test`,
+`mde_scope`, `mde_note` (empty: computed) and `mde_percent_note` (no
+percentage, because neither group is designated the reference).
+
+The NBS has no MDE: `nbs_components.json` and the returned dictionary carry
+`mde_note: "not computed: network-based statistic component"`.
+
 ---
 
 ## Visualization

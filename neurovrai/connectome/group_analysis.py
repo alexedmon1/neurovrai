@@ -41,6 +41,15 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from neurovrai.analysis.stats.power import (
+    MDE_ALPHA,
+    MDE_POWER,
+    NBS_NOTE,
+    independent_se_df,
+    minimum_detectable_effect,
+    paired_se_df,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -576,6 +585,17 @@ def compute_group_difference(
             - p_matrix_fdr: FDR-corrected p-values
             - significant_edges: Binary matrix of significant edges
             - n_significant: Number of significant edges
+            - se_matrix: Standard error of each edge's difference
+            - mde_matrix: Minimum detectable difference per edge (80% power,
+              two-sided alpha 0.05, nominal: no FDR adjustment), in the
+              connectivity matrix's units. NaN on the diagonal and where an
+              edge has no variance.
+            - mde_df: Degrees of freedom of the edge tests
+
+    The SE is the one behind the t-test actually run: the pooled
+    (Student) SE with n1 + n2 - 2 df for independent groups, which is
+    scipy.stats.ttest_ind's default, and the SD of the paired differences
+    over sqrt(n) with n - 1 df for a paired test.
     """
     n_subjects1 = group1_matrices.shape[0]
     n_subjects2 = group2_matrices.shape[0]
@@ -621,6 +641,19 @@ def compute_group_difference(
             p_matrix[i, j] = p_val
             p_matrix[j, i] = p_val
 
+    # Standard error and minimum detectable effect per edge, from the same
+    # test as the t-statistics above
+    if paired:
+        se_matrix, df_matrix = paired_se_df(group1_matrices, group2_matrices, axis=0)
+    else:
+        se_matrix, df_matrix = independent_se_df(
+            group1_matrices, group2_matrices, equal_var=True, axis=0
+        )
+    se_matrix = np.where(se_matrix > 0, se_matrix, np.nan)
+    np.fill_diagonal(se_matrix, np.nan)
+    mde_matrix = minimum_detectable_effect(se_matrix, df_matrix)
+    mde_df = float(df_matrix.flat[0])
+
     # FDR correction
     logger.info("Applying FDR correction...")
     upper_triangle_indices = np.triu_indices(n_rois, k=1)
@@ -658,7 +691,12 @@ def compute_group_difference(
         'n_significant': int(n_significant),
         'n_subjects_group1': n_subjects1,
         'n_subjects_group2': n_subjects2,
-        'alpha': alpha
+        'alpha': alpha,
+        'se_matrix': se_matrix,
+        'mde_matrix': mde_matrix,
+        'mde_df': mde_df,
+        'mde_power': MDE_POWER,
+        'mde_alpha': MDE_ALPHA,
     }
 
     # Save outputs if directory provided
@@ -676,6 +714,8 @@ def compute_group_difference(
         np.save(output_dir / f"{output_prefix}_p_matrix.npy", p_matrix)
         np.save(output_dir / f"{output_prefix}_p_matrix_fdr.npy", p_matrix_fdr)
         np.save(output_dir / f"{output_prefix}_significant_edges.npy", significant_edges)
+        np.save(output_dir / f"{output_prefix}_se_matrix.npy", se_matrix)
+        np.save(output_dir / f"{output_prefix}_mde_matrix.npy", mde_matrix)
 
         # Save summary
         summary = {
@@ -690,7 +730,25 @@ def compute_group_difference(
             'proportion_significant': float(n_significant / len(p_values_flat)),
             'group1_mean_connectivity': float(group1_mean[upper_triangle_indices].mean()),
             'group2_mean_connectivity': float(group2_mean[upper_triangle_indices].mean()),
-            'mean_difference': float(difference_matrix[upper_triangle_indices].mean())
+            'mean_difference': float(difference_matrix[upper_triangle_indices].mean()),
+            'mde_test': (
+                'paired t-test: SE = SD of differences / sqrt(n), df = n - 1'
+                if paired else
+                'Student two-sample t-test (pooled variance): df = n1 + n2 - 2'
+            ),
+            'mde_df': mde_df,
+            'mde_power': MDE_POWER,
+            'mde_alpha': MDE_ALPHA,
+            'mde_note': '',
+            'mde_scope': (
+                f'per edge, in {output_prefix}_se_matrix.npy and '
+                f'{output_prefix}_mde_matrix.npy, in the connectivity units; '
+                'alpha is nominal (no FDR adjustment); NaN on the diagonal '
+                'and where an edge has no variance'
+            ),
+            'mde_percent_note': (
+                'not computed: neither group is designated the reference'
+            ),
         }
 
         summary_file = output_dir / f"{output_prefix}_summary.json"
@@ -846,7 +904,8 @@ def compute_network_based_statistic(
             'component_pvalues': [],
             'max_component_null': [],
             'threshold': threshold,
-            'n_permutations': n_permutations
+            'n_permutations': n_permutations,
+            'mde_note': NBS_NOTE,
         }
 
     max_observed_size = max(observed_sizes) if observed_sizes else 0
@@ -912,7 +971,8 @@ def compute_network_based_statistic(
         'threshold': threshold,
         'n_permutations': n_permutations,
         'alpha': alpha,
-        'n_significant': n_significant
+        'n_significant': n_significant,
+        'mde_note': NBS_NOTE,
     }
 
     # Save outputs if directory provided
@@ -934,7 +994,8 @@ def compute_network_based_statistic(
             'threshold': float(threshold),
             'n_permutations': int(n_permutations),
             'alpha': float(alpha),
-            'n_significant': int(n_significant)
+            'n_significant': int(n_significant),
+            'mde_note': NBS_NOTE,
         }
 
         with open(output_dir / "nbs_components.json", 'w') as f:

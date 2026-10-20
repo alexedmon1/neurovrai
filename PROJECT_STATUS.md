@@ -1,5 +1,5 @@
 # MRI Preprocessing Pipeline - Project Status
-**Last Updated**: 2026-01-20
+**Last Updated**: 2026-10-20
 
 ## 🎯 Project Overview
 
@@ -13,7 +13,34 @@ Production-ready MRI preprocessing pipeline for anatomical, diffusion, functiona
 
 ---
 
-## 📝 Latest Updates (2026-01-20)
+## 📝 Latest Updates (2026-10-20)
+
+### Minimum Detectable Effect on Tabular Tests ✅
+**Goal**: Every tabular inferential result says what difference its design could
+have detected, so a null reads against a number rather than only a p-value.
+
+**Completed**:
+1. **`neurovrai/analysis/stats/power.py`**: MDE at 80% power, two-sided alpha 0.05
+   (nominal, no multiple-comparison correction): `(t.ppf(1-alpha/2, df) + t.ppf(power, df)) * se`,
+   normal quantiles when df is missing or infinite. SE/df helpers for Student, Welch
+   and paired t-tests; `mde_fields()` returns the shared columns `se`, `df`, `mde`,
+   `mde_percent`, `mde_power`, `mde_alpha`, `mde_note` (same names as neurofaune and
+   source-analytics).
+2. **`scripts/wmh_group_comparison.py`**: `wmh_group_comparison.csv` gains
+   `mean_difference`, `t_stat` and the MDE columns for the t-test it reports;
+   `mde_percent` is relative to the good-control mean.
+3. **`connectome/group_analysis.py`**: `compute_group_difference` writes
+   `{prefix}_se_matrix.npy` and `{prefix}_mde_matrix.npy` and records the MDE settings in
+   `{prefix}_summary.json`; the NBS records `mde_note: "not computed: network-based
+   statistic component"`.
+4. **Voxelwise maps** (randomise/TFCE, nilearn GLM): no MDE, documented as
+   "not computed: voxelwise map" in `docs/GLM_USAGE.md`.
+
+**Tests**: `tests/unit/test_power.py` (reference values shared across the three tools).
+
+---
+
+## 📝 Updates (2026-01-20)
 
 ### Study Initialization System ✅
 **Goal**: Implement comprehensive study setup workflow similar to neurofaune, adapted for human MRI data

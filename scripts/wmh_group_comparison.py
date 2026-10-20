@@ -4,6 +4,20 @@ WMH Group Comparison Script
 
 Compares WMH metrics between groups defined in gludata.csv.
 mriglu: 1 = controlled gestational diabetes, 2 = uncontrolled gestational diabetes
+
+Each metric row also carries the minimum detectable effect of the t-test it
+reports (neurovrai.analysis.stats.power): the difference in the metric's own
+units that the design detects with 80% power at two-sided alpha 0.05.
+
+- The estimate is mean_difference = poor_control_mean - good_control_mean, the
+  direction cohens_d already uses, and `se`, `df` and `t_stat` belong to that
+  same t-test (scipy's ttest_ind default: Student, pooled variance,
+  df = n1 + n2 - 2), so the MDE describes the test whose ttest_p is reported.
+  The Mann-Whitney p has no MDE of its own.
+- mde_percent is relative to the good-control mean (mriglu=2 as this script
+  labels it): the group subtracted, i.e. the comparison baseline. Blank when
+  that mean is zero.
+- alpha is nominal: four metrics are tested and no correction is applied.
 """
 
 import pandas as pd
@@ -13,6 +27,8 @@ from scipy import stats
 import json
 import argparse
 import logging
+
+from neurovrai.analysis.stats.power import independent_se_df, mde_fields
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -117,6 +133,11 @@ def compare_groups(wmh_df: pd.DataFrame, glu_df: pd.DataFrame, output_dir: Path)
         # Also compute t-test for reference
         t_stat, p_t = stats.ttest_ind(group1, group2)
 
+        # Minimum detectable effect of that same t-test (pooled SE, n1+n2-2 df),
+        # as a percentage of the good-control (baseline) mean
+        se, df = independent_se_df(group1.to_numpy(), group2.to_numpy(), equal_var=True)
+        power_fields = mde_fields(se, df, reference_mean=mean2)
+
         # Effect size (Cohen's d)
         pooled_std = np.sqrt(((len(group1)-1)*std1**2 + (len(group2)-1)*std2**2) /
                             (len(group1) + len(group2) - 2))
@@ -128,6 +149,10 @@ def compare_groups(wmh_df: pd.DataFrame, glu_df: pd.DataFrame, output_dir: Path)
         print(f"  Mann-Whitney U p-value: {p_mw:.4f}")
         print(f"  T-test p-value: {p_t:.4f}")
         print(f"  Cohen's d: {cohens_d:.3f}")
+        if power_fields['mde_note']:
+            print(f"  MDE: {power_fields['mde_note']}")
+        else:
+            print(f"  MDE (80% power, alpha 0.05): {power_fields['mde']:.2f}")
 
         results.append({
             'metric': metric,
@@ -140,7 +165,10 @@ def compare_groups(wmh_df: pd.DataFrame, glu_df: pd.DataFrame, output_dir: Path)
             'good_control_n': len(group2),
             'mannwhitney_p': p_mw,
             'ttest_p': p_t,
-            'cohens_d': cohens_d
+            'cohens_d': cohens_d,
+            'mean_difference': mean1 - mean2,
+            't_stat': t_stat,
+            **power_fields,
         })
 
     # Save results
