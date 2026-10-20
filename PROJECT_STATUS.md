@@ -16,6 +16,11 @@ Production-ready MRI preprocessing pipeline for anatomical, diffusion, functiona
 ## 📝 Latest Updates (2026-10-20)
 
 ### Minimum Detectable Effect on Tabular Tests ✅
+**Known issues found doing this, not yet fixed**: see
+`docs/issues/KNOWN_ISSUES_2026-10-20.md` (TBSS GLM path calls undefined functions,
+undeclared `statsmodels`, wrong connectome README examples, a colliding SE filename,
+the WMH script's group coding).
+
 **Goal**: Every tabular inferential result says what difference its design could
 have detected, so a null reads against a number rather than only a p-value.
 
