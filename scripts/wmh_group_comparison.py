@@ -136,11 +136,11 @@ def compare_groups(wmh_df: pd.DataFrame, glu_df: pd.DataFrame, output_dir: Path)
         # Minimum detectable effect of that same t-test (pooled SE, n1+n2-2 df),
         # as a percentage of the good-control (baseline) mean
         se, df = independent_se_df(group1.to_numpy(), group2.to_numpy(), equal_var=True)
-        power_fields = mde_fields(se, df, reference_mean=mean2)
-
-        # Effect size (Cohen's d)
         pooled_std = np.sqrt(((len(group1)-1)*std1**2 + (len(group2)-1)*std2**2) /
                             (len(group1) + len(group2) - 2))
+        power_fields = mde_fields(se, df, reference_mean=mean2, sd=pooled_std)
+
+        # Effect size (Cohen's d)
         cohens_d = (mean1 - mean2) / pooled_std if pooled_std > 0 else 0
 
         print(f"\n{metric_labels[metric]}:")

@@ -43,7 +43,7 @@ MDE_ALPHA = 0.05
 VOXELWISE_NOTE = "not computed: voxelwise map"
 NBS_NOTE = "not computed: network-based statistic component"
 
-# A reference mean this close to zero makes a percentage meaningless.
+# With no SD to judge by, only a reference mean this close to zero is refused a percentage.
 _NEAR_ZERO = 1e-12
 
 ArrayLike = float | np.ndarray
@@ -131,13 +131,23 @@ def paired_se_df(a: np.ndarray, b: np.ndarray, axis: int = 0) -> tuple[ArrayLike
     return float(se), df
 
 
-def mde_percent(mde: ArrayLike, reference_mean: ArrayLike | None) -> ArrayLike:
-    """100 * mde / |reference mean|; NaN with no reference or a mean near zero."""
+def mde_percent(
+    mde: ArrayLike, reference_mean: ArrayLike | None, sd: ArrayLike | None = None
+) -> ArrayLike:
+    """100 * mde / |reference mean|; NaN with no reference or a mean near zero.
+
+    "Near zero" is the rule shared with neurofaune and source-analytics: the
+    reference mean lies within one residual (pooled) SD of zero, |mean| < sd.
+    For change scores, centred measures or log ratios a percent of such a mean
+    is a large number that means nothing. Without an SD only an exact zero is
+    refused.
+    """
     if reference_mean is None:
         return np.nan
     ref = np.abs(np.asarray(reference_mean, dtype=float))
+    floor = _NEAR_ZERO if sd is None else np.maximum(np.abs(np.asarray(sd, dtype=float)), _NEAR_ZERO)
     with np.errstate(divide="ignore", invalid="ignore"):
-        pct = np.where(np.isfinite(ref) & (ref > _NEAR_ZERO), 100.0 * np.asarray(mde) / ref, np.nan)
+        pct = np.where(np.isfinite(ref) & (ref >= floor), 100.0 * np.asarray(mde) / ref, np.nan)
     return pct if pct.ndim else float(pct)
 
 
@@ -147,6 +157,7 @@ def mde_fields(
     reference_mean: float | None = None,
     alpha: float = MDE_ALPHA,
     power: float = MDE_POWER,
+    sd: float | None = None,
 ) -> dict[str, object]:
     """
     The contract's columns for one tabular row.
@@ -168,7 +179,7 @@ def mde_fields(
         pct = np.nan
     else:
         mde = minimum_detectable_effect(se, df, alpha=alpha, power=power)
-        pct = mde_percent(mde, reference_mean)
+        pct = mde_percent(mde, reference_mean, sd)
 
     return {
         "se": np.nan if se is None else float(se),

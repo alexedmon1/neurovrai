@@ -188,7 +188,10 @@ When using `--method both`, outputs are organized as:
 Tabular tests in neurovrai report the minimum detectable effect (MDE): the
 difference the design detects with 80% power at two-sided alpha 0.05, in the
 estimate's units (`neurovrai/analysis/stats/power.py`; columns `se`, `df`,
-`mde`, `mde_percent`, `mde_power`, `mde_alpha`, `mde_note`).
+`mde`, `mde_percent`, `mde_power`, `mde_alpha`, `mde_note`). `mde_percent` is
+the MDE as a percent of the reference group's mean, left blank when that mean
+lies within one pooled SD of zero, the rule neurofaune and source-analytics
+share: a percent of a near-zero mean means nothing.
 
 The voxelwise outputs above carry no MDE: **not computed: voxelwise map.**
 randomise/TFCE and nilearn second-level maps are corrected for the whole map by

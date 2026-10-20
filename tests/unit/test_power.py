@@ -88,6 +88,14 @@ def test_mde_percent_blank_without_a_usable_reference():
     assert np.isnan(mde_percent(2.0, 0.0))
 
 
+def test_mde_percent_is_blank_within_one_sd_of_zero():
+    """The rule shared with neurofaune and source-analytics: |mean| < sd."""
+    assert np.isnan(mde_percent(2.0, 4.9, sd=5.0))
+    assert mde_percent(2.0, 5.0, sd=5.0) == pytest.approx(40.0)
+    assert mde_percent(2.0, -5.1, sd=5.0) == pytest.approx(2.0 / 5.1 * 100)
+    assert np.isnan(mde_fields(1.0, 26, reference_mean=0.5, sd=1.0)["mde_percent"])
+
+
 def test_mde_fields_carry_the_contract():
     row = mde_fields(1.0, 10, reference_mean=31.07197)
     assert set(row) == {"se", "df", "mde", "mde_percent", "mde_power", "mde_alpha", "mde_note"}
