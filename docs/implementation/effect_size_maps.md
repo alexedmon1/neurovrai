@@ -32,6 +32,22 @@ For **one-sample or paired t-tests**:
 d = t / sqrt(n)
 ```
 
+For **an FSL design (`design.mat` and `design.con`)**, any GLM, each contrast c on its own:
+```
+d = t * sqrt(c' (X'X)^-1 c)
+```
+This is the contrast's estimate over the residual SD. It reduces to the two formulas above
+for one group (X = 1, c = 1) and for two groups in cell-means coding (c = [1, -1]). With
+covariates it is the adjusted difference over the residual SD. The contrast's scale is
+d's scale: [1, -1] compares the groups, [0.5, -0.5] gives half of that. Hedges' g uses the
+residual df, N - rank(X). `design.con` is read from beside `design.mat` (or
+`--contrast-file`); a design other than one group is refused without it.
+
+Until 2026-11-13 a `.mat` was read as one-sample whatever it held (d = t / sqrt(N)), which
+halves d for two equal groups, and the `--design-file` route failed on randomise's file
+names. Maps made from a `.mat` before then should be remade. Tested in
+`tests/unit/test_effect_size.py` against d computed from simulated data.
+
 ## Usage
 
 ### Basic Command Line Usage
@@ -41,6 +57,12 @@ d = t / sqrt(n)
 python scripts/analysis/calculate_effect_sizes.py \
     --randomise-dir results/tbss_randomise \
     --design-file design.csv \
+    --output-dir results/effect_sizes
+
+# From randomise's own design (design.con beside design.mat): d per contrast, any GLM
+python scripts/analysis/calculate_effect_sizes.py \
+    --randomise-dir results/tbss_randomise \
+    --design-file results/tbss_randomise/design.mat \
     --output-dir results/effect_sizes
 
 # Specify sample sizes manually

@@ -12,17 +12,19 @@ The Cohen's d effect size calculation implementation (`neurovrai/analysis/stats/
 
 1. **Basic Functionality**
    - [ ] Test with actual randomise t-statistic files
-   - [ ] Verify Cohen's d conversion formula accuracy
+   - [x] Verify Cohen's d conversion formula accuracy (2026-11-13, simulated data)
    - [ ] Check output file generation
 
 2. **Different Design Types**
-   - [ ] Two-sample design (most common)
-   - [ ] One-sample design
-   - [ ] Paired design (if applicable)
+   - [x] Two-sample design (most common)
+   - [x] One-sample design
+   - [x] Paired design (if applicable): given as --design-type paired; a paired design.mat
+         gives d in within-subject residual SDs, scaled by its contrast
+   - [x] Any GLM from design.mat + design.con, covariates included
 
 3. **Edge Cases**
-   - [ ] Small sample sizes (n<20)
-   - [ ] Unequal group sizes
+   - [x] Small sample sizes (n<20)
+   - [x] Unequal group sizes
    - [ ] Missing corrected p-value files
 
 4. **Integration Testing**
@@ -60,7 +62,11 @@ python scripts/analysis/calculate_effect_sizes.py \
 - Assumes randomise was run with TFCE
 - May need adjustment for different FSL versions
 
-**STATUS**: Awaiting test data
+**STATUS** (2026-11-13): the formulas and the `.mat` route are tested against d computed
+from simulated data (`tests/unit/test_effect_size.py`); that found a `.mat` read as
+one-sample whatever it held (d halved for two equal groups) and a `--design-file` route
+that could not read randomise's file names, both fixed. Still to do: a run on real
+randomise output (the items left unticked).
 
 ---
 

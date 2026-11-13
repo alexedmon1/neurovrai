@@ -99,7 +99,8 @@ def main():
     design_group.add_argument(
         '--design-file',
         type=Path,
-        help='Design matrix file (.mat or .csv) to extract sample sizes'
+        help='Design matrix file (.mat or .csv). A .mat gives d for each contrast from '
+             'the design itself, with design.con beside it or --contrast-file'
     )
     design_group.add_argument(
         '--n1',
@@ -107,6 +108,11 @@ def main():
         help='Sample size for group 1 (or total N for one-sample)'
     )
 
+    parser.add_argument(
+        '--contrast-file',
+        type=Path,
+        help='design.con for a .mat design (default: the .con beside the .mat)'
+    )
     parser.add_argument(
         '--n2',
         type=int,
@@ -196,7 +202,8 @@ def main():
                 randomise_dir=args.randomise_dir,
                 design_file=args.design_file,
                 output_dir=args.output_dir,
-                contrast_names=contrast_names
+                contrast_names=contrast_names,
+                contrast_file=args.contrast_file
             )
 
         elif args.n1 is not None:

@@ -9,6 +9,8 @@ measure of effect magnitude that is independent of sample size.
 Key features:
 - Convert t-statistics to Cohen's d
 - Support for different design types (one-sample, two-sample, paired)
+- Any GLM given as an FSL design.mat and design.con: d = t * sqrt(c'(X'X)^-1 c)
+  for each contrast, the contrast's estimate over the residual SD
 - Generate both uncorrected and thresholded effect size maps
 - Calculate confidence intervals for effect sizes
 - Create publication-ready visualizations
@@ -16,6 +18,7 @@ Key features:
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
 
@@ -87,7 +90,54 @@ def t_to_cohens_d(
     return d
 
 
-def hedges_g(d: np.ndarray, n1: int, n2: Optional[int] = None) -> np.ndarray:
+def read_fsl_vest(path: Path) -> np.ndarray:
+    """Read an FSL VEST matrix (design.mat, design.con): the rows after /Matrix."""
+    rows = []
+    in_matrix = False
+    for line in Path(path).read_text().splitlines():
+        if line.strip().startswith('/Matrix'):
+            in_matrix = True
+        elif in_matrix and line.strip():
+            rows.append([float(v) for v in line.split()])
+    if not rows:
+        raise EffectSizeError(f"No /Matrix rows in {path}")
+    return np.array(rows, ndmin=2)
+
+
+def contrast_variance_factors(design: np.ndarray, contrasts: np.ndarray) -> np.ndarray:
+    """c'(X'X)^-1 c for each contrast row c of C: d = t * sqrt(factor).
+
+    t = c'b / (sigma * sqrt(c'(X'X)^-1 c)), so t * sqrt(c'(X'X)^-1 c) = c'b / sigma, the
+    contrast's estimate in residual SDs. For one group (X = 1, c = 1) the factor is 1/N;
+    for two groups in cell-means coding (c = [1, -1]) it is 1/n1 + 1/n2: the familiar
+    one-sample and pooled-SD d. With covariates, d is the adjusted difference over the
+    residual SD. The contrast's scale is d's scale: [1, -1] gives a difference of groups,
+    [0.5, -0.5] half of one.
+    """
+    design = np.atleast_2d(design)
+    contrasts = np.atleast_2d(contrasts)
+    if contrasts.shape[1] != design.shape[1]:
+        raise EffectSizeError(
+            f"The contrasts have {contrasts.shape[1]} columns and the design {design.shape[1]}")
+    if np.linalg.matrix_rank(design) < design.shape[1]:
+        raise EffectSizeError("The design matrix is rank deficient; its contrasts have no unique d")
+    xtx_inv = np.linalg.inv(design.T @ design)
+    return np.einsum('ij,jk,ik->i', contrasts, xtx_inv, contrasts)
+
+
+def _describe_design(design: np.ndarray) -> Tuple[str, int, Optional[int]]:
+    """The design's shape, for the log and the n-based fallbacks: type, n1, n2."""
+    n = design.shape[0]
+    if design.shape[1] == 1 and np.all(design == 1):
+        return "one_sample", n, None
+    is_indicator = np.all(np.isin(design, (0, 1)), axis=0)
+    if design.shape[1] == 2 and is_indicator.all() and np.all(design.sum(axis=1) == 1):
+        return "two_sample", int(design[:, 0].sum()), int(design[:, 1].sum())
+    return "glm", n, None
+
+
+def hedges_g(d: np.ndarray, n1: int, n2: Optional[int] = None,
+             df: Optional[int] = None) -> np.ndarray:
     """
     Convert Cohen's d to Hedges' g (bias-corrected effect size).
 
@@ -102,6 +152,8 @@ def hedges_g(d: np.ndarray, n1: int, n2: Optional[int] = None) -> np.ndarray:
         Sample size for group 1
     n2 : int, optional
         Sample size for group 2
+    df : int, optional
+        Residual degrees of freedom (N - rank(X)), given for a GLM design
 
     Returns
     -------
@@ -109,10 +161,8 @@ def hedges_g(d: np.ndarray, n1: int, n2: Optional[int] = None) -> np.ndarray:
         Hedges' g values
     """
     # Calculate degrees of freedom
-    if n2 is None:
-        df = n1 - 1  # One-sample or paired
-    else:
-        df = n1 + n2 - 2  # Two-sample
+    if df is None:
+        df = n1 - 1 if n2 is None else n1 + n2 - 2  # one-sample or paired; two-sample
 
     # Correction factor (J)
     # Approximation from Hedges (1981)
@@ -125,7 +175,8 @@ def calculate_effect_size_ci(
     d: np.ndarray,
     n1: int,
     n2: Optional[int] = None,
-    confidence: float = 0.95
+    confidence: float = 0.95,
+    variance_factor: Optional[float] = None
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Calculate confidence intervals for Cohen's d.
@@ -142,6 +193,9 @@ def calculate_effect_size_ci(
         Sample size for group 2
     confidence : float
         Confidence level (default: 0.95 for 95% CI)
+    variance_factor : float, optional
+        c'(X'X)^-1 c for a GLM contrast; n1 is then the total N. Gives the same SE as
+        the one- and two-sample formulas when the design is one of those.
 
     Returns
     -------
@@ -149,7 +203,9 @@ def calculate_effect_size_ci(
         (lower_ci, upper_ci) arrays
     """
     # Calculate standard error of d
-    if n2 is None:
+    if variance_factor is not None:
+        se_d = np.sqrt(variance_factor + d**2/(2*n1))
+    elif n2 is None:
         # One-sample or paired
         n_eff = n1
         se_d = np.sqrt(1/n1 + d**2/(2*n1))
@@ -192,6 +248,9 @@ def create_effect_size_maps(
         - 'n2': Sample size for group 2 (optional)
         - 'design_type': "one_sample", "two_sample", or "paired"
         - 'contrast_name': Name of contrast (optional)
+        - 'variance_factor': c'(X'X)^-1 c for this contrast (optional; from a
+          design.mat and design.con). When given, d = t * sqrt(variance_factor),
+          n1 is the total N and 'df' the residual degrees of freedom.
     corrp_file : Path, optional
         Path to corrected p-value file for thresholding
     p_threshold : float
@@ -218,6 +277,7 @@ def create_effect_size_maps(
     n2 = design_info.get('n2', None)
     design_type = design_info.get('design_type', 'two_sample')
     contrast_name = design_info.get('contrast_name', 'contrast')
+    variance_factor = design_info.get('variance_factor')
 
     if n1 is None:
         raise EffectSizeError("n1 (sample size) must be specified in design_info")
@@ -232,7 +292,11 @@ def create_effect_size_maps(
 
     # Calculate Cohen's d
     logger.info("Calculating Cohen's d...")
-    d_data = t_to_cohens_d(tstat_data, n1, n2, design_type)
+    if variance_factor is not None:
+        logger.info(f"  c'(X'X)^-1 c = {variance_factor:.6g}")
+        d_data = tstat_data * np.sqrt(variance_factor)
+    else:
+        d_data = t_to_cohens_d(tstat_data, n1, n2, design_type)
 
     # Save uncorrected Cohen's d
     d_uncorrected_file = output_dir / f"{contrast_name}_cohens_d_uncorrected.nii.gz"
@@ -272,7 +336,7 @@ def create_effect_size_maps(
     # Calculate Hedges' g if requested
     if calculate_hedges:
         logger.info("Calculating Hedges' g...")
-        g_data = hedges_g(d_data, n1, n2)
+        g_data = hedges_g(d_data, n1, n2, df=design_info.get('df'))
         g_file = output_dir / f"{contrast_name}_hedges_g_uncorrected.nii.gz"
         g_img = nib.Nifti1Image(g_data, tstat_img.affine, tstat_img.header)
         nib.save(g_img, g_file)
@@ -282,7 +346,8 @@ def create_effect_size_maps(
     # Calculate confidence intervals if requested
     if calculate_ci:
         logger.info("Calculating 95% confidence intervals...")
-        lower_ci, upper_ci = calculate_effect_size_ci(d_data, n1, n2)
+        lower_ci, upper_ci = calculate_effect_size_ci(
+            d_data, n1, n2, variance_factor=variance_factor)
 
         # Save CI maps
         lower_file = output_dir / f"{contrast_name}_cohens_d_ci_lower.nii.gz"
@@ -419,7 +484,8 @@ def batch_effect_size_calculation(
     randomise_dir: Path,
     design_file: Path,
     output_dir: Path,
-    contrast_names: Optional[Dict[int, str]] = None
+    contrast_names: Optional[Dict[int, str]] = None,
+    contrast_file: Optional[Path] = None
 ) -> Dict:
     """
     Calculate effect sizes for all contrasts from a randomise analysis.
@@ -434,6 +500,8 @@ def batch_effect_size_calculation(
         Output directory for effect size maps
     contrast_names : dict, optional
         Dictionary mapping contrast numbers to names
+    contrast_file : Path, optional
+        design.con for a .mat design (default: the .con beside the .mat)
 
     Returns
     -------
@@ -445,7 +513,8 @@ def batch_effect_size_calculation(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Parse design matrix to get sample sizes
-    design_info = parse_design_matrix(design_file)
+    design_info = parse_design_matrix(design_file, contrast_file)
+    variance_factors = design_info.pop('variance_factors', None)
 
     # Find all t-statistic files
     tstat_files = sorted(randomise_dir.glob("randomise_tstat*.nii.gz"))
@@ -459,7 +528,10 @@ def batch_effect_size_calculation(
 
     for tstat_file in tstat_files:
         # Extract contrast number
-        contrast_num = int(tstat_file.stem.split('tstat')[-1])
+        match = re.search(r'tstat(\d+)\.nii', tstat_file.name)
+        if match is None:
+            raise EffectSizeError(f"No contrast number in {tstat_file.name}")
+        contrast_num = int(match.group(1))
 
         # Get contrast name
         if contrast_names and contrast_num in contrast_names:
@@ -478,10 +550,18 @@ def batch_effect_size_calculation(
         # Create effect size maps
         contrast_output_dir = output_dir / contrast_name
 
+        contrast_info = {**design_info, 'contrast_name': contrast_name}
+        if variance_factors is not None:
+            if contrast_num not in variance_factors:
+                raise EffectSizeError(
+                    f"{tstat_file.name} has no contrast {contrast_num} in the design's "
+                    f"{len(variance_factors)} contrasts")
+            contrast_info['variance_factor'] = variance_factors[contrast_num]
+
         result = create_effect_size_maps(
             tstat_file=tstat_file,
             output_dir=contrast_output_dir,
-            design_info={**design_info, 'contrast_name': contrast_name},
+            design_info=contrast_info,
             corrp_file=corrp_file
         )
 
@@ -497,7 +577,7 @@ def batch_effect_size_calculation(
     return results
 
 
-def parse_design_matrix(design_file: Path) -> Dict:
+def parse_design_matrix(design_file: Path, contrast_file: Optional[Path] = None) -> Dict:
     """
     Parse FSL design matrix to extract sample sizes.
 
@@ -505,11 +585,16 @@ def parse_design_matrix(design_file: Path) -> Dict:
     ----------
     design_file : Path
         Path to .mat or .csv file
+    contrast_file : Path, optional
+        design.con for a .mat (default: the .con beside it). Needed unless the design
+        is one group (a single column of ones).
 
     Returns
     -------
     dict
-        Design information including sample sizes
+        Design information including sample sizes. For a .mat, also 'variance_factors'
+        ({contrast number: c'(X'X)^-1 c}, numbered from 1 as randomise numbers its
+        tstat files) and 'df' (N - rank(X)).
     """
     design_file = Path(design_file)
 
@@ -535,21 +620,33 @@ def parse_design_matrix(design_file: Path) -> Dict:
             design_type = "one_sample"
 
     elif design_file.suffix == '.mat':
-        # FSL .mat format
-        with open(design_file, 'r') as f:
-            lines = f.readlines()
+        # FSL .mat format: d for each contrast from the design itself
+        design = read_fsl_vest(design_file)
+        n_subjects = design.shape[0]
+        design_type, n1, n2 = _describe_design(design)
 
-        # Extract NumPoints
-        for line in lines:
-            if '/NumPoints' in line:
-                n_subjects = int(line.split()[-1])
-                break
+        if contrast_file is None and design_file.with_suffix('.con').exists():
+            contrast_file = design_file.with_suffix('.con')
+        if contrast_file is not None:
+            contrasts = read_fsl_vest(contrast_file)
+        elif design_type == "one_sample":
+            contrasts = np.ones((1, 1))
+        else:
+            raise EffectSizeError(
+                f"{design_file.name} needs its contrasts to give d: put design.con beside it "
+                f"or pass the contrast file")
 
-        # For now, assume one-sample unless we can determine otherwise
-        # (Would need to parse the actual matrix to determine design type)
-        n1 = n_subjects
-        n2 = None
-        design_type = "one_sample"
+        factors = contrast_variance_factors(design, contrasts)
+        logger.info(f"Design {design_file.name}: {design_type}, N={n_subjects}, "
+                    f"{len(factors)} contrast(s)")
+        return {
+            'n1': n1,
+            'n2': n2,
+            'design_type': design_type,
+            'n_subjects': n_subjects,
+            'df': int(n_subjects - np.linalg.matrix_rank(design)),
+            'variance_factors': {i + 1: float(f) for i, f in enumerate(factors)},
+        }
 
     else:
         raise EffectSizeError(f"Unsupported design file format: {design_file.suffix}")
