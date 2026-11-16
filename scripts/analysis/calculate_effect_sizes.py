@@ -257,7 +257,9 @@ def main():
                         break
 
                 if not corrp_file:
-                    logger.info("  No corrected p-value file found")
+                    logger.warning(
+                        f"{contrast_name}: no corrected p-value file for {tstat_file.name} "
+                        f"in {args.randomise_dir}; no thresholded map made, only the uncorrected d")
 
                 # Create output directory for this contrast
                 contrast_output = args.output_dir / contrast_name

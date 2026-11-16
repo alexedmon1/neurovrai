@@ -18,6 +18,7 @@ from neurovrai.analysis.stats.effect_size import (
     EffectSizeError,
     batch_effect_size_calculation,
     calculate_effect_size_ci,
+    create_effect_size_maps,
     hedges_g,
     parse_design_matrix,
     t_to_cohens_d,
@@ -164,3 +165,39 @@ def test_the_batch_gives_each_contrast_its_own_d(tmp_path):
     for name, sign in (("a_gt_b", 1), ("b_gt_a", -1)):
         d = nib.load(results[name]["output_files"]["d_uncorrected"]).get_fdata()
         np.testing.assert_allclose(d, sign * tstat * np.sqrt(1 / n1 + 1 / n2), rtol=1e-6)
+
+
+def test_a_contrast_without_corrected_p_values_warns_and_still_gives_d(tmp_path, caplog):
+    """No randomise_tfce_corrp_tstat file: the uncorrected d is made, and the missing
+    thresholded map is a warning, not an INFO line the command line hides."""
+    nib = pytest.importorskip("nibabel")
+    rdir = tmp_path / "randomise"
+    rdir.mkdir()
+    tstat = RNG.normal(0, 2, (4, 4, 3)).astype(np.float32)
+    nib.save(nib.Nifti1Image(tstat, np.eye(4)), rdir / "randomise_tstat1.nii.gz")
+    nib.save(nib.Nifti1Image(np.full_like(tstat, 0.99), np.eye(4)),
+             rdir / "randomise_tfce_corrp_tstat2.nii.gz")
+    nib.save(nib.Nifti1Image(tstat, np.eye(4)), rdir / "randomise_tstat2.nii.gz")
+    mat = _write_vest(tmp_path / "design.mat", _two_group_design(9, 12))
+    _write_vest(tmp_path / "design.con", np.array([[1, -1], [-1, 1]]))
+
+    with caplog.at_level("WARNING"):
+        results = batch_effect_size_calculation(rdir, mat, tmp_path / "out")
+    warned = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warned) == 1 and "contrast1" in warned[0] and "corrp_tstat1" in warned[0]
+    assert "d_thresholded" not in results["contrast1"]["output_files"]
+    assert "d_uncorrected" in results["contrast1"]["output_files"]
+    assert "d_thresholded" in results["contrast2"]["output_files"]
+
+
+def test_a_named_corrp_file_that_does_not_exist_is_a_warning(tmp_path, caplog):
+    nib = pytest.importorskip("nibabel")
+    tfile = tmp_path / "randomise_tstat1.nii.gz"
+    nib.save(nib.Nifti1Image(RNG.normal(0, 2, (3, 3, 3)).astype(np.float32), np.eye(4)), tfile)
+    with caplog.at_level("WARNING"):
+        result = create_effect_size_maps(
+            tfile, tmp_path / "out", {"n1": 10, "design_type": "one_sample"},
+            corrp_file=tmp_path / "missing_corrp_tstat1.nii.gz")
+    assert any("does not exist" in r.getMessage() for r in caplog.records
+               if r.levelname == "WARNING")
+    assert "d_thresholded" not in result["output_files"]

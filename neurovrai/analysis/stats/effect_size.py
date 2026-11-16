@@ -365,7 +365,12 @@ def create_effect_size_maps(
         logger.info(f"  Saved CI maps: {lower_file.name}, {upper_file.name}")
 
     # Create thresholded maps if corrected p-values provided
-    if corrp_file and corrp_file.exists():
+    if corrp_file and not Path(corrp_file).exists():
+        logger.warning(
+            f"{contrast_name}: corrected p-value file {corrp_file} does not exist; "
+            f"no thresholded map (p < {p_threshold}) made")
+        corrp_file = None
+    if corrp_file:
         logger.info(f"Creating thresholded maps (p < {p_threshold})...")
 
         corrp_img = nib.load(corrp_file)
@@ -544,8 +549,10 @@ def batch_effect_size_calculation(
         # Look for corresponding corrected p-value file
         corrp_file = randomise_dir / f"randomise_tfce_corrp_tstat{contrast_num}.nii.gz"
         if not corrp_file.exists():
+            logger.warning(
+                f"{contrast_name}: no {corrp_file.name} in {randomise_dir}; "
+                "no thresholded map made, only the uncorrected d")
             corrp_file = None
-            logger.info("  No corrected p-value file found")
 
         # Create effect size maps
         contrast_output_dir = output_dir / contrast_name
