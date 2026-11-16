@@ -177,3 +177,15 @@ def test_measures_run_differently_are_refused(tmp_path):
                                    mask=tmp_path / "mask.nii.gz", mask_name="m", analysis_id="dwi/tbss/x",
                                    title="t", description="d", analysis_type="tbss", modality="dwi",
                                    space="S")
+
+
+def test_combined_atlases_keep_the_first_and_shift_the_rest():
+    from neurofaune.analysis.stats.readout import Atlas
+
+    a = Atlas(np.array([[1, 0], [0, 0]], np.int32), {1: "Cortex A"})
+    b = Atlas(np.array([[3, 3], [0, 4]], np.int32), {3: "Left Thalamus", 4: "Right Putamen"},
+              {3: "left", 4: "right"})
+    c = R.combine_atlases(a, b)
+    assert c.parcellation.tolist() == [[1, 103], [0, 104]]
+    assert c.names == {1: "Cortex A", 103: "Left Thalamus", 104: "Right Putamen"}
+    assert c.hemispheres == {103: "left", 104: "right"}

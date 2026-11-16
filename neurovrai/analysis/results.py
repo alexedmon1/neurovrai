@@ -85,22 +85,23 @@ def package_entry() -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------------------- atlas ---
-def fsl_atlas(atlas_id: str = "jhu-labels", resolution: float = 1.0):
-    """An FSL label atlas as neurofaune's ``Atlas``: parcellation, names, hemispheres.
+def fsl_atlas(atlas_id: str = "jhu-labels", resolution: float = 1.0, *, drop: Sequence[str] = ()):
+    """An FSL atlas as neurofaune's ``Atlas``: parcellation, names, hemispheres.
 
     Names and label values come from FSL's atlas registry (fslpy), so a value means what
-    FSL says it means. Hemisphere is read from a trailing " L" / " R" (JHU's convention)
-    or a leading "Left " / "Right " (Harvard-Oxford subcortical).
+    FSL says it means. A probabilistic atlas is read through its summary image (FSL's
+    max-probability, thresholded at 25%). Labels named in ``drop`` are set to 0.
+    Hemisphere is read from a trailing " L" / " R" (JHU's convention) or a leading
+    "Left " / "Right " (Harvard-Oxford subcortical).
     """
     from fsl.data import atlases
     from neurofaune.analysis.stats.readout import Atlas
 
     atlases.rescanAtlases()
     desc = atlases.getAtlasDescription(atlas_id)
-    if desc.atlasType != "label":
-        raise ValueError(f"{atlas_id} is a {desc.atlasType} atlas; give a label (max-prob) atlas")
+    images = desc.images if desc.atlasType == "label" else desc.summaryImages
     path = None
-    for img, pix in zip(desc.images, desc.pixdims, strict=False):
+    for img, pix in zip(images, desc.pixdims, strict=False):
         if abs(pix[0] - resolution) < 1e-3:
             path = img
     if path is None:
@@ -111,12 +112,43 @@ def fsl_atlas(atlas_id: str = "jhu-labels", resolution: float = 1.0):
     for label in desc.labels:
         if label.value == 0:
             continue
+        if label.name in drop:
+            data[data == label.value] = 0
+            continue
         names[int(label.value)] = label.name
         m = re.search(r"\s([LR])$", label.name) or re.match(r"(Left|Right)\s", label.name)
         if m:
             hemi[int(label.value)] = {"L": "left", "R": "right", "Left": "left",
                                       "Right": "right"}[m.group(1)]
     return Atlas(data, names, hemi)
+
+
+def combine_atlases(first, *others, offset: int = 100):
+    """One parcellation from several on the same grid: the first's labels win where both
+    label a voxel; each later atlas's labels are shifted by ``offset`` (then 2 x offset, ...)."""
+    from neurofaune.analysis.stats.readout import Atlas
+
+    data = first.parcellation.copy()
+    names, hemi = dict(first.names), dict(first.hemispheres)
+    for k, other in enumerate(others, start=1):
+        if other.parcellation.shape != data.shape:
+            raise ValueError("atlases on different grids")
+        shift = k * offset
+        if data.max() >= shift:
+            raise ValueError(f"labels reach {data.max()}; use a larger offset than {offset}")
+        fill = (data == 0) & (other.parcellation > 0)
+        data[fill] = other.parcellation[fill] + shift
+        names.update({v + shift: n for v, n in other.names.items()})
+        hemi.update({v + shift: h for v, h in other.hemispheres.items()})
+    return Atlas(data, names, hemi)
+
+
+def harvard_oxford(resolution: float = 2.0):
+    """Harvard-Oxford cortical, then subcortical where cortical has no label; subcortical's
+    whole-hemisphere "Cerebral White Matter" / "Cerebral Cortex" labels left out."""
+    drop = [f"{side} Cerebral {what}" for side in ("Left", "Right") for what in ("White Matter", "Cortex")]
+    return combine_atlases(fsl_atlas("harvardoxford-cortical", resolution),
+                           fsl_atlas("harvardoxford-subcortical", resolution, drop=drop))
 
 
 # ------------------------------------------------------------------------------ design ---
