@@ -104,10 +104,12 @@ def run_randomise(
     mask: Optional[Path] = None,
     n_permutations: int = 5000,
     tfce: bool = True,
+    tfce_2d: bool = False,
     voxel_threshold: Optional[float] = None,
     demean: bool = False,
     variance_smoothing: Optional[float] = None,
     seed: Optional[int] = None,
+    uncorrected_p: bool = True,
     n_threads: int = 1
 ) -> Dict:
     """
@@ -121,10 +123,15 @@ def run_randomise(
         mask: Optional binary mask (3D volume)
         n_permutations: Number of permutations (default: 5000)
         tfce: Use Threshold-Free Cluster Enhancement (default: True)
+        tfce_2d: 2-D TFCE (--T2), for TBSS skeletons only. The default,
+            False, is the standard 3-D TFCE (-T) for volumetric data (VBM,
+            ASL CBF, T1w/T2w ratio, ReHo/fALFF).
         voxel_threshold: Cluster-forming threshold (only if tfce=False)
         demean: Demean data temporally (for within-subject designs)
         variance_smoothing: Variance smoothing (mm, for heterogeneous variance)
         seed: Random seed for reproducibility
+        uncorrected_p: Also write uncorrected p maps (--uncorrp), so a
+            read-out can report extent at an uncorrected threshold too
         n_threads: Number of parallel threads (default: 1)
 
     Returns:
@@ -164,8 +171,12 @@ def run_randomise(
 
     # TFCE or voxel-wise thresholding
     if tfce:
-        cmd.append('--T2')  # TFCE for T-statistics
-        logging.info("Using Threshold-Free Cluster Enhancement (TFCE)")
+        if tfce_2d:
+            cmd.append('--T2')
+            logging.info("Using 2-D TFCE (--T2, skeleton)")
+        else:
+            cmd.append('-T')
+            logging.info("Using 3-D TFCE (-T)")
     elif voxel_threshold is not None:
         cmd.extend(['-c', str(voxel_threshold)])
         logging.info(f"Using cluster threshold: {voxel_threshold}")
@@ -182,6 +193,9 @@ def run_randomise(
     if seed is not None:
         cmd.append(f'--seed={seed}')
         logging.info(f"Random seed: {seed}")
+
+    if uncorrected_p:
+        cmd.append('--uncorrp')
 
     # Parallel execution
     if n_threads > 1:
@@ -267,6 +281,10 @@ def run_randomise(
         'success': True,
         'elapsed_time': elapsed,
         'n_permutations': n_permutations,
+        'command': cmd,
+        'tfce': tfce,
+        'tfce_2d': tfce_2d,
+        'variance_smoothing': variance_smoothing,
         'output_dir': str(output_dir),
         'output_files': {k: [str(f) for f in v] if isinstance(v, list) else str(v)
                          for k, v in output_files.items()}

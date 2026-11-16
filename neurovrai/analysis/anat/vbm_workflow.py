@@ -685,7 +685,8 @@ def run_vbm_analysis(
             mask=mask_file,
             output_dir=randomise_dir,
             n_permutations=n_permutations,
-            tfce=tfce
+            tfce=tfce,
+            tfce_2d=False  # volumetric data: 3-D TFCE
         )
 
         logger.info(f"✓ Randomise complete: {randomise_dir}")

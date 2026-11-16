@@ -265,6 +265,8 @@ def run_randomise(
     design_con: Path,
     mask: Path,
     n_perm: int = 5000,
+    variance_smoothing: Optional[float] = 5.0,
+    uncorrected_p: bool = True,
     logger: Optional[logging.Logger] = None
 ) -> bool:
     """
@@ -277,6 +279,10 @@ def run_randomise(
         design_con: Contrast file
         mask: Group mask
         n_perm: Number of permutations
+        variance_smoothing: randomise -v, in mm: the variance is smoothed
+            with this sigma, so the statistic is a pseudo-t. 5 mm is this
+            module's deliberate choice for ReHo/fALFF; None for plain t.
+        uncorrected_p: Also write uncorrected p maps (--uncorrp)
         logger: Logger instance
 
     Returns:
@@ -292,9 +298,12 @@ def run_randomise(
         '-t', str(design_con),
         '-m', str(mask),
         '-n', str(n_perm),
-        '-T',  # TFCE correction
-        '-v', '5',  # Verbose
+        '-T',  # 3-D TFCE
     ]
+    if variance_smoothing is not None:
+        cmd.extend(['-v', str(variance_smoothing)])  # variance smoothing, sigma in mm
+    if uncorrected_p:
+        cmd.append('--uncorrp')
 
     if logger:
         logger.info(f"Running randomise with {n_perm} permutations...")
@@ -323,6 +332,7 @@ def run_batch_analysis(
     n_jobs: int = 4,
     skip_compute: bool = False,
     skip_normalize: bool = False,
+    variance_smoothing: Optional[float] = 5.0,
 ) -> Dict:
     """
     Run complete batch analysis: compute -> normalize -> merge -> randomise
@@ -339,6 +349,8 @@ def run_batch_analysis(
         n_jobs: Number of parallel jobs
         skip_compute: Skip computing ReHo/fALFF (use existing)
         skip_normalize: Skip normalization (use existing)
+        variance_smoothing: randomise variance smoothing in mm (pseudo-t);
+            None for plain t. Recorded in the results summary.
 
     Returns:
         Dictionary with analysis results
@@ -624,6 +636,7 @@ def run_batch_analysis(
         design_con=group_dir / 'design.con',
         mask=group_mask_file,
         n_perm=n_perm,
+        variance_smoothing=variance_smoothing,
         logger=logger
     )
 
@@ -631,7 +644,10 @@ def run_batch_analysis(
         results['randomise'] = {
             'status': 'success',
             'output_dir': str(randomise_dir),
-            'n_perm': n_perm
+            'n_perm': n_perm,
+            'tfce': '3-D (-T)',
+            'variance_smoothing_mm': variance_smoothing,
+            'uncorrected_p': True,
         }
     else:
         results['randomise'] = {'status': 'failed'}
@@ -708,6 +724,12 @@ if __name__ == '__main__':
         action='store_true',
         help='Skip normalization (use existing)'
     )
+    parser.add_argument(
+        '--variance-smoothing',
+        type=float,
+        default=5.0,
+        help='randomise variance smoothing sigma in mm (pseudo-t; default 5). 0 for plain t.'
+    )
 
     args = parser.parse_args()
 
@@ -753,6 +775,7 @@ if __name__ == '__main__':
             n_perm=args.n_perm,
             skip_compute=args.skip_compute,
             skip_normalize=args.skip_normalize,
+            variance_smoothing=args.variance_smoothing or None,
         )
 
         print(f"\n{analysis_type.upper()} Results:")

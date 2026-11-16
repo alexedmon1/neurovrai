@@ -326,6 +326,7 @@ def run_tbss_statistical_analysis(
             mask=prepared_files['mask_file'],
             n_permutations=n_permutations,
             tfce=tfce,
+            tfce_2d=True,  # skeleton data: 2-D TFCE
             seed=seed
         )
 

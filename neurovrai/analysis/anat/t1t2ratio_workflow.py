@@ -746,7 +746,7 @@ def run_t1t2ratio_analysis(
     method: str = 'randomise',
     n_permutations: int = 5000,
     tfce: bool = True,
-    cluster_threshold: float = 0.95
+    cluster_threshold: float = 0.05
 ) -> Dict[str, Any]:
     """
     Run group-level statistical analysis on T1w/T2w ratio maps.
@@ -764,7 +764,9 @@ def run_t1t2ratio_analysis(
     tfce : bool
         Use TFCE correction (default: True)
     cluster_threshold : float
-        Cluster-forming threshold (default: 0.95 = p < 0.05)
+        Corrected p threshold for the cluster report (default: 0.05).
+        create_enhanced_cluster_report takes a p value and keeps
+        voxels with corrp > 1 - threshold.
 
     Returns
     -------
@@ -813,7 +815,8 @@ def run_t1t2ratio_analysis(
             output_dir=randomise_dir,
             mask=group_mask if group_mask.exists() else None,
             n_permutations=n_permutations,
-            tfce=tfce
+            tfce=tfce,
+            tfce_2d=False  # volumetric data: 3-D TFCE
         )
         results['randomise'] = randomise_result
 
