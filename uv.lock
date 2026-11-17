@@ -1011,8 +1011,8 @@ wheels = [
 
 [[package]]
 name = "lumiere"
-version = "0.4.5"
-source = { git = "https://github.com/alexedmon1/lumiere?rev=98072ed371dd34b86e15d595789df8a2650a5965#98072ed371dd34b86e15d595789df8a2650a5965" }
+version = "0.4.6"
+source = { git = "https://github.com/alexedmon1/lumiere?rev=b3b6e5f5b68e12d2b5ad8ff737f816327f07d204#b3b6e5f5b68e12d2b5ad8ff737f816327f07d204" }
 
 [[package]]
 name = "lxml"
@@ -1288,7 +1288,7 @@ dependencies = [
 [[package]]
 name = "neurofaune"
 version = "0.12.0a0"
-source = { git = "https://github.com/alexedmon1/neurofaune?rev=5e9ba3d0e544b7d63155c7f0cf6a8896345e85c1#5e9ba3d0e544b7d63155c7f0cf6a8896345e85c1" }
+source = { git = "https://github.com/alexedmon1/neurofaune?rev=0f6b1927574e7175b800ff6f8a3b03e4142d187c#0f6b1927574e7175b800ff6f8a3b03e4142d187c" }
 dependencies = [
     { name = "bokeh" },
     { name = "brukerapi" },
@@ -1365,7 +1365,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.5.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "neuroaider", git = "https://github.com/alexedmon1/neuroaider.git" },
-    { name = "neurofaune", extras = ["results"], git = "https://github.com/alexedmon1/neurofaune?rev=5e9ba3d0e544b7d63155c7f0cf6a8896345e85c1" },
+    { name = "neurofaune", extras = ["results"], git = "https://github.com/alexedmon1/neurofaune?rev=0f6b1927574e7175b800ff6f8a3b03e4142d187c" },
     { name = "nibabel", specifier = ">=5.3.2" },
     { name = "nilearn", specifier = ">=0.10.0,<0.11" },
     { name = "nipype", specifier = ">=1.10.0" },

@@ -13,7 +13,7 @@ dependencies = [
     "neuroaider @ git+https://github.com/alexedmon1/neuroaider.git",  # Design matrix helper
     # Design records, the randomise read-out and the results specification (Lumière, through
     # the results extra): decided 2026-10-06, docs/RESULTS_PRODUCERS.md §4.3 in Lumière.
-    "neurofaune[results] @ git+https://github.com/alexedmon1/neurofaune@5e9ba3d0e544b7d63155c7f0cf6a8896345e85c1",
+    "neurofaune[results] @ git+https://github.com/alexedmon1/neurofaune@0f6b1927574e7175b800ff6f8a3b03e4142d187c",
     "nibabel>=5.3.2",
     "nilearn>=0.10.0,<0.11",  # For TEDANA compatibility
     "nipype>=1.10.0",
