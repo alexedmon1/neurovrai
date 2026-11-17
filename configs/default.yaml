@@ -81,6 +81,14 @@ anatomical:
     run: false          # Only enable if needed for nuisance regression
     number_classes: 3   # Number of tissue classes (3=GM/WM/CSF)
 
+  # Tissue segmentation method (t1w_preprocess step 4): ants (Atropos, K-means start) or fsl
+  # (FAST). Maps are named csf/gm/wm.nii.gz either way; segmentation/segmentation.json records
+  # the method. See neurovrai/preprocess/utils/t1w_segmentation.py.
+  segmentation_method: ants
+  fast:
+    img_type: 1         # 1 = T1-weighted
+    number_classes: 3
+
 # Diffusion preprocessing defaults
 diffusion:
   # Pre-eddy denoising + Gibbs-ringing removal (dipy, as in neurofaune): each raw series on its

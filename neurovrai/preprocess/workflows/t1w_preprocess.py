@@ -6,7 +6,8 @@ Workflow steps:
 1. Reorientation to standard orientation (fslreorient2std)
 2. Skull stripping (BET)
 3. Bias field correction (N4)
-4. Tissue segmentation (Atropos)
+4. Tissue segmentation (anatomical.segmentation_method: Atropos or FSL FAST; see
+   neurovrai/preprocess/utils/t1w_segmentation.py)
 5. Linear registration to MNI152 (FLIRT)
 6. Nonlinear registration to MNI152 (FNIRT/ANTs)
 7. Save transformations to TransformRegistry
@@ -38,6 +39,15 @@ from neurovrai.utils.workflow import (
     validate_inputs
 )
 from neurovrai.utils.transforms import TransformRegistry
+from neurovrai.preprocess.utils.t1w_segmentation import (
+    create_fast_node,
+    name_fast_tissues,
+    prepare_segmentation_dir,
+    segmentation_method,
+    supersede_segmentation,
+    unlink_named_tissues,
+    write_segmentation_record,
+)
 
 
 def _tissue_in(derivatives_dir: Path, tissue: str) -> Optional[Path]:
@@ -48,6 +58,33 @@ def _tissue_in(derivatives_dir: Path, tissue: str) -> Optional[Path]:
         if found:
             return found
     return None
+
+
+def _tissue_class_map(derivatives_dir: Path) -> Optional[Path]:
+    """The hard label map: Atropos *labeled.nii.gz or FAST *_seg.nii.gz."""
+    for pattern in ('*labeled.nii.gz', '*_seg.nii.gz'):
+        found = sorted(Path(derivatives_dir).glob(f'segmentation/{pattern}'))
+        if found:
+            return found[0]
+    return None
+
+
+def _name_tissues(derivatives_dir: Path, method: str, config: Dict[str, Any]) -> None:
+    """csf/gm/wm.nii.gz from this run's outputs (remade, never left over), plus segmentation.json."""
+    logger = logging.getLogger(__name__)
+    seg_dir = Path(derivatives_dir) / 'segmentation'
+    if not seg_dir.is_dir():
+        logger.warning(f"No segmentation folder in {derivatives_dir}")
+        return
+    if method == 'fsl':
+        logger.info("Naming FAST tissue maps (pve_0/1/2 = CSF/GM/WM)...")
+        name_fast_tissues(seg_dir)
+    elif list(seg_dir.glob('POSTERIOR_*.nii.gz')):
+        logger.info("Standardizing Atropos tissue names...")
+        unlink_named_tissues(seg_dir)  # a rerun can reorder the posteriors
+        standardize_atropos_tissues(derivatives_dir, use_symlinks=True)
+    corrected = sorted((Path(derivatives_dir) / 'bias_corrected').glob('*.nii.gz'))
+    write_segmentation_record(seg_dir, method, config, corrected[0] if corrected else None)
 
 
 def standardize_atropos_tissues(
@@ -601,8 +638,10 @@ def create_t1w_preprocessing_workflow(
     # 3. Bias correction (ANTs N4, fast ~2.5min)
     bias_correct = create_bias_correction_node(config)
 
-    # 4. Tissue segmentation (ANTs Atropos)
-    segment = create_segmentation_node(config)
+    # 4. Tissue segmentation (ANTs Atropos, or FSL FAST)
+    seg_method = segmentation_method(config)
+    logger.info(f"Tissue segmentation: {'FSL FAST' if seg_method == 'fsl' else 'ANTs Atropos'}")
+    segment = create_fast_node(config) if seg_method == 'fsl' else create_segmentation_node(config)
 
     # 5. Registration to MNI152 (ANTs or FSL)
     registration_method = config.get('anatomical', {}).get('registration_method', 'ants')
@@ -701,14 +740,21 @@ def create_t1w_preprocessing_workflow(
     )
     extract_wm.inputs.index = 2  # WM
 
-    # Tissue segmentation using ANTs Atropos (on N4-bias-corrected image)
-    # Atropos requires both intensity image and mask
-    wf.connect(bias_correct, 'output_image', segment, 'intensity_images')
-    wf.connect(skull_strip, 'mask_file', segment, 'mask_image')
-    wf.connect(segment, 'classified_image', outputnode, 'tissue_class_map')
-    wf.connect(segment, 'posteriors', extract_csf, 'probability_maps')
-    wf.connect(segment, 'posteriors', extract_gm, 'probability_maps')
-    wf.connect(segment, 'posteriors', extract_wm, 'probability_maps')
+    # Tissue segmentation on the N4-bias-corrected brain. FAST's partial-volume maps come in a
+    # fixed order (CSF, GM, WM); Atropos posteriors do not, and are named after the run.
+    if seg_method == 'fsl':
+        wf.connect(bias_correct, 'output_image', segment, 'in_files')
+        wf.connect(segment, 'tissue_class_map', outputnode, 'tissue_class_map')
+        prob_out = 'partial_volume_files'
+    else:
+        # Atropos requires both intensity image and mask
+        wf.connect(bias_correct, 'output_image', segment, 'intensity_images')
+        wf.connect(skull_strip, 'mask_file', segment, 'mask_image')
+        wf.connect(segment, 'classified_image', outputnode, 'tissue_class_map')
+        prob_out = 'posteriors'
+    wf.connect(segment, prob_out, extract_csf, 'probability_maps')
+    wf.connect(segment, prob_out, extract_gm, 'probability_maps')
+    wf.connect(segment, prob_out, extract_wm, 'probability_maps')
     wf.connect(extract_csf, 'tissue_map', outputnode, 'csf_prob')
     wf.connect(extract_gm, 'tissue_map', outputnode, 'gm_prob')
     wf.connect(extract_wm, 'tissue_map', outputnode, 'wm_prob')
@@ -834,6 +880,10 @@ def run_t1w_preprocessing(
     # This ensures hash_method is set when nodes are instantiated
     exec_config = get_execution_config(config)
 
+    # Outputs another segmentation method wrote are moved aside first (superseded_<method>/)
+    seg_method = segmentation_method(config)
+    prepare_segmentation_dir(derivatives_dir / 'segmentation', seg_method)
+
     # Create workflow
     wf = create_t1w_preprocessing_workflow(
         config=config,
@@ -847,13 +897,9 @@ def run_t1w_preprocessing(
     # Run workflow
     wf.run(**exec_config)
 
-    # Standardize Atropos tissue names (if using Atropos)
-    # This creates csf.nii.gz, gm.nii.gz, wm.nii.gz symlinks based on intensity
+    # Name the tissue maps csf/gm/wm.nii.gz and record how they were made
     seg_dir = derivatives_dir / 'segmentation'
-    if seg_dir.exists() and list(seg_dir.glob('POSTERIOR_*.nii.gz')):
-        logger = logging.getLogger(__name__)
-        logger.info("Standardizing Atropos tissue names...")
-        standardize_atropos_tissues(derivatives_dir, use_symlinks=True)
+    _name_tissues(derivatives_dir, seg_method, config)
 
     # Collect outputs
     # Find output files in derivatives directory
@@ -877,7 +923,7 @@ def run_t1w_preprocessing(
         'csf_prob': _tissue_in(derivatives_dir, 'csf'),
         'gm_prob': _tissue_in(derivatives_dir, 'gm'),
         'wm_prob': _tissue_in(derivatives_dir, 'wm'),
-        'tissue_class_map': list(derivatives_dir.glob('**/segmentation/*labeled.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/*labeled.nii.gz')) else None,
+        'tissue_class_map': _tissue_class_map(derivatives_dir),
         # For FSL: look for .mat and warp.nii.gz
         # For ANTs: look for .h5 composite transform
         'mni_affine': (list(derivatives_dir.glob('**/transforms/*.mat'))[0] if list(derivatives_dir.glob('**/transforms/*.mat')) else
@@ -997,6 +1043,64 @@ def run_t1w_preprocessing(
             logging.warning("Continuing without QC...")
 
     return outputs
+
+
+def run_t1w_segmentation(
+    config: Dict[str, Any],
+    anat_dir: Path,
+    work_dir: Optional[Path] = None,
+) -> Dict[str, Path]:
+    """Re-segment an already preprocessed T1w: only step 4, on its N4-corrected brain.
+
+    For redoing a segmentation (a failed one, or a change of ``anatomical.segmentation_method``)
+    without rerunning skull stripping, N4 and registration. ``anat_dir`` is
+    ``derivatives/<subject>/anat``; its ``bias_corrected/`` (and, for Atropos, ``mask/``) are the
+    inputs. The previous ``segmentation/`` outputs are moved into
+    ``segmentation/superseded_<method>/``; the new ones get the names a full run writes (FAST:
+    ``<input>_pve_0/1/2``, ``<input>_seg``; Atropos: ``POSTERIOR_0N``, ``*_labeled``), csf/gm/wm.nii.gz
+    links and ``segmentation.json``.
+
+    Returns {'csf': path, 'gm': path, 'wm': path}.
+    """
+    logger = logging.getLogger(__name__)
+    anat_dir = Path(anat_dir)
+    corrected = sorted((anat_dir / 'bias_corrected').glob('*.nii.gz'))
+    if len(corrected) != 1:
+        raise FileNotFoundError(f"expected one image in {anat_dir / 'bias_corrected'}, found {len(corrected)}")
+    method = segmentation_method(config)
+    seg_dir = anat_dir / 'segmentation'
+    if work_dir is None:
+        # derivatives/<subject>/anat -> <study>/work/<subject>/t1w_segmentation
+        work_dir = anat_dir.parent.parent.parent / 'work' / anat_dir.parent.name / 't1w_segmentation'
+    run_dir = Path(work_dir) / method
+    if run_dir.exists():
+        shutil.rmtree(run_dir)
+    run_dir.mkdir(parents=True)
+
+    stem = corrected[0].name[:-len('.nii.gz')]
+    logger.info(f"Segmenting {corrected[0].name} with {'FSL FAST' if method == 'fsl' else 'ANTs Atropos'}")
+    if method == 'fsl':
+        node = create_fast_node(config)
+        node.inputs.in_files = str(corrected[0])
+        node.inputs.out_basename = str(run_dir / stem)
+        res = node.interface.run(cwd=str(run_dir))
+        keep = list(res.outputs.partial_volume_files) + [res.outputs.tissue_class_map]
+    else:
+        masks = sorted((anat_dir / 'mask').glob('*.nii.gz'))
+        if len(masks) != 1:
+            raise FileNotFoundError(f"expected one mask in {anat_dir / 'mask'}, found {len(masks)}")
+        node = create_segmentation_node(config)
+        node.inputs.intensity_images = str(corrected[0])
+        node.inputs.mask_image = str(masks[0])
+        res = node.interface.run(cwd=str(run_dir))
+        keep = list(res.outputs.posteriors) + [res.outputs.classified_image]
+
+    supersede_segmentation(seg_dir, f"re-segmented with {method} by run_t1w_segmentation")
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    for f in keep:
+        shutil.copy2(f, seg_dir / Path(f).name)
+    _name_tissues(anat_dir, method, config)
+    return {t: seg_dir / f'{t}.nii.gz' for t in ('csf', 'gm', 'wm')}
 
 
 # =============================================================================

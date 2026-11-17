@@ -74,6 +74,7 @@ def create_config_template(study_root: Path, output_file: Path = None):
                 'bspline_fitting_distance': 300  # B-spline mesh resolution
             },
             'segmentation_method': 'ants',  # 'ants' (Atropos) or 'fsl' (FAST)
+            'fast': {'img_type': 1, 'number_classes': 3},  # used when segmentation_method is 'fsl'
             'atropos': {
                 'number_of_tissue_classes': 3,  # CSF, GM, WM
                 'initialization': 'KMeans',  # KMeans, Otsu, or PriorProbabilityImages
