@@ -144,6 +144,9 @@ class DWIConfigValidator(ConfigValidator):
 
     OPTIONAL_KEYS = [
         'diffusion.topup.readout_time',
+        'diffusion.denoise.enabled',
+        'diffusion.denoise.patch_radius',
+        'diffusion.degibbs.enabled',
         'diffusion.eddy_config.use_cuda',
         'diffusion.run_qc'
     ]

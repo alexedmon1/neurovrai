@@ -3,6 +3,8 @@
 Diffusion MRI preprocessing workflow using Nipype and FSL.
 
 Workflow steps:
+0. MP-PCA denoising and Gibbs-ringing removal of each raw series (dipy, as in neurofaune;
+   diffusion.denoise / diffusion.degibbs, see neurovrai/preprocess/utils/dwi_denoise.py)
 1. TOPUP distortion correction using reverse phase-encoding acquisition (per shell)
 2. Merge multiple DWI acquisitions (bval, bvec, nifti) after TOPUP correction
 3. Eddy current and motion correction (eddy with TOPUP integration)
@@ -46,6 +48,7 @@ from neurovrai.preprocess.utils.dwi_normalization import (
 )
 from neurovrai.preprocess.workflows.advanced_diffusion import run_advanced_diffusion_models
 from neurovrai.preprocess.utils.dti_metrics import calculate_ad_rd
+from neurovrai.preprocess.utils.dwi_denoise import denoise_dwi_series
 
 
 def merge_dwi_files(
@@ -488,6 +491,7 @@ def run_dwi_multishell_topup_preprocessing(
         logger.info("  (No reverse PE files available)")
     logger.info("")
     logger.info("Pipeline steps:")
+    logger.info("  0. Denoise (MP-PCA) and remove Gibbs ringing, per series")
     logger.info("  1. Merge DWI shells")
     if use_topup:
         logger.info("  2. Merge reverse phase-encoding images")
@@ -531,6 +535,13 @@ def run_dwi_multishell_topup_preprocessing(
     logger.info(f"Derivatives output: {derivatives_dir}")
     logger.info(f"Working directory: {work_dir}")
     logger.info("")
+
+    # Step 0: MP-PCA denoising + Gibbs removal, each raw series on its own, before merging
+    # (one noise level per decomposition; series differ in scaling), TOPUP and eddy
+    logger.info("Step 0: Denoising (MP-PCA) and Gibbs-ringing removal, per series")
+    dwi_files, _ = denoise_dwi_series(
+        dwi_files, config, work_dir / 'denoise', record_dir=derivatives_dir / 'denoise'
+    )
 
     # Step 1: Merge DWI shells FIRST (before any correction)
     logger.info("Step 1: Merging DWI shells")
@@ -1379,6 +1390,13 @@ def run_dwi_preprocessing(
     # This ensures hash_method is set when nodes are instantiated
     exec_config = get_execution_config(config)
 
+    # Step 0: MP-PCA denoising + Gibbs removal before eddy (as in the multi-shell pipeline)
+    logger.info("Step 0: Denoising (MP-PCA) and Gibbs-ringing removal")
+    (dwi_file,), _ = denoise_dwi_series(
+        [Path(dwi_file)], config, Path(work_dir) / 'denoise',
+        record_dir=get_derivatives_dir(output_dir, 'mri-preprocess', subject, session) / 'dwi' / 'denoise',
+    )
+
     # Create workflow
     wf = create_dwi_preprocessing_workflow(
         config=config,
@@ -1571,6 +1589,12 @@ def run_dwi_singleshell_preprocessing(
     logger.info(f"Detected b-values: {unique_bvals}")
     if len(unique_bvals) > 1:
         logger.warning(f"Multiple b-values detected ({len(unique_bvals)}). Consider using multi-shell pipeline.")
+
+    # Step 0: MP-PCA denoising + Gibbs removal before eddy (as in the multi-shell pipeline)
+    logger.info("Step 0: Denoising (MP-PCA) and Gibbs-ringing removal")
+    (dwi_file,), _ = denoise_dwi_series(
+        [dwi_file], config, work_dir / 'denoise', record_dir=derivatives_dir / 'denoise'
+    )
 
     # Get number of volumes
     n_vols = _get_nvols(dwi_file)

@@ -88,7 +88,9 @@ def create_config_template(study_root: Path, output_file: Path = None):
 
         # Diffusion preprocessing
         'diffusion': {
-            'denoise_method': 'dwidenoise',
+            'denoise_method': 'dwidenoise',  # label only; MP-PCA via dipy (diffusion.denoise)
+            'denoise': {'enabled': True, 'patch_radius': 2},
+            'degibbs': {'enabled': True, 'num_processes': 1},
             'bet': {
                 'frac': 0.3  # Lower than anatomical (0.5) - DWI has lower contrast
             },
