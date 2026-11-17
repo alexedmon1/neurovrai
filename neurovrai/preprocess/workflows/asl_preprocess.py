@@ -60,9 +60,9 @@ def run_asl_preprocessing(
     wm_mask: Optional[Path] = None,
     csf_mask: Optional[Path] = None,
     dicom_dir: Optional[Path] = None,
-    label_control_order: str = 'control_first',
-    labeling_duration: float = 1.8,
-    post_labeling_delay: float = 1.8,
+    label_control_order: Optional[str] = None,
+    labeling_duration: Optional[float] = None,
+    post_labeling_delay: Optional[float] = None,
     normalize_to_mni: bool = False
 ) -> Dict[str, Path]:
     """
@@ -98,14 +98,14 @@ def run_asl_preprocessing(
     dicom_dir : Path, optional
         Directory containing ASL DICOM files for automatic parameter extraction
         If provided, will extract acquisition parameters from DICOM and override config
-    label_control_order : str
-        Label-control ordering ('control_first' or 'label_first')
-    labeling_duration : float
-        Labeling duration (τ) in seconds (default: 1.8s for pCASL)
+    label_control_order : str, optional
+        Label-control ordering ('control_first' or 'label_first'); default config asl.label_control_order
+    labeling_duration : float, optional
+        Labeling duration (τ) in seconds; default config asl.labeling_duration, else 1.8 s with a warning.
         Overridden by DICOM if dicom_dir is provided
-    post_labeling_delay : float
-        Post-labeling delay (PLD) in seconds (default: 1.8s)
-        Overridden by DICOM if dicom_dir is provided
+    post_labeling_delay : float, optional
+        Post-labeling delay (PLD) in seconds; default config asl.post_labeling_delay, else 1.8 s with a
+        warning. Overridden by DICOM if dicom_dir is provided
     normalize_to_mni : bool
         Perform spatial normalization to MNI152 (default: False)
 
@@ -157,6 +157,13 @@ def run_asl_preprocessing(
     # Extract BET parameters from config
     asl_config = config.get('asl', {})
     bet_frac = asl_config.get('bet', {}).get('frac', 0.3)  # Default: 0.3 for ASL
+
+    # Acquisition timing: an explicit argument, else config asl.<key>, else a generic default with a
+    # warning (1.8 s is not this scanner's value; IRC805's pCASL is tau 1.932 s, PLD 2.031 s).
+    # DICOM values, when a DICOM folder is given and they are found, override all of these.
+    from neurovrai.preprocess.utils.asl_cbf import resolve_asl_timing
+    labeling_duration, post_labeling_delay, label_control_order = resolve_asl_timing(
+        asl_config, labeling_duration, post_labeling_delay, label_control_order)
 
     # Automatic DICOM parameter extraction (if available)
     dicom_params = None
@@ -339,9 +346,10 @@ def run_asl_preprocessing(
         m0=m0,
         labeling_duration=labeling_duration,
         post_labeling_delay=post_labeling_delay,
-        labeling_efficiency=config.get('labeling_efficiency', 0.85),
-        t1_blood=config.get('t1_blood', 1.65),
-        blood_brain_partition=config.get('blood_brain_partition', 0.9),
+        labeling_efficiency=asl_config.get('labeling_efficiency', config.get('labeling_efficiency', 0.85)),
+        t1_blood=asl_config.get('t1_blood', config.get('t1_blood', 1.65)),
+        blood_brain_partition=asl_config.get('blood_brain_partition',
+                                             config.get('blood_brain_partition', 0.9)),
         mask=brain_mask
     )
 

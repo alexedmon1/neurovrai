@@ -649,3 +649,26 @@ def choose_asl_run(asl_files, order: str = 'control_first', **thresholds):
         if qc['passed']:
             return f, report
     return None, report
+
+
+ASL_TIMING_DEFAULTS = {'labeling_duration': 1.8, 'post_labeling_delay': 1.8,
+                       'label_control_order': 'control_first'}
+
+
+def resolve_asl_timing(asl_config: Dict, labeling_duration: Optional[float] = None,
+                       post_labeling_delay: Optional[float] = None,
+                       label_control_order: Optional[str] = None) -> Tuple[float, float, str]:
+    """(labeling_duration, post_labeling_delay, label_control_order): argument, else asl config,
+    else a generic default with a warning. DICOM values, applied later, override these."""
+    given = {'labeling_duration': labeling_duration, 'post_labeling_delay': post_labeling_delay,
+             'label_control_order': label_control_order}
+    for key, value in given.items():
+        if value is None:
+            if (asl_config or {}).get(key) is not None:
+                given[key] = asl_config[key]
+            else:
+                given[key] = ASL_TIMING_DEFAULTS[key]
+                logger.warning(f"asl.{key} not in config: using the generic default "
+                               f"{ASL_TIMING_DEFAULTS[key]} unless DICOM supplies it")
+    return (float(given['labeling_duration']), float(given['post_labeling_delay']),
+            str(given['label_control_order']))

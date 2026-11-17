@@ -311,14 +311,18 @@ def preprocess_asl(subject, config, nifti_dir, derivatives_dir, work_dir, dicom_
     tissue = find_tissue_maps(seg_dir)
     gm_mask, wm_mask, csf_mask = tissue['gm'], tissue['wm'], tissue['csf']
 
-    # Find DICOM directory for parameter extraction
+    # Find the DICOM series of the chosen run (same series number, e.g. 1204_...) for parameter
+    # extraction; any other pCASL folder may be a different series (e.g. the scanner's perfusion map)
     dicom_asl_dir = None
     if dicom_dir:
-        for date_dir in dicom_dir.glob('*'):
-            asl_subdirs = list(date_dir.glob('*pCASL*'))
-            if asl_subdirs:
-                dicom_asl_dir = asl_subdirs[0]
+        series_no = asl_file.name.split('_')[0]
+        for date_dir in sorted(Path(dicom_dir).glob('*')):
+            matches = sorted(d for d in date_dir.glob(f'{series_no}_*pCASL*') if d.is_dir())
+            if matches:
+                dicom_asl_dir = matches[0]
                 break
+        if dicom_asl_dir is None:
+            logger.warning(f"No DICOM folder for series {series_no}: timing from config asl.*")
 
     logger.info(f"Input: {asl_file.name}")
     logger.info(f"DICOM parameters: {'Available' if dicom_asl_dir else 'Using defaults from config'}")

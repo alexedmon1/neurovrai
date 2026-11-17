@@ -49,3 +49,13 @@ def test_choose_skips_failed_first_run(tmp_path):
 def test_choose_returns_none_when_all_fail(tmp_path):
     _write_run(tmp_path / '1004_SOURCE_pCASL.nii.gz', 0.0, 3)
     assert choose_asl_run([tmp_path / '1004_SOURCE_pCASL.nii.gz'])[0] is None
+
+
+def test_timing_from_config_not_generic_default(caplog):
+    from neurovrai.preprocess.utils.asl_cbf import resolve_asl_timing
+    cfg = {'labeling_duration': 1.932, 'post_labeling_delay': 2.031}
+    assert resolve_asl_timing(cfg) == (1.932, 2.031, 'control_first')
+    assert resolve_asl_timing(cfg, labeling_duration=1.5) == (1.5, 2.031, 'control_first')
+    with caplog.at_level('WARNING'):
+        assert resolve_asl_timing({}) == (1.8, 1.8, 'control_first')
+    assert 'generic default' in caplog.text
