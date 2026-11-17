@@ -119,13 +119,18 @@ def gather_subject_maps(
     return output_4d, subject_ids
 
 
-def create_mean_mask(image_4d: Path, output_dir: Path, brain_mask: Path = None) -> Path:
+def create_mean_mask(image_4d: Path, output_dir: Path, brain_mask: Path = None,
+                     min_value: float = 1.0, min_fraction: float = 0.5) -> Path:
     """
     Create a group mask from 4D image, constrained to brain region.
 
     The mask includes voxels that:
     1. Are within the brain (MNI brain mask)
-    2. Have valid (non-zero) data in at least 50% of subjects
+    2. Have data, |CBF| > min_value (ml/100g/min), in at least min_fraction of subjects
+
+    "Non-zero" is not enough: warping with trilinear or B-spline interpolation leaves tiny non-zero
+    values across the whole field of view, so a != 0 test keeps almost the entire box (IRC805's
+    old mask: 694,745 voxels against 228,483 in the MNI brain).
 
     Args:
         image_4d: Path to 4D image
@@ -156,12 +161,13 @@ def create_mean_mask(image_4d: Path, output_dir: Path, brain_mask: Path = None) 
     n_brain_voxels = np.sum(brain_data > 0)
     logging.info(f"  Brain mask voxels: {n_brain_voxels:,}")
 
-    # Create data mask: voxels that are non-zero in at least 50% of subjects
+    # Data mask: |CBF| > min_value in at least min_fraction of subjects
     n_subjects = data.shape[3]
-    threshold = n_subjects * 0.5
+    threshold = n_subjects * min_fraction
 
-    nonzero_count = np.sum(data != 0, axis=3)
+    nonzero_count = np.sum(np.abs(data) > min_value, axis=3)
     data_mask = (nonzero_count >= threshold).astype(np.uint8)
+    logging.info(f"  Data voxel: |CBF| > {min_value:g} in >= {min_fraction:.0%} of {n_subjects} subjects")
 
     n_data_voxels = np.sum(data_mask)
     logging.info(f"  Data coverage voxels: {n_data_voxels:,}")
