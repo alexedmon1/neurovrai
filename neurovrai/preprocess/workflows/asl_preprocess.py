@@ -266,6 +266,25 @@ def run_asl_preprocessing(
         method='simple'
     )
 
+    # Labelling check: refuse a run whose label had no effect (ΔM/M0 ~ 0, pair signs random) or
+    # whose label/control order looks reversed, unless asl.allow_failed_label_qc is set
+    from neurovrai.preprocess.utils.asl_cbf import label_signal_qc
+    asl_cfg = config.get('asl', {})
+    label_qc = label_signal_qc(
+        control_volumes, label_volumes,
+        min_label_signal=asl_cfg.get('min_label_signal', 0.002),
+        min_positive_pairs=asl_cfg.get('min_positive_pairs', 0.8),
+    )
+    results['label_qc'] = label_qc
+    logger.info(f"  Labelling check: ΔM/M0 {label_qc['label_signal']:.4f}, positive pairs "
+                f"{label_qc['positive_pairs']:.0%} ({label_qc['reason']})")
+    if not label_qc['passed']:
+        msg = f"ASL labelling check failed for {Path(asl_file).name}: {label_qc['reason']}"
+        if asl_cfg.get('allow_failed_label_qc', False):
+            logger.warning(f"  {msg} (continuing: asl.allow_failed_label_qc is set)")
+        else:
+            raise ValueError(msg)
+
     # Save 4D perfusion-weighted signal for tSNR calculation
     perfusion_4d_file = work_dir / 'perfusion_4d.nii.gz'
     nib.save(nib.Nifti1Image(delta_m_4d, affine, header), perfusion_4d_file)

@@ -583,3 +583,69 @@ def save_asl_outputs(
         logger.info(f"Saved CBF map: {cbf_file}")
 
     return saved_files
+
+
+# ---------------------------------------------------------------------------
+# Labelling-signal QC: does a run carry a perfusion signal at all?
+# ---------------------------------------------------------------------------
+
+DEFAULT_MIN_LABEL_SIGNAL = 0.002   # median-tissue ΔM/M0; normal pCASL runs here are ~0.005-0.013
+DEFAULT_MIN_POSITIVE_PAIRS = 0.8   # fraction of control-label pairs with positive mean ΔM
+
+
+def label_signal_qc(
+    control_volumes: np.ndarray,
+    label_volumes: np.ndarray,
+    min_label_signal: float = DEFAULT_MIN_LABEL_SIGNAL,
+    min_positive_pairs: float = DEFAULT_MIN_POSITIVE_PAIRS,
+) -> Dict[str, float]:
+    """Check that labelling had an effect: ΔM/M0 in bright tissue and the sign of each pair.
+
+    Tissue is taken as the voxels in the top 30% of the mean control image (no mask needed, so the
+    check can run before brain extraction or on a run not yet chosen). A run whose label did nothing
+    has ΔM/M0 near zero and pair means that swing around zero; a reversed label/control order gives
+    a negative ratio. Returns the numbers and ``passed`` (1.0 or 0.0) with ``reason``.
+    """
+    control_mean = control_volumes.mean(axis=3)
+    nonzero = control_mean[control_mean > 0]
+    if nonzero.size == 0:
+        return {'label_signal': 0.0, 'positive_pairs': 0.0, 'n_pairs': 0, 'passed': 0.0,
+                'reason': 'empty control image'}
+    tissue = control_mean > np.percentile(nonzero, 70)
+    m0 = float(control_mean[tissue].mean())
+    pair_dm = (control_volumes[tissue] - label_volumes[tissue]).mean(axis=0)  # one value per pair
+    ratio = float(pair_dm.mean() / m0) if m0 > 0 else 0.0
+    positive = float(np.mean(pair_dm > 0)) if pair_dm.size else 0.0
+
+    reasons = []
+    if ratio <= -min_label_signal:
+        reasons.append(f"ΔM/M0 is negative ({ratio:.4f}): label/control order may be reversed")
+    elif ratio < min_label_signal:
+        reasons.append(f"ΔM/M0 {ratio:.4f} < {min_label_signal}: labelling had little or no effect")
+    if positive < min_positive_pairs:
+        reasons.append(f"only {positive:.0%} of pairs have positive ΔM (< {min_positive_pairs:.0%})")
+    return {'label_signal': ratio, 'positive_pairs': positive, 'n_pairs': int(pair_dm.size),
+            'passed': 0.0 if reasons else 1.0, 'reason': '; '.join(reasons) or 'ok'}
+
+
+def label_signal_qc_file(asl_file: Path, order: str = 'control_first', **thresholds) -> Dict[str, float]:
+    """``label_signal_qc`` on a raw 4-D ASL series (before motion correction)."""
+    data = np.asanyarray(nib.load(str(asl_file)).dataobj).astype(np.float32)
+    control, label = separate_label_control(data, order=order)
+    return label_signal_qc(control, label, **thresholds)
+
+
+def choose_asl_run(asl_files, order: str = 'control_first', **thresholds):
+    """Choose the ASL run to process: the first, in name (series) order, whose labelling QC passes.
+
+    Returns (chosen file or None, {file name: qc dict}). With one run, it is still checked.
+    """
+    report = {}
+    for f in sorted(Path(p) for p in asl_files):
+        qc = label_signal_qc_file(f, order=order, **thresholds)
+        report[f.name] = qc
+        logger.info(f"  {f.name}: ΔM/M0 {qc['label_signal']:.4f}, positive pairs "
+                    f"{qc['positive_pairs']:.0%} -> {qc['reason']}")
+        if qc['passed']:
+            return f, report
+    return None, report

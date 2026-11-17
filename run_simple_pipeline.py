@@ -279,9 +279,21 @@ def preprocess_asl(subject, config, nifti_dir, derivatives_dir, work_dir, dicom_
         logger.info("⊘ No ASL files found - skipping\n")
         return None
 
-    # Use SOURCE file if available
-    source_files = [f for f in asl_files if 'SOURCE' in f.name]
-    asl_file = source_files[0] if source_files else asl_files[0]
+    # Use SOURCE files if available. With several runs, take the first (in series order) whose
+    # labelling actually worked: a run with no label effect gives near-zero CBF.
+    from neurovrai.preprocess.utils.asl_cbf import choose_asl_run
+    asl_cfg = config.get('asl', {})
+    source_files = [f for f in asl_files if 'SOURCE' in f.name] or asl_files
+    logger.info(f"Labelling check on {len(source_files)} ASL run(s):")
+    asl_file, run_qc = choose_asl_run(
+        source_files,
+        order=asl_cfg.get('label_control_order', 'control_first'),
+        min_label_signal=asl_cfg.get('min_label_signal', 0.002),
+        min_positive_pairs=asl_cfg.get('min_positive_pairs', 0.8),
+    )
+    if asl_file is None:
+        logger.error("✗ No ASL run passed the labelling check - skipping ASL for this subject\n")
+        return None
 
     # Check that anatomical preprocessing was done
     anat_dir = derivatives_dir / subject / 'anat'
