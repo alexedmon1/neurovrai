@@ -32,8 +32,9 @@ inside both calls: MP-PCA decomposes one small matrix per voxel, and multithread
 those ran more than 5x slower while using every core (IRC805, 112x112x72 volumes: 6 slices took
 59 s single-threaded and over 300 s threaded). Run subjects in parallel instead. A record of what was done
 (``denoise.json``, with the noise level MP-PCA estimated per series) and the noise maps go to
-``derivatives/<subject>/dwi/denoise/``. The record's noise level is the median over brain voxels
-(mean DWI above 10% of its 99th percentile) that have an estimate, with the share that have none.
+``derivatives/<subject>/dwi/denoise/``. The record's noise level is the median over head voxels
+(brightest volume, i.e. a b0, above 10% of its 99th percentile) that have an estimate, with the
+share that have none.
 """
 from __future__ import annotations
 
@@ -240,14 +241,16 @@ def _min_radius(nvols: int) -> int:
 def _sigma_summary(sigma_file: Path, dwi_file: Path) -> Dict[str, Any]:
     """Median noise sigma over brain voxels that have an estimate, and the share that have none.
 
-    Brain = mean DWI above 10% of its 99th percentile. MP-PCA leaves NaN where it could not fit a
-    patch (mostly empty background; in the brain, a sign the patch is too small for the volumes).
+    Brain = the brightest volume (a b0; no b-values needed) above 10% of its 99th percentile. The
+    mean over all volumes is not used: high-b volumes pull its percentile down, and the mask then
+    spread to twice the head (IRC805), into background where MP-PCA has no estimate. MP-PCA leaves
+    NaN where it could not fit a patch (empty background; in the brain, a sign the patch is too
+    small for the volumes).
     """
     sigma = np.asarray(nib.load(str(sigma_file)).dataobj, dtype=np.float32)
-    mean = np.asarray(nib.load(str(dwi_file)).dataobj, dtype=np.float32)
-    if mean.ndim == 4:
-        mean = mean.mean(axis=3)
-    vals = sigma[mean > 0.1 * np.percentile(mean, 99)]
+    data = np.asarray(nib.load(str(dwi_file)).dataobj, dtype=np.float32)
+    ref = data[..., int(np.argmax(data.reshape(-1, data.shape[3]).mean(axis=0)))] if data.ndim == 4 else data
+    vals = sigma[ref > 0.1 * np.percentile(ref, 99)]
     finite = np.isfinite(vals)
     return {
         'noise_sigma_median': float(np.median(vals[finite])) if finite.any() else None,
