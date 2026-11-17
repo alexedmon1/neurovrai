@@ -59,3 +59,14 @@ def test_timing_from_config_not_generic_default(caplog):
     with caplog.at_level('WARNING'):
         assert resolve_asl_timing({}) == (1.8, 1.8, 'control_first')
     assert 'generic default' in caplog.text
+
+
+def test_tissue_cbf_uses_probability_threshold():
+    from neurovrai.preprocess.utils.asl_cbf import compute_tissue_specific_cbf
+    cbf = np.array([60.0, 55.0, 20.0, 22.0, 1.0])
+    gm = np.array([0.9, 0.8, 0.1, 0.05, 0.1])
+    wm = np.array([0.05, 0.15, 0.85, 0.9, 0.05])
+    csf = np.array([0.05, 0.05, 0.05, 0.05, 0.85])
+    r = compute_tissue_specific_cbf(cbf, gm, wm, csf)
+    assert r['gm']['n_voxels'] == 2 and r['gm']['mean'] == 57.5
+    assert r['wm']['mean'] == 21.0 and r['csf']['mean'] == 1.0

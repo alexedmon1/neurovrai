@@ -232,7 +232,8 @@ def preprocess_functional(subject, config, nifti_dir, derivatives_dir, work_dir)
     anat_dir = derivatives_dir / subject / 'anat'
 
     # Find brain file (may be in brain/ subdirectory)
-    brain_files = list(anat_dir.rglob('*brain.nii.gz'))
+    # T1w brain: the anat brain/ output first (rglob alone could return e.g. an mni_space/ image)
+    brain_files = sorted((anat_dir / 'brain').glob('*brain.nii.gz')) or sorted(anat_dir.rglob('*brain.nii.gz'))
     if not brain_files:
         logger.error("✗ Anatomical preprocessing required first\n")
         return None
@@ -300,7 +301,8 @@ def preprocess_asl(subject, config, nifti_dir, derivatives_dir, work_dir, dicom_
     seg_dir = anat_dir / 'segmentation'
 
     # Find brain file (may be in brain/ subdirectory)
-    brain_files = list(anat_dir.rglob('*brain.nii.gz'))
+    # T1w brain: the anat brain/ output first (rglob alone could return e.g. an mni_space/ image)
+    brain_files = sorted((anat_dir / 'brain').glob('*brain.nii.gz')) or sorted(anat_dir.rglob('*brain.nii.gz'))
     if not brain_files:
         logger.error("✗ Anatomical preprocessing required first\n")
         return None

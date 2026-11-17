@@ -47,6 +47,19 @@ from neurovrai.preprocess.qc.asl_qc import (
 )
 from neurovrai.utils.transforms import create_transform_registry, save_transform, find_transform
 
+
+def _tissue_to_asl(tissue_file: Path, t1w_to_asl_mat: Path, asl_ref: Path, out_file: Path) -> Path:
+    """Bring a T1w-space tissue probability map into ASL space through the registration.
+
+    Trilinear, because these are probability maps (thresholded later, e.g. WM > 0.7); nearest
+    neighbour on a 0.5 mm map resampled to ASL voxels keeps whichever sample happens to be nearest.
+    """
+    subprocess.run([
+        'flirt', '-in', str(tissue_file), '-ref', str(asl_ref), '-applyxfm',
+        '-init', str(t1w_to_asl_mat), '-interp', 'trilinear', '-out', str(out_file)
+    ], check=True, capture_output=True)
+    return out_file
+
 logger = logging.getLogger(__name__)
 
 
@@ -333,6 +346,48 @@ def run_asl_preprocessing(
     logger.info(f"  Brain voxels: {n_brain_voxels}")
     logger.info("")
 
+    # ASL -> T1w registration, before calibration: the tissue maps are in T1w space and must be
+    # brought into ASL space through it (an identity resample, used before, does not align them)
+    asl_to_anat_mat = None
+    t1w_to_asl_mat = None
+    if t1w_brain:
+        logger.info("Registering mean control to T1w (6 dof, correlation ratio)...")
+        asl_to_t1w_work = work_dir / 'asl_to_t1w.mat'
+        subprocess.run([
+            'flirt', '-in', str(control_mean_file), '-ref', str(t1w_brain),
+            '-omat', str(asl_to_t1w_work), '-dof', '6', '-cost', 'corratio'
+        ], check=True, capture_output=True)
+        t1w_to_asl_mat = work_dir / 't1w_to_asl.mat'
+        subprocess.run(['convert_xfm', '-omat', str(t1w_to_asl_mat), '-inverse', str(asl_to_t1w_work)],
+                       check=True, capture_output=True)
+        asl_to_anat_mat = save_transform(
+            transform_file=asl_to_t1w_work,
+            study_root=study_root,
+            subject=subject,
+            source='asl',
+            target='t1w',
+            transform_type='affine'
+        )
+        results['asl_to_anat'] = asl_to_anat_mat
+        logger.info(f"  ASL→anatomical transform: {asl_to_anat_mat}")
+        logger.info("")
+
+    tissue_asl_cache: Dict[str, np.ndarray] = {}
+
+    def tissue_in_asl(name: str, tissue_file: Path) -> Optional[np.ndarray]:
+        """Tissue probability map in ASL space, or None without a registration.
+
+        Rewritten on every run (cached only in memory): work dirs from earlier versions hold
+        identity-resampled *_mask_asl.nii.gz files that must not be reused.
+        """
+        if tissue_file is None or t1w_to_asl_mat is None:
+            return None
+        if name not in tissue_asl_cache:
+            out = work_dir / f'{name}_mask_asl.nii.gz'
+            _tissue_to_asl(tissue_file, t1w_to_asl_mat, control_mean_file, out)
+            tissue_asl_cache[name] = nib.load(out).get_fdata()
+        return tissue_asl_cache[name]
+
     # Step 4: CBF quantification
     logger.info("Step 4: CBF quantification")
     logger.info("  Using standard single-compartment kinetic model")
@@ -358,26 +413,13 @@ def run_asl_preprocessing(
     # Step 5: M0 Calibration with White Matter Reference (if WM mask provided)
     cbf_calibrated = None
     calibration_info = None
-    if wm_mask and config.get('asl', {}).get('apply_m0_calibration', True):
+    if wm_mask and t1w_to_asl_mat is None and config.get('asl', {}).get('apply_m0_calibration', True):
+        logger.warning("Step 5: M0 calibration skipped: no T1w brain to register the WM map with")
+    if wm_mask and t1w_to_asl_mat is not None and config.get('asl', {}).get('apply_m0_calibration', True):
         logger.info("Step 5: M0 Calibration with White Matter Reference")
         logger.info("  Correcting for M0 estimation bias...")
-        logger.info("  Resampling tissue masks to ASL space...")
-
-        # Resample WM mask from anatomical to ASL space
-        wm_mask_asl = work_dir / 'wm_mask_asl.nii.gz'
-        flirt_resample_cmd = [
-            'flirt',
-            '-in', str(wm_mask),
-            '-ref', str(control_mean_file),  # ASL reference
-            '-out', str(wm_mask_asl),
-            '-applyxfm',  # Apply identity transform (just resample)
-            '-interp', 'nearestneighbour'  # Preserve mask values
-        ]
-        subprocess.run(flirt_resample_cmd, check=True, capture_output=True)
-        logger.info(f"  WM mask resampled: {wm_mask_asl}")
-
-        # Load resampled WM mask
-        wm_data = nib.load(wm_mask_asl).get_fdata()
+        logger.info("  Bringing the WM map into ASL space through the ASL→T1w registration...")
+        wm_data = tissue_in_asl('wm', wm_mask)
 
         try:
             cbf_calibrated, calibration_info = calibrate_cbf_with_wm_reference(
@@ -402,40 +444,14 @@ def run_asl_preprocessing(
     # Step 6: Partial Volume Correction (if enabled and tissue masks provided)
     cbf_gm_pvc = None
     cbf_wm_pvc = None
-    if config.get('asl', {}).get('apply_pvc', False) and gm_mask and wm_mask and csf_mask:
+    if (config.get('asl', {}).get('apply_pvc', False) and gm_mask and wm_mask and csf_mask
+            and t1w_to_asl_mat is not None):
         logger.info("Step 6: Partial Volume Correction")
         logger.info("  Applying linear regression PVC method...")
-        logger.info("  Resampling tissue masks to ASL space...")
-
-        # Resample tissue masks from anatomical to ASL space
-        gm_mask_asl = work_dir / 'gm_mask_asl.nii.gz'
-        csf_mask_asl = work_dir / 'csf_mask_asl.nii.gz'
-
-        # Resample GM mask
-        flirt_gm_cmd = [
-            'flirt', '-in', str(gm_mask), '-ref', str(control_mean_file),
-            '-out', str(gm_mask_asl), '-applyxfm', '-interp', 'nearestneighbour'
-        ]
-        subprocess.run(flirt_gm_cmd, check=True, capture_output=True)
-
-        # Resample CSF mask
-        flirt_csf_cmd = [
-            'flirt', '-in', str(csf_mask), '-ref', str(control_mean_file),
-            '-out', str(csf_mask_asl), '-applyxfm', '-interp', 'nearestneighbour'
-        ]
-        subprocess.run(flirt_csf_cmd, check=True, capture_output=True)
-
-        # Load resampled tissue masks (wm_data may already be loaded from calibration)
-        gm_data = nib.load(gm_mask_asl).get_fdata()
-        if 'wm_data' not in locals():  # Load if not already loaded in calibration
-            wm_mask_asl = work_dir / 'wm_mask_asl.nii.gz'
-            flirt_wm_cmd = [
-                'flirt', '-in', str(wm_mask), '-ref', str(control_mean_file),
-                '-out', str(wm_mask_asl), '-applyxfm', '-interp', 'nearestneighbour'
-            ]
-            subprocess.run(flirt_wm_cmd, check=True, capture_output=True)
-            wm_data = nib.load(wm_mask_asl).get_fdata()
-        csf_data = nib.load(csf_mask_asl).get_fdata()
+        logger.info("  Bringing tissue maps into ASL space through the ASL→T1w registration...")
+        gm_data = tissue_in_asl('gm', gm_mask)
+        wm_data = tissue_in_asl('wm', wm_mask)
+        csf_data = tissue_in_asl('csf', csf_mask)
 
         # Use calibrated CBF if available, otherwise use uncalibrated
         cbf_to_correct = cbf_calibrated if cbf_calibrated is not None else cbf
@@ -507,27 +523,11 @@ def run_asl_preprocessing(
     logger.info("")
 
     # Step 7: Tissue-specific CBF statistics (if masks provided)
-    if gm_mask and wm_mask and csf_mask:
+    if gm_mask and wm_mask and csf_mask and t1w_to_asl_mat is not None:
         logger.info("Step 7: Computing tissue-specific CBF statistics")
-
-        # Check if resampled masks exist from previous steps, otherwise resample now
-        gm_mask_asl = work_dir / 'gm_mask_asl.nii.gz'
-        wm_mask_asl = work_dir / 'wm_mask_asl.nii.gz'
-        csf_mask_asl = work_dir / 'csf_mask_asl.nii.gz'
-
-        if not gm_mask_asl.exists():
-            logger.info("  Resampling tissue masks to ASL space...")
-            for mask_file, mask_asl in [(gm_mask, gm_mask_asl), (wm_mask, wm_mask_asl), (csf_mask, csf_mask_asl)]:
-                flirt_cmd = [
-                    'flirt', '-in', str(mask_file), '-ref', str(control_mean_file),
-                    '-out', str(mask_asl), '-applyxfm', '-interp', 'nearestneighbour'
-                ]
-                subprocess.run(flirt_cmd, check=True, capture_output=True)
-
-        # Load resampled tissue masks
-        gm_data = nib.load(gm_mask_asl).get_fdata()
-        wm_data = nib.load(wm_mask_asl).get_fdata()
-        csf_data = nib.load(csf_mask_asl).get_fdata()
+        gm_data = tissue_in_asl('gm', gm_mask)
+        wm_data = tissue_in_asl('wm', wm_mask)
+        csf_data = tissue_in_asl('csf', csf_mask)
 
         # Compute tissue-specific statistics
         tissue_cbf = compute_tissue_specific_cbf(
@@ -541,39 +541,8 @@ def run_asl_preprocessing(
         logger.info("")
 
     # Step 8: Registration to anatomical space (if T1w provided)
-    if t1w_brain:
-        logger.info("Step 8: Registration to anatomical space")
-        logger.info("  Registering mean control to T1w...")
-
-        # Create temp transform file
-        import tempfile
-        temp_mat = Path(tempfile.mktemp(suffix='_asl_to_anat.mat'))
-
-        flirt_cmd = [
-            'flirt',
-            '-in', str(control_mean_file),
-            '-ref', str(t1w_brain),
-            '-omat', str(temp_mat),
-            '-dof', '6',
-            '-cost', 'corratio'  # Good for different contrasts
-        ]
-
-        subprocess.run(flirt_cmd, check=True, capture_output=True)
-
-        # Save to standardized location: {study_root}/transforms/{subject}/
-        asl_to_anat_mat = save_transform(
-            transform_file=temp_mat,
-            study_root=study_root,
-            subject=subject,
-            source='asl',
-            target='t1w',
-            transform_type='affine'
-        )
-        temp_mat.unlink()  # Clean up temp file
-
-        logger.info(f"  ASL→anatomical transform: {asl_to_anat_mat}")
-        results['asl_to_anat'] = asl_to_anat_mat
-        logger.info("")
+    if t1w_brain and asl_to_anat_mat is not None:
+        logger.info("Step 8: CBF to anatomical space (registration from before calibration)")
 
         # Apply transform to CBF map
         logger.info("  Transforming CBF to anatomical space...")
@@ -591,6 +560,16 @@ def run_asl_preprocessing(
         subprocess.run(flirt_apply_cmd, check=True, capture_output=True)
         logger.info(f"  CBF in anatomical space: {cbf_anat}")
         results['cbf_anat'] = cbf_anat
+
+        # The WM-calibrated CBF too, so the group analysis can use either
+        if results.get('cbf_calibrated'):
+            cbf_calibrated_anat = derivatives_dir / f'{subject}_cbf_calibrated_anat.nii.gz'
+            subprocess.run([
+                'flirt', '-in', str(results['cbf_calibrated']), '-ref', str(t1w_brain),
+                '-applyxfm', '-init', str(asl_to_anat_mat), '-out', str(cbf_calibrated_anat)
+            ], check=True, capture_output=True)
+            logger.info(f"  Calibrated CBF in anatomical space: {cbf_calibrated_anat}")
+            results['cbf_calibrated_anat'] = cbf_calibrated_anat
         logger.info("")
 
     # Step 9: Spatial normalization to MNI152 (optional)
@@ -687,10 +666,10 @@ def run_asl_preprocessing(
         # CBF QC
         logger.info("  Computing CBF QC metrics...")
 
-        # Use resampled masks for QC if they exist, otherwise use original (will cause error)
-        gm_mask_for_qc = work_dir / 'gm_mask_asl.nii.gz' if (work_dir / 'gm_mask_asl.nii.gz').exists() else gm_mask
-        wm_mask_for_qc = work_dir / 'wm_mask_asl.nii.gz' if (work_dir / 'wm_mask_asl.nii.gz').exists() else wm_mask
-        csf_mask_for_qc = work_dir / 'csf_mask_asl.nii.gz' if (work_dir / 'csf_mask_asl.nii.gz').exists() else csf_mask
+        # Tissue maps registered into ASL space in this run, otherwise the originals
+        gm_mask_for_qc = work_dir / 'gm_mask_asl.nii.gz' if 'gm' in tissue_asl_cache else gm_mask
+        wm_mask_for_qc = work_dir / 'wm_mask_asl.nii.gz' if 'wm' in tissue_asl_cache else wm_mask
+        csf_mask_for_qc = work_dir / 'csf_mask_asl.nii.gz' if 'csf' in tissue_asl_cache else csf_mask
 
         cbf_qc = compute_cbf_qc(
             cbf_file=results['cbf'],

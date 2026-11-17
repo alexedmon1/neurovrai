@@ -218,10 +218,15 @@ def compute_tissue_specific_cbf(
     cbf: np.ndarray,
     gm_mask: np.ndarray,
     wm_mask: np.ndarray,
-    csf_mask: np.ndarray
+    csf_mask: np.ndarray,
+    threshold: float = 0.5
 ) -> Dict[str, Dict[str, float]]:
     """
     Compute tissue-specific CBF statistics.
+
+    The masks are tissue probability maps, so a voxel counts for a tissue when its probability is
+    above ``threshold`` (0.5, as in the ASL QC). "> 0" would put nearly every brain voxel in every
+    tissue, since posteriors are rarely exactly zero.
 
     Parameters
     ----------
@@ -252,7 +257,7 @@ def compute_tissue_specific_cbf(
     results = {}
 
     for tissue, mask in [('gm', gm_mask), ('wm', wm_mask), ('csf', csf_mask)]:
-        tissue_cbf = cbf[mask > 0]
+        tissue_cbf = cbf[mask > threshold]
 
         if len(tissue_cbf) > 0:
             results[tissue] = {
@@ -261,7 +266,7 @@ def compute_tissue_specific_cbf(
                 'std': float(np.std(tissue_cbf)),
                 'min': float(np.min(tissue_cbf)),
                 'max': float(np.max(tissue_cbf)),
-                'n_voxels': int(np.sum(mask > 0))
+                'n_voxels': int(np.sum(mask > threshold))
             }
 
             logger.info(f"{tissue.upper()} CBF: {results[tissue]['mean']:.2f} ± "
