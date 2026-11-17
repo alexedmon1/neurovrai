@@ -1343,6 +1343,7 @@ dependencies = [
     { name = "seaborn" },
     { name = "spyder-kernels" },
     { name = "tedana" },
+    { name = "threadpoolctl" },
 ]
 
 [package.optional-dependencies]
@@ -1383,6 +1384,7 @@ requires-dist = [
     { name = "seaborn", specifier = ">=0.12.0" },
     { name = "spyder-kernels", specifier = ">=3.1.0" },
     { name = "tedana", specifier = ">=25.0.1" },
+    { name = "threadpoolctl", specifier = ">=3.1" },
 ]
 provides-extras = ["dev"]
 

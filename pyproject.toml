@@ -27,6 +27,7 @@ dependencies = [
     "seaborn>=0.12.0",  # For QC visualizations
     "spyder-kernels>=3.1.0",
     "tedana>=25.0.1",
+    "threadpoolctl>=3.1",  # one BLAS thread inside dipy MP-PCA (neurovrai/preprocess/utils/dwi_denoise.py)
 ]
 
 [project.optional-dependencies]

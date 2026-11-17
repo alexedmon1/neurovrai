@@ -22,7 +22,10 @@ Config (same keys and defaults as neurofaune; ``diffusion.denoise_method`` is a 
         enabled: true      # Gibbs-ringing removal
         num_processes: 1
 
-dipy is already a dependency, so no external tools (MRtrix) are needed. A record of what was done
+dipy is already a dependency, so no external tools (MRtrix) are needed. BLAS is held to one thread
+inside both calls: MP-PCA decomposes one small matrix per voxel, and multithreaded OpenBLAS on
+those ran more than 5x slower while using every core (IRC805, 112x112x72 volumes: 6 slices took
+59 s single-threaded and over 300 s threaded). Run subjects in parallel instead. A record of what was done
 (``denoise.json``, with the noise level MP-PCA estimated per series) and the noise maps go to
 ``derivatives/<subject>/dwi/denoise/``.
 """
@@ -52,17 +55,19 @@ def denoise_dwi_mppca(
     If ``sigma_file`` is given, the noise standard deviation MP-PCA estimated is saved there (3-D).
     """
     from dipy.denoise.localpca import mppca
+    from threadpoolctl import threadpool_limits
 
     img = nib.load(str(in_file))
     data = np.asarray(img.dataobj, dtype=np.float32)
     mask = None
     if mask_file is not None:
         mask = np.asarray(nib.load(str(mask_file)).dataobj) > 0
-    if sigma_file is not None:
-        den, sigma = mppca(data, mask=mask, patch_radius=patch_radius, return_sigma=True)
-        nib.save(nib.Nifti1Image(np.asarray(sigma, dtype=np.float32), img.affine), str(sigma_file))
-    else:
-        den = mppca(data, mask=mask, patch_radius=patch_radius)
+    with threadpool_limits(limits=1, user_api='blas'):
+        if sigma_file is not None:
+            den, sigma = mppca(data, mask=mask, patch_radius=patch_radius, return_sigma=True)
+            nib.save(nib.Nifti1Image(np.asarray(sigma, dtype=np.float32), img.affine), str(sigma_file))
+        else:
+            den = mppca(data, mask=mask, patch_radius=patch_radius)
     den = np.asarray(den, dtype=np.float32)
     np.clip(den, 0, None, out=den)  # denoising can produce small negatives
     nib.save(_float_image(den, img), str(out_file))
@@ -76,10 +81,12 @@ def degibbs_dwi(
 ) -> Path:
     """Remove Gibbs ringing from a 3-D/4-D image (slices along axis 2). Returns ``out_file``."""
     from dipy.denoise.gibbs import gibbs_removal
+    from threadpoolctl import threadpool_limits
 
     img = nib.load(str(in_file))
     data = np.asarray(img.dataobj, dtype=np.float32)
-    dg = gibbs_removal(data, slice_axis=2, inplace=False, num_processes=num_processes)
+    with threadpool_limits(limits=1, user_api='blas'):
+        dg = gibbs_removal(data, slice_axis=2, inplace=False, num_processes=num_processes)
     dg = np.asarray(dg, dtype=np.float32)
     np.clip(dg, 0, None, out=dg)
     nib.save(_float_image(dg, img), str(out_file))
