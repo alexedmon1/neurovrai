@@ -8,12 +8,15 @@ import json
 
 import nibabel as nib
 import numpy as np
+import pytest
 
 from neurovrai.preprocess.utils.dwi_denoise import (
     degibbs_dwi,
     denoise_dwi_mppca,
     denoise_dwi_series,
     denoise_settings,
+    _min_radius,
+    _sigma_summary,
 )
 
 
@@ -80,9 +83,13 @@ def test_scaled_int16_input_keeps_its_values(tmp_path):
     assert abs(out.get_fdata()[8, 8, 2, 0] - 500.0) < 5.0
 
 
-def test_settings_default_to_neurofaune():
-    assert denoise_settings({}) == {'denoise': True, 'patch_radius': 2,
+def test_settings_defaults():
+    assert denoise_settings({}) == {'denoise': True, 'patch_radius': 'auto',
                                     'degibbs': True, 'num_processes': 1}
+    assert denoise_settings({'diffusion': {'denoise': {'patch_radius': 3}}})['patch_radius'] == 3
+    assert denoise_settings({'diffusion': {'denoise': {'patch_radius': 'AUTO'}}})['patch_radius'] == 'auto'
+    with pytest.raises(ValueError):
+        denoise_settings({'diffusion': {'denoise': {'patch_radius': 0}}})
     s = denoise_settings({'diffusion': {'denoise': {'enabled': False}, 'degibbs': {'num_processes': 4}}})
     assert s['denoise'] is False and s['degibbs'] is True and s['num_processes'] == 4
 
@@ -123,3 +130,31 @@ def test_disabled_passes_inputs_through(tmp_path):
     outs, rec = denoise_dwi_series([f], cfg, tmp_path / "work")
     assert outs == [f] and not (tmp_path / "work").exists()
     assert rec['denoise']['enabled'] is False
+
+
+def test_auto_radius_follows_dipys_sample_rule():
+    # dipy needs (2r+1)^3 - 1 >= volumes; IRC805's b3000 series has 125 volumes -> radius 3
+    assert _min_radius(26) == 1 and _min_radius(27) == 2
+    assert _min_radius(95) == 2 and _min_radius(124) == 2 and _min_radius(125) == 3
+    assert _min_radius(342) == 3 and _min_radius(343) == 4
+
+
+def test_auto_radius_recorded_per_series(tmp_path):
+    _, a = _noisy_block(seed=5, shape=(20, 20, 10, 20))
+    _, b = _noisy_block(seed=6, shape=(20, 20, 10, 30))
+    outs, rec = denoise_dwi_series([_save(tmp_path, a, "a.nii.gz"), _save(tmp_path, b, "b.nii.gz")],
+                                   {'diffusion': {'degibbs': {'enabled': False}}}, tmp_path / "work")
+    assert rec['denoise']['patch_radius'] == 'auto'
+    assert [s['patch_radius'] for s in rec['series']] == [1, 2]
+    assert all(s['noise_sigma_missing_fraction'] < 0.01 for s in rec['series'])
+
+
+def test_sigma_summary_ignores_missing_estimates(tmp_path):
+    dwi = np.zeros((10, 10, 4, 3), dtype=np.float32)
+    dwi[2:8, 2:8, :, :] = 100.0
+    sigma = np.full((10, 10, 4), np.nan, dtype=np.float32)
+    sigma[2:8, 2:8, :] = 7.0
+    sigma[2, 2:8, :] = np.nan  # 1 of 6 brain rows without an estimate
+    out = _sigma_summary(_save(tmp_path, sigma, "sigma.nii.gz"), _save(tmp_path, dwi, "dwi.nii.gz"))
+    assert out['noise_sigma_median'] == pytest.approx(7.0)
+    assert out['noise_sigma_missing_fraction'] == pytest.approx(1 / 6, abs=1e-3)

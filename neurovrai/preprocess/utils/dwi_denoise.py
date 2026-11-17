@@ -9,25 +9,31 @@ Applied to each raw 4-D DWI series *before* merging, TOPUP and eddy, in this ord
 
 Per series, not on the merged data: MP-PCA assumes one noise level across the volumes it
 decomposes, and separately acquired series can differ in scaling and noise (Philips scale slopes
-differ per series). Each series still needs at least as many voxels in a patch, (2r + 1)^3, as it
-has volumes for the Marchenko-Pastur fit to be reliable; a warning is logged otherwise.
+differ per series). Each series needs more voxels in a patch, (2r + 1)^3, than it has volumes for
+the Marchenko-Pastur fit (dipy: samples - 1 >= volumes). With fewer, the noise estimate fails in
+part of the brain: IRC805's 125-volume b3000 series at radius 2 (125 voxels) had no estimate in
+10% of brain voxels. So the radius is chosen per series by default (``patch_radius: auto``, the
+smallest r that satisfies dipy, as MRtrix dwidenoise does): 2 for up to 124 volumes, 3 for up to
+342. A number is used as given for every series, with a warning where it is too small.
 
-Config (same keys and defaults as neurofaune; ``diffusion.denoise_method`` is a label only):
+Config (same keys as neurofaune; ``diffusion.denoise_method`` is a label only):
 
     diffusion:
       denoise:
         enabled: true      # MP-PCA
-        patch_radius: 2
+        patch_radius: auto # or a number for every series (neurofaune's default is 2)
       degibbs:
         enabled: true      # Gibbs-ringing removal
-        num_processes: 1
+        num_processes: 1   # >1 starts worker processes with 'spawn': a script calling this
+                           # must guard its entry point with ``if __name__ == '__main__':``
 
 dipy is already a dependency, so no external tools (MRtrix) are needed. BLAS is held to one thread
 inside both calls: MP-PCA decomposes one small matrix per voxel, and multithreaded OpenBLAS on
 those ran more than 5x slower while using every core (IRC805, 112x112x72 volumes: 6 slices took
 59 s single-threaded and over 300 s threaded). Run subjects in parallel instead. A record of what was done
 (``denoise.json``, with the noise level MP-PCA estimated per series) and the noise maps go to
-``derivatives/<subject>/dwi/denoise/``.
+``derivatives/<subject>/dwi/denoise/``. The record's noise level is the median over brain voxels
+(mean DWI above 10% of its 99th percentile) that have an estimate, with the share that have none.
 """
 from __future__ import annotations
 
@@ -103,13 +109,23 @@ def _float_image(data: np.ndarray, like: nib.Nifti1Image) -> nib.Nifti1Image:
 
 
 def denoise_settings(config: Dict[str, Any]) -> Dict[str, Any]:
-    """The denoise / degibbs settings from ``config['diffusion']``, with neurofaune's defaults."""
+    """The denoise / degibbs settings from ``config['diffusion']``.
+
+    ``patch_radius`` is ``'auto'`` (the default: chosen per series from its volume count) or an int.
+    """
     diff = (config or {}).get('diffusion', {}) or {}
     den = diff.get('denoise', {}) or {}
     dg = diff.get('degibbs', {}) or {}
+    radius = den.get('patch_radius', 'auto')
+    if radius is None or str(radius).strip().lower() == 'auto':
+        radius = 'auto'
+    else:
+        radius = int(radius)
+        if radius < 1:
+            raise ValueError(f"diffusion.denoise.patch_radius must be 'auto' or >= 1, not {radius}")
     return {
         'denoise': bool(den.get('enabled', True)),
-        'patch_radius': int(den.get('patch_radius', 2)),
+        'patch_radius': radius,
         'degibbs': bool(dg.get('enabled', True)),
         'num_processes': int(dg.get('num_processes', 1)),
     }
@@ -165,24 +181,26 @@ def denoise_dwi_series(
         nvols = img.shape[3] if img.ndim == 4 else 1
         out = work_dir / f"{stem}_{'denoised' if s['denoise'] and not s['degibbs'] else 'preproc'}.nii.gz"
         sigma_file = work_dir / f"{stem}_noise_sigma.nii.gz" if s['denoise'] else None
+        radius = _min_radius(nvols) if s['patch_radius'] == 'auto' else s['patch_radius']
         entry: Dict[str, Any] = {'input': str(f), 'input_bytes': f.stat().st_size,
                                  'n_volumes': int(nvols), 'output': str(out)}
+        if s['denoise']:
+            entry['patch_radius'] = radius
         prev = _matching_series(old, settings_key, entry)
         if prev is not None and out.exists() and (sigma_file is None or sigma_file.exists()):
             logger.info(f"  Series {i}: reusing {out.name}")
-            entry.update({k: prev[k] for k in ('noise_sigma_median',) if k in prev})
+            entry.update({k: prev[k] for k in _NOISE_KEYS if k in prev})
         else:
             current = f
             if s['denoise']:
-                patch_voxels = (2 * s['patch_radius'] + 1) ** 3
-                if patch_voxels < nvols:
-                    logger.warning(f"  Series {i}: patch of {patch_voxels} voxels < {nvols} volumes; "
-                                   f"MP-PCA works best with patch_radius >= "
+                if (2 * radius + 1) ** 3 - 1 < nvols:
+                    logger.warning(f"  Series {i}: patch of {(2 * radius + 1) ** 3} voxels is too "
+                                   f"small for {nvols} volumes; MP-PCA needs patch_radius >= "
                                    f"{_min_radius(nvols)} for this series")
                 den = work_dir / f"{stem}_denoised.nii.gz"
                 logger.info(f"  Series {i}: MP-PCA denoising {f.name} ({nvols} volumes, "
-                            f"patch radius {s['patch_radius']})")
-                denoise_dwi_mppca(current, den, patch_radius=s['patch_radius'], sigma_file=sigma_file)
+                            f"patch radius {radius})")
+                denoise_dwi_mppca(current, den, patch_radius=radius, sigma_file=sigma_file)
                 current = den
             if s['degibbs']:
                 logger.info(f"  Series {i}: Gibbs-ringing removal")
@@ -191,7 +209,10 @@ def denoise_dwi_series(
                     current.unlink()  # the intermediate; the de-Gibbsed file is what carries on
                 current = out
             if sigma_file is not None:
-                entry['noise_sigma_median'] = _sigma_median(sigma_file, f)
+                entry.update(_sigma_summary(sigma_file, f))
+                if entry['noise_sigma_missing_fraction'] > 0.01:
+                    logger.warning(f"  Series {i}: no noise estimate in "
+                                   f"{entry['noise_sigma_missing_fraction']:.1%} of brain voxels")
         outputs.append(out)
         record['series'].append(entry)
 
@@ -205,21 +226,33 @@ def denoise_dwi_series(
     return outputs, record
 
 
+_NOISE_KEYS = ('noise_sigma_median', 'noise_sigma_missing_fraction')
+
+
 def _min_radius(nvols: int) -> int:
+    """Smallest patch radius dipy's MP-PCA accepts for ``nvols`` volumes: (2r+1)^3 - 1 >= nvols."""
     r = 1
-    while (2 * r + 1) ** 3 < nvols:
+    while (2 * r + 1) ** 3 - 1 < nvols:
         r += 1
     return r
 
 
-def _sigma_median(sigma_file: Path, dwi_file: Path) -> float:
-    """Median noise sigma over voxels with signal (mean DWI above 10% of its 99th percentile)."""
+def _sigma_summary(sigma_file: Path, dwi_file: Path) -> Dict[str, Any]:
+    """Median noise sigma over brain voxels that have an estimate, and the share that have none.
+
+    Brain = mean DWI above 10% of its 99th percentile. MP-PCA leaves NaN where it could not fit a
+    patch (mostly empty background; in the brain, a sign the patch is too small for the volumes).
+    """
     sigma = np.asarray(nib.load(str(sigma_file)).dataobj, dtype=np.float32)
     mean = np.asarray(nib.load(str(dwi_file)).dataobj, dtype=np.float32)
     if mean.ndim == 4:
         mean = mean.mean(axis=3)
-    sel = mean > 0.1 * np.percentile(mean, 99)
-    return float(np.median(sigma[sel])) if sel.any() else float('nan')
+    vals = sigma[mean > 0.1 * np.percentile(mean, 99)]
+    finite = np.isfinite(vals)
+    return {
+        'noise_sigma_median': float(np.median(vals[finite])) if finite.any() else None,
+        'noise_sigma_missing_fraction': round(float(1 - finite.mean()), 4) if vals.size else 1.0,
+    }
 
 
 def _read_record(path: Path) -> Optional[Dict[str, Any]]:
