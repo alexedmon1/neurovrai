@@ -1304,15 +1304,16 @@ def run_func_preprocessing(
         anat_dir = Path(anat_derivatives)
         seg_dir = anat_dir / 'segmentation'
 
-        # Locate tissue probability maps from Atropos
-        # POSTERIOR_01.nii.gz = CSF, POSTERIOR_02.nii.gz = GM, POSTERIOR_03.nii.gz = WM
-        csf_files = list(seg_dir.glob('*POSTERIOR_01.nii.gz'))
-        wm_files = list(seg_dir.glob('*POSTERIOR_03.nii.gz'))
+        # Tissue maps by name (csf/gm/wm.nii.gz or FAST pve_*), never by Atropos position:
+        # K-means Atropos writes POSTERIOR_01..03 in arbitrary order.
+        from neurovrai.utils.tissue_maps import find_tissue_map
+        csf_found = find_tissue_map(seg_dir, 'csf')
+        wm_found = find_tissue_map(seg_dir, 'wm')
         brain_files = list(anat_dir.glob('brain/*brain.nii.gz'))
 
-        if csf_files and wm_files and brain_files:
-            csf_mask = csf_files[0]
-            wm_mask = wm_files[0]
+        if csf_found and wm_found and brain_files:
+            csf_mask = csf_found
+            wm_mask = wm_found
             brain_file = brain_files[0]
 
             logger.info(f"  CSF mask: {csf_mask.name}")

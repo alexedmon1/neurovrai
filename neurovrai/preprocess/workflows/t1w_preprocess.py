@@ -40,6 +40,16 @@ from neurovrai.utils.workflow import (
 from neurovrai.utils.transforms import TransformRegistry
 
 
+def _tissue_in(derivatives_dir: Path, tissue: str) -> Optional[Path]:
+    """Tissue map by name from the first segmentation/ folder under ``derivatives_dir``."""
+    from neurovrai.utils.tissue_maps import find_tissue_map
+    for seg_dir in sorted(Path(derivatives_dir).glob('**/segmentation')):
+        found = find_tissue_map(seg_dir, tissue)
+        if found:
+            return found
+    return None
+
+
 def standardize_atropos_tissues(
     derivatives_dir: Path,
     use_symlinks: bool = True
@@ -862,15 +872,11 @@ def run_t1w_preprocessing(
         'brain': list(derivatives_dir.glob('**/brain/*.nii.gz'))[0] if list(derivatives_dir.glob('**/brain/*.nii.gz')) else None,
         'brain_mask': list(derivatives_dir.glob('**/mask/*.nii.gz'))[0] if list(derivatives_dir.glob('**/mask/*.nii.gz')) else None,
         'bias_corrected': list(derivatives_dir.glob('**/bias_corrected/*.nii.gz'))[0] if list(derivatives_dir.glob('**/bias_corrected/*.nii.gz')) else None,
-        # Tissue segmentation: Prefer standardized names (csf.nii.gz, gm.nii.gz, wm.nii.gz)
-        # Fall back to POSTERIOR_*.nii.gz if standardized names don't exist
-        # NOTE: Atropos with K-means produces POSTERIOR files in RANDOM order - don't assume ordering!
-        'csf_prob': (list(derivatives_dir.glob('**/segmentation/csf.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/csf.nii.gz')) else
-                     list(derivatives_dir.glob('**/segmentation/POSTERIOR_01.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_01.nii.gz')) else None),
-        'gm_prob': (list(derivatives_dir.glob('**/segmentation/gm.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/gm.nii.gz')) else
-                    list(derivatives_dir.glob('**/segmentation/POSTERIOR_02.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_02.nii.gz')) else None),
-        'wm_prob': (list(derivatives_dir.glob('**/segmentation/wm.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/wm.nii.gz')) else
-                    list(derivatives_dir.glob('**/segmentation/POSTERIOR_03.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/POSTERIOR_03.nii.gz')) else None),
+        # Tissue segmentation by name (csf/gm/wm.nii.gz, or FAST pve_*), never by Atropos position:
+        # Atropos with K-means produces POSTERIOR files in arbitrary order.
+        'csf_prob': _tissue_in(derivatives_dir, 'csf'),
+        'gm_prob': _tissue_in(derivatives_dir, 'gm'),
+        'wm_prob': _tissue_in(derivatives_dir, 'wm'),
         'tissue_class_map': list(derivatives_dir.glob('**/segmentation/*labeled.nii.gz'))[0] if list(derivatives_dir.glob('**/segmentation/*labeled.nii.gz')) else None,
         # For FSL: look for .mat and warp.nii.gz
         # For ANTs: look for .h5 composite transform

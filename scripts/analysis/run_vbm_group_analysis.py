@@ -193,11 +193,9 @@ NOTE: GLM uses nilearn's SecondLevelModel with FDR and Bonferroni correction.
         if not seg_dir.exists():
             continue
 
-        # Check for GM probability map (FAST or Atropos)
-        gm_fast = seg_dir / 'pve_1.nii.gz'
-        gm_atropos = seg_dir / 'POSTERIOR_02.nii.gz'
-
-        if gm_fast.exists() or gm_atropos.exists():
+        # GM probability map by name (gm.nii.gz or FAST pve_1), never Atropos position
+        from neurovrai.utils.tissue_maps import find_tissue_map
+        if find_tissue_map(seg_dir, 'gm') is not None:
             subjects.append(subject_id)
 
     if not subjects:

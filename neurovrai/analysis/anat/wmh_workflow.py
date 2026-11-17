@@ -190,41 +190,25 @@ def find_t1w_brain(derivatives_dir: Path, subject: str) -> Optional[Path]:
 def find_wm_segmentation(derivatives_dir: Path, subject: str) -> Optional[Path]:
     """Find white matter segmentation from derivatives."""
     seg_dir = derivatives_dir / subject / 'anat' / 'segmentation'
-    if seg_dir.exists():
-        # Check for symlink or POSTERIOR_03
-        wm_symlink = seg_dir / 'wm.nii.gz'
-        if wm_symlink.exists():
-            return wm_symlink
-        posterior = seg_dir / 'POSTERIOR_03.nii.gz'
-        if posterior.exists():
-            return posterior
-    return None
+    # By name (wm.nii.gz or FAST pve_*), never Atropos position
+    from neurovrai.utils.tissue_maps import find_tissue_map
+    return find_tissue_map(seg_dir, 'wm')
 
 
 def find_csf_segmentation(derivatives_dir: Path, subject: str) -> Optional[Path]:
     """Find CSF segmentation from derivatives."""
     seg_dir = derivatives_dir / subject / 'anat' / 'segmentation'
-    if seg_dir.exists():
-        csf_symlink = seg_dir / 'csf.nii.gz'
-        if csf_symlink.exists():
-            return csf_symlink
-        posterior = seg_dir / 'POSTERIOR_01.nii.gz'
-        if posterior.exists():
-            return posterior
-    return None
+    # By name (csf.nii.gz or FAST pve_*), never Atropos position
+    from neurovrai.utils.tissue_maps import find_tissue_map
+    return find_tissue_map(seg_dir, 'csf')
 
 
 def find_gm_segmentation(derivatives_dir: Path, subject: str) -> Optional[Path]:
     """Find gray matter segmentation from derivatives."""
     seg_dir = derivatives_dir / subject / 'anat' / 'segmentation'
-    if seg_dir.exists():
-        gm_symlink = seg_dir / 'gm.nii.gz'
-        if gm_symlink.exists():
-            return gm_symlink
-        posterior = seg_dir / 'POSTERIOR_02.nii.gz'
-        if posterior.exists():
-            return posterior
-    return None
+    # By name (gm.nii.gz or FAST pve_*), never Atropos position
+    from neurovrai.utils.tissue_maps import find_tissue_map
+    return find_tissue_map(seg_dir, 'gm')
 
 
 def find_t1w_mni_transform(transforms_dir: Path, subject: str) -> Optional[Path]:

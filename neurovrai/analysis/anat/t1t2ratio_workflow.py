@@ -113,25 +113,9 @@ def find_wm_probability(derivatives_dir: Path, subject: str) -> Optional[Path]:
     """Find white matter probability map from segmentation."""
     seg_dir = derivatives_dir / subject / 'anat' / 'segmentation'
 
-    if not seg_dir.exists():
-        return None
-
-    # Check for standardized naming first
-    wm_file = seg_dir / 'wm.nii.gz'
-    if wm_file.exists():
-        return wm_file
-
-    # Check for POSTERIOR_03 (typically WM in Atropos)
-    posterior_wm = seg_dir / 'POSTERIOR_03.nii.gz'
-    if posterior_wm.exists():
-        return posterior_wm
-
-    # Check for pve_2 (FSL FAST WM)
-    pve_wm = seg_dir / 'pve_2.nii.gz'
-    if pve_wm.exists():
-        return pve_wm
-
-    return None
+    # By name (wm.nii.gz or FAST pve_2), never Atropos position (POSTERIOR_03 is not reliably WM)
+    from neurovrai.utils.tissue_maps import find_tissue_map
+    return find_tissue_map(seg_dir, 'wm')
 
 
 def discover_subjects(study_root: Path) -> List[str]:

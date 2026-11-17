@@ -294,9 +294,10 @@ def preprocess_asl(subject, config, nifti_dir, derivatives_dir, work_dir, dicom_
         return None
     t1w_brain = brain_files[0]
 
-    gm_mask = seg_dir / 'POSTERIOR_02.nii.gz'
-    wm_mask = seg_dir / 'POSTERIOR_03.nii.gz'
-    csf_mask = seg_dir / 'POSTERIOR_01.nii.gz'
+    # Tissue maps by name (csf/gm/wm.nii.gz or FAST pve_*), never by Atropos position
+    from neurovrai.utils.tissue_maps import find_tissue_maps
+    tissue = find_tissue_maps(seg_dir)
+    gm_mask, wm_mask, csf_mask = tissue['gm'], tissue['wm'], tissue['csf']
 
     # Find DICOM directory for parameter extraction
     dicom_asl_dir = None
