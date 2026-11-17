@@ -1181,7 +1181,21 @@ def create_dwi_preprocessing_workflow(
         eddy.inputs.in_topup_fieldcoef = str(topup_fieldcoef)
         eddy.inputs.in_topup_movpar = str(topup_movpar)
 
-    # 3. DTI fitting
+    # 3. DTI fitting, on b=0 plus the shells up to diffusion.dti.max_bval (default 1000):
+    # the tensor is non-linear above that (see neurovrai/preprocess/utils/dti_shells.py)
+    from neurovrai.preprocess.utils.dti_shells import dti_shell_settings, select_dti_volumes_node
+    dti_max_bval, dti_tolerance = dti_shell_settings(config)
+    select_dti = Node(
+        niu.Function(
+            input_names=['dwi_file', 'bval_file', 'bvec_file', 'max_bval', 'tolerance'],
+            output_names=['dwi', 'bval', 'bvec'],
+            function=select_dti_volumes_node,
+        ),
+        name='select_dti_shells'
+    )
+    select_dti.inputs.max_bval = dti_max_bval
+    select_dti.inputs.tolerance = dti_tolerance
+    logger.info(f"DTI tensor fitted on b <= {dti_max_bval:g} s/mm² (plus b=0)")
     dtifit = create_dtifit_node()
 
     # 4. BEDPOSTX (optional)
@@ -1201,6 +1215,8 @@ def create_dwi_preprocessing_workflow(
                 'l2',
                 'l3',
                 'tensor',
+                'dti_bval',
+                'dti_bvec',
                 'fa_mni',
                 'md_mni'
             ]
@@ -1240,13 +1256,19 @@ def create_dwi_preprocessing_workflow(
         ])
     ])
 
-    # DTI fitting
+    # DTI fitting: select b <= max_bval from the eddy-corrected data and rotated bvecs first
     wf.connect([
-        (eddy, dtifit, [
-            ('out_corrected', 'dwi'),
-            ('out_rotated_bvecs', 'bvecs')
+        (eddy, select_dti, [
+            ('out_corrected', 'dwi_file'),
+            ('out_rotated_bvecs', 'bvec_file')
         ]),
-        (inputnode, dtifit, [('bval', 'bvals')]),
+        (inputnode, select_dti, [('bval', 'bval_file')]),
+        (select_dti, dtifit, [
+            ('dwi', 'dwi'),
+            ('bvec', 'bvecs'),
+            ('bval', 'bvals')
+        ]),
+        (select_dti, outputnode, [('bval', 'dti_bval'), ('bvec', 'dti_bvec')]),
         (bet_dwi, dtifit, [('mask_file', 'mask')]),
         (dtifit, outputnode, [
             ('FA', 'fa'),
@@ -1280,7 +1302,9 @@ def create_dwi_preprocessing_workflow(
             ('l1', 'dti.@l1'),
             ('l2', 'dti.@l2'),
             ('l3', 'dti.@l3'),
-            ('tensor', 'dti.@tensor')
+            ('tensor', 'dti.@tensor'),
+            ('dti_bval', 'dti.@bval'),
+            ('dti_bvec', 'dti.@bvec')
         ])
     ])
 
@@ -1683,14 +1707,24 @@ def run_dwi_singleshell_preprocessing(
     dti_dir.mkdir(exist_ok=True)
     dti_basename = dti_dir / 'dti'
 
+    # Fit on b=0 plus the shells up to diffusion.dti.max_bval (default 1000); dti.bval/dti.bvec
+    # in dti/ record what the tensor was fitted on
+    from neurovrai.preprocess.utils.dti_shells import dti_shell_settings, select_dti_volumes
+    dti_max_bval, dti_tolerance = dti_shell_settings(config)
+    dti_dwi, dti_bval, dti_bvec = select_dti_volumes(
+        final_dwi, final_bval, final_bvec, dti_dir, dti_max_bval, dti_tolerance)
+    logger.info(f"  Tensor fitted on b <= {dti_max_bval:g} s/mm² (plus b=0): {dti_bval}")
+
     subprocess.run([
         'dtifit',
-        '-k', str(final_dwi),
+        '-k', str(dti_dwi),
         '-m', str(mask_file),
-        '-r', str(final_bvec),
-        '-b', str(final_bval),
+        '-r', str(dti_bvec),
+        '-b', str(dti_bval),
         '-o', str(dti_basename)
     ], check=True)
+    if Path(dti_dwi) != Path(final_dwi):
+        Path(dti_dwi).unlink()  # the subset image is only needed for the fit
 
     # Calculate AD and RD
     logger.info("  Calculating AD and RD...")
